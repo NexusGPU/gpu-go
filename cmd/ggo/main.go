@@ -4,7 +4,9 @@ import (
 	"os"
 
 	"github.com/NexusGPU/gpu-go/cmd/ggo/agent"
+	"github.com/NexusGPU/gpu-go/cmd/ggo/auth"
 	"github.com/NexusGPU/gpu-go/cmd/ggo/deps"
+	"github.com/NexusGPU/gpu-go/cmd/ggo/libs"
 	"github.com/NexusGPU/gpu-go/cmd/ggo/share"
 	"github.com/NexusGPU/gpu-go/cmd/ggo/studio"
 	"github.com/NexusGPU/gpu-go/cmd/ggo/use"
@@ -40,7 +42,7 @@ It provides commands to:
 )
 
 func init() {
-	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
+	rootCmd.PersistentFlags().BoolVar(&verbose, "verbose", false, "Enable verbose output")
 
 	// Add subcommands
 	rootCmd.AddCommand(agent.NewAgentCmd())
@@ -50,6 +52,12 @@ func init() {
 	rootCmd.AddCommand(use.NewCleanCmd())
 	rootCmd.AddCommand(deps.NewDepsCmd())
 	rootCmd.AddCommand(studio.NewStudioCmd())
+	rootCmd.AddCommand(libs.NewLibsCmd())
+
+	// Auth commands (login/logout at root level for convenience)
+	rootCmd.AddCommand(auth.NewLoginCmd())
+	rootCmd.AddCommand(auth.NewLogoutCmd())
+	rootCmd.AddCommand(auth.NewAuthCmd())
 }
 
 func main() {

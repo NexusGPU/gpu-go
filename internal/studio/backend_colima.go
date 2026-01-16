@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -13,13 +14,36 @@ import (
 // ColimaBackend implements the Backend interface using Colima (macOS/Linux)
 type ColimaBackend struct {
 	dockerBackend *DockerBackend
+	profile       string // Colima profile name (default: "default")
+	dockerHost    string // Custom docker host socket path
 }
 
 // NewColimaBackend creates a new Colima backend
 func NewColimaBackend() *ColimaBackend {
+	return NewColimaBackendWithProfile("")
+}
+
+// NewColimaBackendWithProfile creates a new Colima backend with specific profile
+func NewColimaBackendWithProfile(profile string) *ColimaBackend {
+	if profile == "" {
+		profile = "default"
+	}
+
+	// Detect Docker socket path for this Colima profile
+	homeDir, _ := os.UserHomeDir()
+	dockerHost := fmt.Sprintf("unix://%s/.colima/%s/docker.sock", homeDir, profile)
+
 	return &ColimaBackend{
 		dockerBackend: NewDockerBackend(),
+		profile:       profile,
+		dockerHost:    dockerHost,
 	}
+}
+
+// SetDockerHost sets a custom Docker socket path
+func (b *ColimaBackend) SetDockerHost(dockerHost string) {
+	b.dockerHost = dockerHost
+	b.dockerBackend = NewDockerBackend()
 }
 
 func (b *ColimaBackend) Name() string {
@@ -35,8 +59,8 @@ func (b *ColimaBackend) IsAvailable(ctx context.Context) bool {
 		return false
 	}
 
-	// Check if Colima is installed and running
-	cmd := exec.CommandContext(ctx, "colima", "status")
+	// Check if Colima is installed and running for this profile
+	cmd := exec.CommandContext(ctx, "colima", "status", "-p", b.profile)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return false
@@ -52,15 +76,16 @@ func (b *ColimaBackend) EnsureRunning(ctx context.Context) error {
 		return nil
 	}
 
-	// Start Colima
+	// Start Colima with the specified profile
 	cmd := exec.CommandContext(ctx, "colima", "start",
+		"-p", b.profile,
 		"--cpu", "4",
 		"--memory", "8",
 		"--disk", "60",
 	)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("failed to start Colima: %w, output: %s", err, string(output))
+		return fmt.Errorf("failed to start Colima profile '%s': %w, output: %s", b.profile, err, string(output))
 	}
 
 	return nil
@@ -132,6 +157,7 @@ func (b *ColimaBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 
 	// Run with Colima's docker context
 	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd.Env = append(os.Environ(), fmt.Sprintf("DOCKER_HOST=%s", b.dockerHost))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create container: %w, output: %s", err, string(output))
@@ -158,6 +184,7 @@ func (b *ColimaBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 
 func (b *ColimaBackend) Start(ctx context.Context, envID string) error {
 	cmd := exec.CommandContext(ctx, "docker", "start", envID)
+	cmd.Env = append(os.Environ(), fmt.Sprintf("DOCKER_HOST=%s", b.dockerHost))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to start container: %w, output: %s", err, string(output))
@@ -167,6 +194,7 @@ func (b *ColimaBackend) Start(ctx context.Context, envID string) error {
 
 func (b *ColimaBackend) Stop(ctx context.Context, envID string) error {
 	cmd := exec.CommandContext(ctx, "docker", "stop", envID)
+	cmd.Env = append(os.Environ(), fmt.Sprintf("DOCKER_HOST=%s", b.dockerHost))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to stop container: %w, output: %s", err, string(output))
@@ -178,6 +206,7 @@ func (b *ColimaBackend) Remove(ctx context.Context, envID string) error {
 	_ = b.Stop(ctx, envID)
 
 	cmd := exec.CommandContext(ctx, "docker", "rm", "-f", envID)
+	cmd.Env = append(os.Environ(), fmt.Sprintf("DOCKER_HOST=%s", b.dockerHost))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to remove container: %w, output: %s", err, string(output))
@@ -189,6 +218,7 @@ func (b *ColimaBackend) List(ctx context.Context) ([]*Environment, error) {
 	cmd := exec.CommandContext(ctx, "docker", "ps", "-a",
 		"--filter", "label=ggo.mode=colima",
 		"--format", "{{json .}}")
+	cmd.Env = append(os.Environ(), fmt.Sprintf("DOCKER_HOST=%s", b.dockerHost))
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -253,7 +283,7 @@ func (b *ColimaBackend) Logs(ctx context.Context, envID string, follow bool) (<-
 
 // GetColimaIP returns the IP address of the Colima VM
 func (b *ColimaBackend) GetColimaIP(ctx context.Context) (string, error) {
-	cmd := exec.CommandContext(ctx, "colima", "status", "--json")
+	cmd := exec.CommandContext(ctx, "colima", "status", "-p", b.profile, "--json")
 	output, err := cmd.Output()
 	if err != nil {
 		return "localhost", nil
@@ -274,6 +304,11 @@ func (b *ColimaBackend) GetColimaIP(ctx context.Context) (string, error) {
 	}
 
 	return "localhost", nil
+}
+
+// GetProfile returns the Colima profile name
+func (b *ColimaBackend) GetProfile() string {
+	return b.profile
 }
 
 var _ Backend = (*ColimaBackend)(nil)

@@ -1,0 +1,17 @@
+.vscode/**
+.vscode-test/**
+src/**
+out/test/**
+.gitignore
+.yarnrc
+tsconfig.json
+.eslintrc.json
+**/*.map
+**/.eslintrc.json
+node_modules/**
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+*.vsix
+images/*.svg
+STUDIO_TEMPLATES.md

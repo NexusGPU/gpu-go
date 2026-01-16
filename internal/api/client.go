@@ -478,11 +478,11 @@ func (c *Client) DeleteShare(ctx context.Context, shareID string) error {
 
 // WebSocket backoff constants
 const (
-	wsInitialBackoff = 1 * time.Minute
-	wsMaxBackoff     = 60 * time.Minute
-	wsHeartbeatInterval = 2 * time.Minute
-	wsReadTimeout    = 30 * time.Second
-	wsHandshakeTimeout = 10 * time.Second
+	wsInitialBackoff         = 1 * time.Minute
+	wsMaxBackoff             = 60 * time.Minute
+	wsHeartbeatInterval      = 2 * time.Minute
+	wsReadTimeout            = 30 * time.Second
+	wsHandshakeTimeout       = 10 * time.Second
 	wsMaxConsecutiveFailures = 3
 )
 

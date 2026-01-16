@@ -13,16 +13,19 @@ import (
 )
 
 var (
-	mode      string
-	image     string
-	gpuURL    string
-	sshKey    string
-	ports     []string
-	volumes   []string
-	envVars   []string
-	cpus      float64
-	memory    string
-	noSSH     bool
+	mode          string
+	image         string
+	gpuURL        string
+	sshKey        string
+	ports         []string
+	volumes       []string
+	envVars       []string
+	cpus          float64
+	memory        string
+	noSSH         bool
+	colimaProfile string
+	wslDistro     string
+	dockerHost    string
 )
 
 // NewStudioCmd creates the studio command
@@ -45,6 +48,15 @@ Examples:
 
   # Create with specific mode
   ggo studio create my-studio --mode wsl --gpu-url "https://..."
+
+  # Create with specific Colima profile
+  ggo studio create my-studio --mode colima --colima-profile myprofile
+
+  # Create with specific WSL distribution
+  ggo studio create my-studio --mode wsl --wsl-distro Ubuntu-22.04
+
+  # Create with custom Docker socket path
+  ggo studio create my-studio --docker-host unix:///path/to/docker.sock
 
   # List all environments
   ggo studio list
@@ -76,10 +88,32 @@ Examples:
 func getManager() *studio.Manager {
 	mgr := studio.NewManager()
 	
-	// Register backends
-	mgr.RegisterBackend(studio.NewDockerBackend())
-	mgr.RegisterBackend(studio.NewColimaBackend())
-	mgr.RegisterBackend(studio.NewWSLBackend())
+	// Register Docker backend
+	dockerBackend := studio.NewDockerBackend()
+	if dockerHost != "" {
+		dockerBackend = studio.NewDockerBackendWithHost(dockerHost)
+	}
+	mgr.RegisterBackend(dockerBackend)
+	
+	// Register Colima backend with custom profile if specified
+	colimaBackend := studio.NewColimaBackend()
+	if colimaProfile != "" {
+		colimaBackend = studio.NewColimaBackendWithProfile(colimaProfile)
+	}
+	if dockerHost != "" {
+		colimaBackend.SetDockerHost(dockerHost)
+	}
+	mgr.RegisterBackend(colimaBackend)
+	
+	// Register WSL backend with custom distro if specified
+	wslBackend := studio.NewWSLBackend()
+	if wslDistro != "" {
+		wslBackend = studio.NewWSLBackendWithDistro(wslDistro)
+	}
+	mgr.RegisterBackend(wslBackend)
+	
+	// Register Apple Container backend
+	mgr.RegisterBackend(studio.NewAppleContainerBackend())
 	
 	return mgr
 }
@@ -102,8 +136,14 @@ Examples:
   # Create with specific image
   ggo studio create my-env --image tensorfusion/studio-torch:latest
 
-  # Create with WSL on Windows
-  ggo studio create my-env --mode wsl --gpu-url "https://..."
+  # Create with WSL on Windows (specific distro)
+  ggo studio create my-env --mode wsl --wsl-distro Ubuntu-22.04 --gpu-url "https://..."
+
+  # Create with Colima on macOS (specific profile)
+  ggo studio create my-env --mode colima --colima-profile myprofile --gpu-url "https://..."
+
+  # Create with custom Docker socket
+  ggo studio create my-env --docker-host unix://$HOME/.colima/custom/docker.sock
 
   # Create with custom ports and volumes
   ggo studio create my-env --gpu-url "..." -p 8888:8888 -v ~/projects:/workspace`,
@@ -233,6 +273,9 @@ Examples:
 	cmd.Flags().Float64Var(&cpus, "cpus", 0, "CPU limit")
 	cmd.Flags().StringVar(&memory, "memory", "", "Memory limit (e.g., 8Gi)")
 	cmd.Flags().BoolVar(&noSSH, "no-ssh", false, "Don't configure SSH")
+	cmd.Flags().StringVar(&colimaProfile, "colima-profile", "", "Colima profile name (default: 'default')")
+	cmd.Flags().StringVar(&wslDistro, "wsl-distro", "", "WSL distribution name (default: use default distro)")
+	cmd.Flags().StringVar(&dockerHost, "docker-host", "", "Custom Docker socket path (e.g., unix:///path/to/docker.sock)")
 
 	return cmd
 }

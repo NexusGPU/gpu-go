@@ -1,0 +1,318 @@
+{
+  "name": "gpu-go",
+  "displayName": "GPU Go",
+  "description": "Use GPU Like NFS - Manage AI studio environments with remote GPU access. Create, connect, and manage GPU-powered development environments.",
+  "version": "0.1.0",
+  "publisher": "tensor-fusion",
+  "license": "SEE LICENSE IN LICENSE",
+  "icon": "images/icon.png",
+  "homepage": "https://tensor-fusion.ai",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/NexusGPU/tensor-fusion"
+  },
+  "bugs": {
+    "url": "https://github.com/NexusGPU/tensor-fusion/issues",
+    "email": "support@tensor-fusion.com"
+  },
+  "qna": "https://github.com/NexusGPU/tensor-fusion/discussions",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "galleryBanner": {
+    "color": "#6366f1",
+    "theme": "dark"
+  },
+  "badges": [
+    {
+      "url": "https://img.shields.io/visual-studio-marketplace/v/tensor-fusion.gpu-go?style=flat-square&label=VS%20Code%20Marketplace",
+      "href": "https://marketplace.visualstudio.com/items?itemName=tensor-fusion.gpu-go",
+      "description": "VS Code Marketplace Version"
+    },
+    {
+      "url": "https://img.shields.io/visual-studio-marketplace/i/tensor-fusion.gpu-go?style=flat-square",
+      "href": "https://marketplace.visualstudio.com/items?itemName=tensor-fusion.gpu-go",
+      "description": "VS Code Marketplace Installs"
+    }
+  ],
+  "categories": [
+    "Machine Learning",
+    "Data Science",
+    "AI",
+    "Other"
+  ],
+  "keywords": [
+    "gpu",
+    "gpu sharing",
+    "remote gpu",
+    "cuda",
+    "nvidia",
+    "remote development",
+    "machine learning",
+    "ai",
+    "tensor fusion",
+    "deep learning",
+    "pytorch",
+    "hands-on lab",
+    "tensorflow",
+    "tensor fusion",
+    "cloud gpu",
+    "jupyter",
+    "share gpu"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "gpu-go",
+          "title": "GPU Go",
+          "icon": "$(circuit-board)"
+        }
+      ]
+    },
+    "views": {
+      "gpu-go": [
+        {
+          "id": "gpugo.studio",
+          "name": "Studio",
+          "contextualTitle": "GPU Go Studio"
+        },
+        {
+          "id": "gpugo.workers",
+          "name": "Workers",
+          "contextualTitle": "GPU Go Workers"
+        },
+        {
+          "id": "gpugo.devices",
+          "name": "Devices",
+          "contextualTitle": "GPU Go Devices"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "gpugo.login",
+        "title": "Login to GPU Go",
+        "category": "GPU Go"
+      },
+      {
+        "command": "gpugo.logout",
+        "title": "Logout from GPU Go",
+        "category": "GPU Go"
+      },
+      {
+        "command": "gpugo.refreshStudio",
+        "title": "Refresh Studio",
+        "icon": "$(refresh)",
+        "category": "GPU Go"
+      },
+      {
+        "command": "gpugo.refreshWorkers",
+        "title": "Refresh Workers",
+        "icon": "$(refresh)",
+        "category": "GPU Go"
+      },
+      {
+        "command": "gpugo.refreshDevices",
+        "title": "Refresh Devices",
+        "icon": "$(refresh)",
+        "category": "GPU Go"
+      },
+      {
+        "command": "gpugo.createStudio",
+        "title": "Create Studio Environment",
+        "icon": "$(add)",
+        "category": "GPU Go"
+      },
+      {
+        "command": "gpugo.startStudio",
+        "title": "Start Studio",
+        "icon": "$(play)",
+        "category": "GPU Go"
+      },
+      {
+        "command": "gpugo.stopStudio",
+        "title": "Stop Studio",
+        "icon": "$(debug-stop)",
+        "category": "GPU Go"
+      },
+      {
+        "command": "gpugo.removeStudio",
+        "title": "Remove Studio",
+        "icon": "$(trash)",
+        "category": "GPU Go"
+      },
+      {
+        "command": "gpugo.connectStudio",
+        "title": "Connect to Studio via SSH",
+        "icon": "$(terminal)",
+        "category": "GPU Go"
+      },
+      {
+        "command": "gpugo.showStudioLogs",
+        "title": "Show Studio Logs",
+        "icon": "$(output)",
+        "category": "GPU Go"
+      },
+      {
+        "command": "gpugo.openWorkerDetails",
+        "title": "Open Worker Details",
+        "category": "GPU Go"
+      },
+      {
+        "command": "gpugo.openDeviceDetails",
+        "title": "Open Device Details",
+        "category": "GPU Go"
+      },
+      {
+        "command": "gpugo.createWorker",
+        "title": "Create Worker",
+        "icon": "$(add)",
+        "category": "GPU Go"
+      },
+      {
+        "command": "gpugo.openDashboard",
+        "title": "Open GPU Go Dashboard",
+        "icon": "$(link-external)",
+        "category": "GPU Go"
+      },
+      {
+        "command": "gpugo.copyWorkerCommand",
+        "title": "Copy Worker Create Command",
+        "category": "GPU Go"
+      },
+      {
+        "command": "gpugo.downloadCli",
+        "title": "Download GPU Go CLI",
+        "category": "GPU Go"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "gpugo.refreshStudio",
+          "when": "view == gpugo.studio",
+          "group": "navigation"
+        },
+        {
+          "command": "gpugo.createStudio",
+          "when": "view == gpugo.studio",
+          "group": "navigation"
+        },
+        {
+          "command": "gpugo.refreshWorkers",
+          "when": "view == gpugo.workers",
+          "group": "navigation"
+        },
+        {
+          "command": "gpugo.createWorker",
+          "when": "view == gpugo.workers",
+          "group": "navigation"
+        },
+        {
+          "command": "gpugo.refreshDevices",
+          "when": "view == gpugo.devices",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "gpugo.startStudio",
+          "when": "view == gpugo.studio && viewItem == studio-stopped",
+          "group": "inline"
+        },
+        {
+          "command": "gpugo.stopStudio",
+          "when": "view == gpugo.studio && viewItem == studio-running",
+          "group": "inline"
+        },
+        {
+          "command": "gpugo.connectStudio",
+          "when": "view == gpugo.studio && viewItem == studio-running",
+          "group": "inline"
+        },
+        {
+          "command": "gpugo.removeStudio",
+          "when": "view == gpugo.studio && viewItem =~ /^studio-/",
+          "group": "inline"
+        },
+        {
+          "command": "gpugo.showStudioLogs",
+          "when": "view == gpugo.studio && viewItem =~ /^studio-/",
+          "group": "2_logs"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "GPU Go",
+      "properties": {
+        "gpugo.serverUrl": {
+          "type": "string",
+          "default": "https://api.gpu.tf",
+          "description": "GPU Go API server URL"
+        },
+        "gpugo.dashboardUrl": {
+          "type": "string",
+          "default": "https://go.tensor-fusion.ai",
+          "description": "GPU Go dashboard URL"
+        },
+        "gpugo.cliPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to ggo CLI binary (leave empty to use auto-downloaded or PATH binary)"
+        },
+        "gpugo.autoRefreshInterval": {
+          "type": "number",
+          "default": 30,
+          "description": "Auto-refresh interval in seconds (0 to disable)"
+        },
+        "gpugo.autoDownloadCli": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically download the GPU Go CLI binary on first install"
+        },
+        "gpugo.cliDownloadUrl": {
+          "type": "string",
+          "default": "https://github.com/NexusGPU/gpu-go/releases/latest/download",
+          "description": "CDN/URL base path for downloading GPU Go CLI binaries"
+        },
+        "gpugo.cliVersion": {
+          "type": "string",
+          "default": "latest",
+          "description": "Version of the GPU Go CLI to download (e.g., 'latest', 'v1.0.0')"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js",
+    "package": "vsce package",
+    "publish": "vsce publish",
+    "publish:ovsx": "ovsx publish"
+  },
+  "devDependencies": {
+    "@types/glob": "^8.1.0",
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "@vscode/test-electron": "^2.3.8",
+    "@vscode/vsce": "^2.22.0",
+    "eslint": "^8.54.0",
+    "glob": "^10.3.10",
+    "mocha": "^10.2.0",
+    "ovsx": "^0.8.3",
+    "typescript": "^5.3.2"
+  },
+  "dependencies": {}
+}

@@ -1,0 +1,191 @@
+name: VSCode Extension
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'vscode-extension/**'
+      - '.github/workflows/vscode-extension.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'vscode-extension/**'
+      - '.github/workflows/vscode-extension.yml'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish to marketplaces'
+        required: false
+        default: false
+        type: boolean
+
+defaults:
+  run:
+    working-directory: vscode-extension
+
+jobs:
+  build:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: vscode-extension/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Compile
+        run: npm run compile
+
+      - name: Package extension
+        run: npm run package
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpu-go-vsix
+          path: vscode-extension/*.vsix
+          retention-days: 30
+
+  # Test on multiple VS Code versions
+  test:
+    name: Test on VS Code ${{ matrix.vscode-version }}
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        vscode-version: ['stable', 'insiders']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: vscode-extension/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        uses: coactions/setup-xvfb@v1
+        with:
+          run: npm test
+          working-directory: vscode-extension
+        env:
+          VSCODE_VERSION: ${{ matrix.vscode-version }}
+
+  # Publish to VS Marketplace and Open VSX
+  publish:
+    name: Publish Extension
+    needs: [build, test]
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'chore(release): vscode-extension')) ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.publish == 'true')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: vscode-extension/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Package extension
+        run: npm run package
+
+      - name: Publish to VS Marketplace
+        run: npx vsce publish -p ${{ secrets.VSCE_PAT }}
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Publish to Open VSX (for Cursor, VSCodium, etc.)
+        run: npx ovsx publish -p ${{ secrets.OVSX_PAT }}
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: vscode-extension-v${{ steps.version.outputs.version }}
+          name: VS Code Extension v${{ steps.version.outputs.version }}
+          body: |
+            ## GPU Go VS Code Extension v${{ steps.version.outputs.version }}
+            
+            ### Installation
+            - **VS Code Marketplace**: [gpu-go](https://marketplace.visualstudio.com/items?itemName=tensor-fusion.gpu-go)
+            - **Open VSX**: [gpu-go](https://open-vsx.org/extension/tensor-fusion/gpu-go)
+            
+            Or install directly in VS Code:
+            ```
+            ext install tensor-fusion.gpu-go
+            ```
+          files: |
+            vscode-extension/*.vsix
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Pre-release publishing for development branches
+  publish-prerelease:
+    name: Publish Pre-release
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref != 'refs/heads/main' && contains(github.event.head_commit.message, '[prerelease]')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: vscode-extension/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Bump version for pre-release
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          PRERELEASE_VERSION="${VERSION}-dev.$(date +%Y%m%d%H%M%S)"
+          npm version $PRERELEASE_VERSION --no-git-tag-version
+
+      - name: Package extension
+        run: npm run package -- --pre-release
+
+      - name: Publish pre-release to VS Marketplace
+        run: npx vsce publish --pre-release -p ${{ secrets.VSCE_PAT }}
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Publish pre-release to Open VSX (for Cursor, VSCodium, etc.)
+        run: npx ovsx publish --pre-release -p ${{ secrets.OVSX_PAT }}
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
