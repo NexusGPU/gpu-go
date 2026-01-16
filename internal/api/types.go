@@ -1,0 +1,212 @@
+package api
+
+import "time"
+
+// TokenResponse represents the response from POST /api/v1/tokens/generate
+type TokenResponse struct {
+	Token          string    `json:"token"`
+	ExpiresAt      time.Time `json:"expires_at"`
+	InstallCommand string    `json:"install_command"`
+}
+
+// GPUInfo represents GPU information for agent registration
+type GPUInfo struct {
+	GPUID         string `json:"gpu_id"`
+	Vendor        string `json:"vendor"`
+	Model         string `json:"model"`
+	VRAMMb        int64  `json:"vram_mb"`
+	DriverVersion string `json:"driver_version,omitempty"`
+	CUDAVersion   string `json:"cuda_version,omitempty"`
+}
+
+// AgentRegisterRequest represents the request body for agent registration
+type AgentRegisterRequest struct {
+	Token      string    `json:"token"`
+	Hostname   string    `json:"hostname"`
+	OS         string    `json:"os"`
+	Arch       string    `json:"arch"`
+	GPUs       []GPUInfo `json:"gpus"`
+	NetworkIPs []string  `json:"network_ips"`
+}
+
+// License represents the license information
+type License struct {
+	Plain     string `json:"plain"`
+	Encrypted string `json:"encrypted"`
+}
+
+// AgentRegisterResponse represents the response from agent registration
+type AgentRegisterResponse struct {
+	AgentID     string  `json:"agent_id"`
+	AgentSecret string  `json:"agent_secret"`
+	License     License `json:"license"`
+}
+
+// AgentInfo represents agent information
+type AgentInfo struct {
+	AgentID    string    `json:"agent_id"`
+	Hostname   string    `json:"hostname"`
+	Status     string    `json:"status"`
+	OS         string    `json:"os"`
+	Arch       string    `json:"arch"`
+	NetworkIPs []string  `json:"network_ips,omitempty"`
+	GPUs       []GPUInfo `json:"gpus,omitempty"`
+	Workers    []WorkerInfo `json:"workers,omitempty"`
+	LastSeenAt time.Time `json:"last_seen_at"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+// AgentListResponse represents the response from GET /api/v1/agents
+type AgentListResponse struct {
+	Agents []AgentInfo `json:"agents"`
+}
+
+// WorkerConfig represents worker configuration from server
+type WorkerConfig struct {
+	WorkerID       string   `json:"worker_id"`
+	GPUIDs         []string `json:"gpu_ids"`
+	VRAMMb         int64    `json:"vram_mb,omitempty"`
+	ComputePercent int      `json:"compute_percent,omitempty"`
+	IsolationMode  string   `json:"isolation_mode,omitempty"`
+	ListenPort     int      `json:"listen_port"`
+	Enabled        bool     `json:"enabled"`
+}
+
+// AgentConfigResponse represents the response from GET /api/v1/agents/{agent_id}/config
+type AgentConfigResponse struct {
+	ConfigVersion int            `json:"config_version"`
+	Workers       []WorkerConfig `json:"workers"`
+	License       License        `json:"license"`
+}
+
+// GPUStatus represents GPU status for status report
+type GPUStatus struct {
+	GPUID        string  `json:"gpu_id"`
+	UsedByWorker *string `json:"used_by_worker"`
+}
+
+// ConnectionInfo represents client connection information
+type ConnectionInfo struct {
+	ClientIP    string    `json:"client_ip"`
+	ConnectedAt time.Time `json:"connected_at"`
+}
+
+// WorkerStatus represents worker status for status report
+type WorkerStatus struct {
+	WorkerID    string           `json:"worker_id"`
+	Status      string           `json:"status"`
+	PID         int              `json:"pid,omitempty"`
+	GPUIDs      []string         `json:"gpu_ids"`
+	Connections []ConnectionInfo `json:"connections,omitempty"`
+}
+
+// AgentStatusRequest represents the request body for agent status report
+type AgentStatusRequest struct {
+	Timestamp time.Time      `json:"timestamp"`
+	GPUs      []GPUStatus    `json:"gpus"`
+	Workers   []WorkerStatus `json:"workers"`
+}
+
+// SuccessResponse represents a simple success response
+type SuccessResponse struct {
+	Success bool `json:"success"`
+}
+
+// WorkerInfo represents worker information
+type WorkerInfo struct {
+	WorkerID    string           `json:"worker_id"`
+	AgentID     string           `json:"agent_id,omitempty"`
+	Name        string           `json:"name"`
+	GPUIDs      []string         `json:"gpu_ids"`
+	ListenPort  int              `json:"listen_port"`
+	Enabled     bool             `json:"enabled"`
+	IsDefault   bool             `json:"is_default,omitempty"`
+	Status      string           `json:"status"`
+	Connections []ConnectionInfo `json:"connections,omitempty"`
+	CreatedAt   time.Time        `json:"created_at,omitempty"`
+}
+
+// WorkerCreateRequest represents the request body for worker creation
+type WorkerCreateRequest struct {
+	AgentID    string   `json:"agent_id"`
+	Name       string   `json:"name"`
+	GPUIDs     []string `json:"gpu_ids"`
+	ListenPort int      `json:"listen_port"`
+	Enabled    bool     `json:"enabled"`
+}
+
+// WorkerUpdateRequest represents the request body for worker update
+type WorkerUpdateRequest struct {
+	Name       *string  `json:"name,omitempty"`
+	GPUIDs     []string `json:"gpu_ids,omitempty"`
+	ListenPort *int     `json:"listen_port,omitempty"`
+	Enabled    *bool    `json:"enabled,omitempty"`
+}
+
+// WorkerListResponse represents the response from GET /api/v1/workers
+type WorkerListResponse struct {
+	Workers []WorkerInfo `json:"workers"`
+}
+
+// ShareInfo represents share link information
+type ShareInfo struct {
+	ShareID        string     `json:"share_id"`
+	ShortCode      string     `json:"short_code"`
+	ShortLink      string     `json:"short_link"`
+	WorkerID       string     `json:"worker_id"`
+	HardwareVendor string     `json:"hardware_vendor"`
+	ConnectionURL  string     `json:"connection_url"`
+	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
+	MaxUses        *int       `json:"max_uses,omitempty"`
+	UsedCount      int        `json:"used_count"`
+	CreatedAt      time.Time  `json:"created_at"`
+}
+
+// ShareCreateRequest represents the request body for share creation
+type ShareCreateRequest struct {
+	WorkerID     string     `json:"worker_id"`
+	ConnectionIP string     `json:"connection_ip"`
+	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
+	MaxUses      *int       `json:"max_uses,omitempty"`
+}
+
+// ShareListResponse represents the response from GET /api/v1/shares
+type ShareListResponse struct {
+	Shares []ShareInfo `json:"shares"`
+}
+
+// SharePublicInfo represents public share information
+type SharePublicInfo struct {
+	WorkerID       string `json:"worker_id"`
+	HardwareVendor string `json:"hardware_vendor"`
+	ConnectionURL  string `json:"connection_url"`
+}
+
+// SystemMetrics represents system metrics for metrics report
+type SystemMetrics struct {
+	CPUUsage      float64 `json:"cpu_usage"`
+	MemoryUsedMb  int64   `json:"memory_used_mb"`
+	MemoryTotalMb int64   `json:"memory_total_mb"`
+}
+
+// GPUMetrics represents GPU metrics for metrics report
+type GPUMetrics struct {
+	GPUID       string  `json:"gpu_id"`
+	Utilization float64 `json:"utilization"`
+	VRAMUsedMb  int64   `json:"vram_used_mb"`
+	VRAMTotalMb int64   `json:"vram_total_mb"`
+	Temperature float64 `json:"temperature"`
+	PowerUsageW float64 `json:"power_usage_w"`
+}
+
+// AgentMetricsRequest represents the request body for agent metrics report
+type AgentMetricsRequest struct {
+	Timestamp time.Time     `json:"timestamp"`
+	System    SystemMetrics `json:"system"`
+	GPUs      []GPUMetrics  `json:"gpus"`
+}
+
+// HeartbeatResponse represents the response from WebSocket heartbeat
+type HeartbeatResponse struct {
+	ConfigVersion int `json:"config_version"`
+}
