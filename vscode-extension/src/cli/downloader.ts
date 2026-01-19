@@ -95,7 +95,7 @@ export class CLIDownloader {
     private downloadFile(url: string, targetPath: string): Promise<void> {
         return new Promise((resolve, reject) => {
             const client = url.startsWith('https') ? https : http;
-            
+
             client.get(url, (response) => {
                 // Handle redirects
                 if (response.statusCode === 301 || response.statusCode === 302) {
@@ -120,7 +120,7 @@ export class CLIDownloader {
                 });
 
                 fileStream.on('error', (err) => {
-                    fs.unlink(targetPath, () => {});
+                    fs.unlink(targetPath, () => { });
                     reject(err);
                 });
             }).on('error', (err) => {
@@ -189,8 +189,18 @@ export class CLIDownloader {
      */
     async ensureCliAvailable(): Promise<string> {
         const config = vscode.workspace.getConfiguration('gpugo');
-        const autoDownload = config.get<boolean>('autoDownloadCli', true);
         const customPath = config.get<string>('cliPath', '');
+
+        // Check environment variable first (useful for debugging/testing)
+        const envCliPath = process.env.GPUGO_CLI_PATH;
+        if (envCliPath) {
+            console.log(`Using CLI path from env GPUGO_CLI_PATH: ${envCliPath}`);
+            return envCliPath;
+        }
+
+        // Check if CLI download should be skipped (e.g., during tests)
+        const skipDownload = process.env.GPUGO_SKIP_CLI_DOWNLOAD === 'true';
+        const autoDownload = skipDownload ? false : config.get<boolean>('autoDownloadCli', true);
 
         // If user specified a custom path, use that
         if (customPath) {
@@ -222,35 +232,35 @@ export class CLIDownloader {
                 return cliPath;
             } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : String(error);
-                const action = await vscode.window.showErrorMessage(
-                    `Failed to download GPU Go CLI: ${errorMessage}`,
-                    'Manual Setup',
-                    'Retry'
-                );
+                console.error('Failed to download CLI:', errorMessage);
 
-                if (action === 'Retry') {
-                    return await this.downloadCli();
-                } else if (action === 'Manual Setup') {
-                    const infoMessage = 'Please install GPU Go CLI manually and configure the path in settings.';
-                    await vscode.window.showInformationMessage(infoMessage, 'Open Settings');
-                    vscode.commands.executeCommand('workbench.action.openSettings', 'gpugo.cliPath');
-                }
+                // Show non-blocking error message
+                // Don't await the response to avoid blocking extension activation
+                vscode.window.showErrorMessage(
+                    `Failed to download GPU Go CLI: ${errorMessage}. Configure manually in settings.`,
+                    'Open Settings'
+                ).then(action => {
+                    if (action === 'Open Settings') {
+                        vscode.commands.executeCommand('workbench.action.openSettings', 'gpugo.cliPath');
+                    }
+                });
+
                 throw error;
             }
         } else {
-            const action = await vscode.window.showWarningMessage(
-                'GPU Go CLI not found. Would you like to download it?',
+            // Show non-blocking warning
+            vscode.window.showWarningMessage(
+                'GPU Go CLI not found. Please download or configure manually.',
                 'Download',
-                'Manual Setup'
-            );
+                'Open Settings'
+            ).then(action => {
+                if (action === 'Download') {
+                    this.downloadCli().catch(console.error);
+                } else if (action === 'Open Settings') {
+                    vscode.commands.executeCommand('workbench.action.openSettings', 'gpugo.cliPath');
+                }
+            });
 
-            if (action === 'Download') {
-                return await this.downloadCli();
-            } else if (action === 'Manual Setup') {
-                const infoMessage = 'Please install GPU Go CLI manually and configure the path in settings.';
-                await vscode.window.showInformationMessage(infoMessage, 'Open Settings');
-                vscode.commands.executeCommand('workbench.action.openSettings', 'gpugo.cliPath');
-            }
             throw new Error('CLI not available');
         }
     }

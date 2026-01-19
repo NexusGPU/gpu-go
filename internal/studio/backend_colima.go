@@ -11,6 +11,12 @@ import (
 	"time"
 )
 
+// Platform constants for runtime.GOOS comparisons
+const (
+	osDarwin = "darwin"
+	osLinux  = "linux"
+)
+
 // ColimaBackend implements the Backend interface using Colima (macOS/Linux)
 type ColimaBackend struct {
 	dockerBackend *DockerBackend
@@ -55,7 +61,7 @@ func (b *ColimaBackend) Mode() Mode {
 }
 
 func (b *ColimaBackend) IsAvailable(ctx context.Context) bool {
-	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+	if runtime.GOOS != osDarwin && runtime.GOOS != osLinux {
 		return false
 	}
 

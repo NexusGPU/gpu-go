@@ -10,9 +10,16 @@ async function main() {
         const extensionTestsPath = path.resolve(__dirname, './suite/index');
 
         // Download VS Code, unzip it and run the integration test
-        await runTests({ extensionDevelopmentPath, extensionTestsPath });
+        await runTests({
+            extensionDevelopmentPath,
+            extensionTestsPath,
+            // Set environment variable to skip CLI download during tests
+            extensionTestsEnv: {
+                GPUGO_SKIP_CLI_DOWNLOAD: 'true'
+            }
+        });
     } catch (err) {
-        console.error('Failed to run tests');
+        console.error('Failed to run tests', err);
         process.exit(1);
     }
 }

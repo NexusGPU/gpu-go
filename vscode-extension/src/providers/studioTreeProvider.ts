@@ -10,17 +10,24 @@ export class StudioTreeItem extends vscode.TreeItem {
     ) {
         super(name, collapsibleState);
         
-        this.tooltip = `${env.name}\nStatus: ${env.status}\nImage: ${env.image}`;
-        this.description = `${env.status} - ${env.mode}`;
+        // Build rich tooltip
+        let tooltip = `${env.name}\nStatus: ${env.status}\nImage: ${env.image}`;
+        if (env.sshPort) {
+            tooltip += `\nSSH: ssh ggo-${env.name}`;
+        }
+        this.tooltip = new vscode.MarkdownString(tooltip);
         
-        // Set icon based on status
+        // Show status with helpful hints
         if (env.status === 'running') {
+            this.description = `● Running`;
             this.iconPath = new vscode.ThemeIcon('vm-running', new vscode.ThemeColor('charts.green'));
             this.contextValue = 'studio-running';
         } else if (env.status === 'stopped' || env.status === 'exited') {
+            this.description = `○ Stopped`;
             this.iconPath = new vscode.ThemeIcon('vm-outline');
             this.contextValue = 'studio-stopped';
         } else {
+            this.description = `◔ ${env.status}`;
             this.iconPath = new vscode.ThemeIcon('loading~spin');
             this.contextValue = 'studio-pending';
         }
@@ -28,9 +35,29 @@ export class StudioTreeItem extends vscode.TreeItem {
 }
 
 export class StudioPropertyItem extends vscode.TreeItem {
-    constructor(label: string, value: string) {
+    constructor(label: string, value: string, options?: { icon?: string; command?: vscode.Command }) {
         super(`${label}: ${value}`, vscode.TreeItemCollapsibleState.None);
         this.description = '';
+        if (options?.icon) {
+            this.iconPath = new vscode.ThemeIcon(options.icon);
+        }
+        if (options?.command) {
+            this.command = options.command;
+        }
+    }
+}
+
+export class StudioWebUrlItem extends vscode.TreeItem {
+    constructor(name: string, url: string) {
+        super(`🌐 ${name}`, vscode.TreeItemCollapsibleState.None);
+        this.description = url;
+        this.tooltip = `Click to open ${url}`;
+        this.iconPath = new vscode.ThemeIcon('globe');
+        this.command = {
+            command: 'vscode.open',
+            title: 'Open URL',
+            arguments: [vscode.Uri.parse(url)]
+        };
     }
 }
 
@@ -80,16 +107,44 @@ export class StudioTreeProvider implements vscode.TreeDataProvider<vscode.TreeIt
         if (element instanceof StudioTreeItem) {
             // Show studio details
             const env = element.env;
-            const items: vscode.TreeItem[] = [
-                new StudioPropertyItem('ID', env.id),
-                new StudioPropertyItem('Mode', env.mode),
-                new StudioPropertyItem('Image', env.image),
-                new StudioPropertyItem('Status', env.status)
-            ];
+            const items: vscode.TreeItem[] = [];
 
-            if (env.sshHost && env.sshPort) {
-                items.push(new StudioPropertyItem('SSH', `${env.sshHost}:${env.sshPort}`));
+            // For running studios, show quick access links first
+            if (env.status === 'running') {
+                // Add web UI links based on known ports
+                const ports = env.ports || [];
+                for (const portMapping of ports) {
+                    const [hostPort, containerPort] = portMapping.split(':').map(p => parseInt(p));
+                    if (containerPort === 8888) {
+                        items.push(new StudioWebUrlItem('Jupyter Lab', `http://localhost:${hostPort}/lab`));
+                    } else if (containerPort === 6006) {
+                        items.push(new StudioWebUrlItem('TensorBoard', `http://localhost:${hostPort}`));
+                    } else if (containerPort === 8787) {
+                        items.push(new StudioWebUrlItem('RStudio', `http://localhost:${hostPort}`));
+                    } else if (containerPort === 4040) {
+                        items.push(new StudioWebUrlItem('Spark UI', `http://localhost:${hostPort}`));
+                    }
+                }
+                
+                // Add SSH quick connect
+                if (env.sshHost && env.sshPort) {
+                    const sshItem = new StudioPropertyItem('SSH', `ggo-${env.name}`, {
+                        icon: 'terminal',
+                        command: {
+                            command: 'gpugo.connectStudio',
+                            title: 'Connect via SSH',
+                            arguments: [element]
+                        }
+                    });
+                    items.push(sshItem);
+                }
             }
+
+            // Show basic info
+            items.push(new StudioPropertyItem('ID', env.id, { icon: 'key' }));
+            items.push(new StudioPropertyItem('Mode', env.mode, { icon: 'server' }));
+            items.push(new StudioPropertyItem('Image', env.image, { icon: 'package' }));
+            items.push(new StudioPropertyItem('Status', env.status, { icon: 'pulse' }));
 
             return items;
         }

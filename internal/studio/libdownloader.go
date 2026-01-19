@@ -15,15 +15,15 @@ import (
 const (
 	// CDN base URL for TensorFusion libraries
 	DefaultCDNURL = "https://cdn.tensor-fusion.ai"
-	
+
 	// Library version - this would normally come from config
 	DefaultLibVersion = "v1.0.0"
 )
 
 // LibraryDownloader handles downloading versioned GPU libraries from CDN
 type LibraryDownloader struct {
-	cdnURL  string
-	version string
+	cdnURL   string
+	version  string
 	cacheDir string
 }
 
@@ -35,13 +35,13 @@ func NewLibraryDownloader(cdnURL, version string) *LibraryDownloader {
 	if version == "" {
 		version = DefaultLibVersion
 	}
-	
+
 	// Default cache directory
 	cacheDir := "/tmp/tensor-fusion/libs"
 	if home, err := os.UserHomeDir(); err == nil {
 		cacheDir = filepath.Join(home, ".tensor-fusion", "libs")
 	}
-	
+
 	return &LibraryDownloader{
 		cdnURL:   cdnURL,
 		version:  version,
@@ -61,7 +61,7 @@ func DetectArchitecture() Architecture {
 		OS:   runtime.GOOS,
 		Arch: runtime.GOARCH,
 	}
-	
+
 	// Normalize architecture names
 	switch arch.Arch {
 	case "amd64":
@@ -73,7 +73,7 @@ func DetectArchitecture() Architecture {
 	default:
 		// Keep as-is for other architectures
 	}
-	
+
 	return arch
 }
 
@@ -102,7 +102,7 @@ func (d *LibraryDownloader) DownloadURL(lib LibraryInfo) string {
 	default:
 		ext = "so"
 	}
-	
+
 	return fmt.Sprintf("%s/%s/%s/lib%s.%s",
 		d.cdnURL,
 		lib.Version,
@@ -115,12 +115,12 @@ func (d *LibraryDownloader) DownloadURL(lib LibraryInfo) string {
 // Download downloads a library from the CDN
 func (d *LibraryDownloader) Download(lib LibraryInfo) (string, error) {
 	url := d.DownloadURL(lib)
-	
+
 	// Create cache directory
 	if err := os.MkdirAll(d.cacheDir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create cache directory: %w", err)
 	}
-	
+
 	// Determine library filename
 	var ext string
 	switch lib.Arch.OS {
@@ -131,67 +131,67 @@ func (d *LibraryDownloader) Download(lib LibraryInfo) (string, error) {
 	default:
 		ext = "so"
 	}
-	
+
 	filename := fmt.Sprintf("lib%s.%s", lib.Name, ext)
 	destPath := filepath.Join(d.cacheDir, filename)
-	
+
 	// Check if already downloaded and verified
 	if d.isValidCache(destPath, lib.Checksum) {
 		fmt.Printf("Library %s already cached at %s\n", lib.Name, destPath)
 		return destPath, nil
 	}
-	
+
 	// Download the library
 	fmt.Printf("Downloading %s from %s...\n", lib.Name, url)
-	
+
 	resp, err := http.Get(url)
 	if err != nil {
 		return "", fmt.Errorf("failed to download library: %w", err)
 	}
-	defer resp.Body.Close()
-	
+	defer func() { _ = resp.Body.Close() }()
+
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("failed to download library: HTTP %d", resp.StatusCode)
 	}
-	
+
 	// Create temporary file
 	tmpFile := destPath + ".tmp"
 	out, err := os.Create(tmpFile)
 	if err != nil {
 		return "", fmt.Errorf("failed to create temporary file: %w", err)
 	}
-	defer out.Close()
-	
+	defer func() { _ = out.Close() }()
+
 	// Copy with progress
 	hasher := sha256.New()
 	writer := io.MultiWriter(out, hasher)
-	
+
 	_, err = io.Copy(writer, resp.Body)
 	if err != nil {
-		os.Remove(tmpFile)
+		_ = os.Remove(tmpFile)
 		return "", fmt.Errorf("failed to download library: %w", err)
 	}
-	
+
 	// Verify checksum if provided
 	if lib.Checksum != "" {
 		downloadedChecksum := hex.EncodeToString(hasher.Sum(nil))
 		if !strings.EqualFold(downloadedChecksum, lib.Checksum) {
-			os.Remove(tmpFile)
+			_ = os.Remove(tmpFile)
 			return "", fmt.Errorf("checksum mismatch: expected %s, got %s", lib.Checksum, downloadedChecksum)
 		}
 	}
-	
+
 	// Move to final location
 	if err := os.Rename(tmpFile, destPath); err != nil {
-		os.Remove(tmpFile)
+		_ = os.Remove(tmpFile)
 		return "", fmt.Errorf("failed to move library to final location: %w", err)
 	}
-	
+
 	// Set permissions
 	if err := os.Chmod(destPath, 0755); err != nil {
 		return "", fmt.Errorf("failed to set permissions: %w", err)
 	}
-	
+
 	fmt.Printf("Successfully downloaded %s to %s\n", lib.Name, destPath)
 	return destPath, nil
 }
@@ -203,29 +203,29 @@ func (d *LibraryDownloader) isValidCache(path, expectedChecksum string) bool {
 	if err != nil {
 		return false
 	}
-	
+
 	// Check if it's a regular file
 	if !info.Mode().IsRegular() {
 		return false
 	}
-	
+
 	// If no checksum provided, assume valid
 	if expectedChecksum == "" {
 		return true
 	}
-	
+
 	// Verify checksum
 	file, err := os.Open(path)
 	if err != nil {
 		return false
 	}
-	defer file.Close()
-	
+	defer func() { _ = file.Close() }()
+
 	hasher := sha256.New()
 	if _, err := io.Copy(hasher, file); err != nil {
 		return false
 	}
-	
+
 	checksum := hex.EncodeToString(hasher.Sum(nil))
 	return strings.EqualFold(checksum, expectedChecksum)
 }
@@ -233,7 +233,7 @@ func (d *LibraryDownloader) isValidCache(path, expectedChecksum string) bool {
 // DownloadDefaultLibraries downloads the default set of GPU libraries
 func (d *LibraryDownloader) DownloadDefaultLibraries() ([]string, error) {
 	arch := DetectArchitecture()
-	
+
 	// List of libraries to download
 	libraries := []LibraryInfo{
 		{
@@ -252,7 +252,7 @@ func (d *LibraryDownloader) DownloadDefaultLibraries() ([]string, error) {
 			Arch:    arch,
 		},
 	}
-	
+
 	var paths []string
 	for _, lib := range libraries {
 		path, err := d.Download(lib)
@@ -263,11 +263,11 @@ func (d *LibraryDownloader) DownloadDefaultLibraries() ([]string, error) {
 		}
 		paths = append(paths, path)
 	}
-	
+
 	if len(paths) == 0 {
 		return nil, fmt.Errorf("failed to download any libraries")
 	}
-	
+
 	return paths, nil
 }
 

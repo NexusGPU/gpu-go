@@ -66,7 +66,7 @@ Examples:
 		},
 	}
 
-	cmd.Flags().StringVar(&serverURL, "server", "https://api.gpu.tf", "Server URL")
+	cmd.Flags().StringVar(&serverURL, "server", api.GetDefaultBaseURL(), "Server URL (or set GPU_GO_ENDPOINT env var)")
 	cmd.Flags().BoolVar(&longTerm, "long-term", false, "Set up a long-term connection")
 	cmd.Flags().StringVar(&outputDir, "output", "", "Output directory for configuration files")
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -17,6 +18,14 @@ const (
 	defaultBaseURL = "https://api.gpu.tf"
 	defaultTimeout = 30 * time.Second
 )
+
+// GetDefaultBaseURL returns the default base URL, checking GPU_GO_ENDPOINT env var first
+func GetDefaultBaseURL() string {
+	if endpoint := os.Getenv("GPU_GO_ENDPOINT"); endpoint != "" {
+		return endpoint
+	}
+	return defaultBaseURL
+}
 
 // Client is the HTTP client for GPU Go API
 type Client struct {
@@ -65,9 +74,10 @@ func WithHTTPClient(httpClient *resty.Client) ClientOption {
 }
 
 // NewClient creates a new API client
+// The base URL defaults to GPU_GO_ENDPOINT env var if set, otherwise https://api.gpu.tf
 func NewClient(opts ...ClientOption) *Client {
 	c := &Client{
-		baseURL:    defaultBaseURL,
+		baseURL:    GetDefaultBaseURL(),
 		httpClient: resty.New().SetTimeout(defaultTimeout),
 		wsStopCh:   make(chan struct{}),
 	}

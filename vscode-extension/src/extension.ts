@@ -20,7 +20,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
     // Initialize CLI wrapper
     const cli = new CLI(context);
-    
+
     // Ensure CLI is available (auto-download if needed)
     try {
         await cli.initialize();
@@ -54,18 +54,20 @@ export async function activate(context: vscode.ExtensionContext) {
     // Register commands
     registerCommands(context, cli);
 
-    // Check authentication status on startup
-    const isLoggedIn = await authManager.checkLoginStatus();
-    if (!isLoggedIn) {
-        // Show login prompt
-        const action = await vscode.window.showInformationMessage(
-            'Welcome to GPU Go! Please login to access your remote GPUs.',
-            'Login'
-        );
-        if (action === 'Login') {
-            vscode.commands.executeCommand('gpugo.login');
+    // Check authentication status on startup (non-blocking)
+    authManager.checkLoginStatus().then(isLoggedIn => {
+        if (!isLoggedIn) {
+            // Show login prompt (non-blocking)
+            vscode.window.showInformationMessage(
+                'Welcome to GPU Go! Please login to access your remote GPUs.',
+                'Login'
+            ).then(action => {
+                if (action === 'Login') {
+                    vscode.commands.executeCommand('gpugo.login');
+                }
+            });
         }
-    }
+    });
 
     // Setup auto-refresh
     setupAutoRefresh(context);
@@ -184,6 +186,41 @@ function registerCommands(context: vscode.ExtensionContext, cli: CLI) {
         })
     );
 
+    // Open Jupyter Lab in browser
+    context.subscriptions.push(
+        vscode.commands.registerCommand('gpugo.openJupyter', async (item) => {
+            if (item?.env) {
+                const port = findMappedPort(item.env.ports, 8888) || 8888;
+                const url = `http://localhost:${port}/lab`;
+                vscode.env.openExternal(vscode.Uri.parse(url));
+                vscode.window.showInformationMessage(`Opening Jupyter Lab at ${url}`);
+            }
+        })
+    );
+
+    // Open TensorBoard in browser
+    context.subscriptions.push(
+        vscode.commands.registerCommand('gpugo.openTensorBoard', async (item) => {
+            if (item?.env) {
+                const port = findMappedPort(item.env.ports, 6006) || 6006;
+                const url = `http://localhost:${port}`;
+                vscode.env.openExternal(vscode.Uri.parse(url));
+                vscode.window.showInformationMessage(`Opening TensorBoard at ${url}`);
+            }
+        })
+    );
+
+    // Open generic Web UI
+    context.subscriptions.push(
+        vscode.commands.registerCommand('gpugo.openWebUI', async (item, port?: number) => {
+            if (item?.env && port) {
+                const mappedPort = findMappedPort(item.env.ports, port) || port;
+                const url = `http://localhost:${mappedPort}`;
+                vscode.env.openExternal(vscode.Uri.parse(url));
+            }
+        })
+    );
+
     // Worker commands
     context.subscriptions.push(
         vscode.commands.registerCommand('gpugo.createWorker', async () => {
@@ -266,4 +303,24 @@ export function deactivate() {
     if (refreshInterval) {
         clearInterval(refreshInterval);
     }
+}
+
+/**
+ * Find the host port mapped to a container port
+ * @param ports Array of port mappings in "hostPort:containerPort" format
+ * @param containerPort The container port to find
+ * @returns The host port if found, undefined otherwise
+ */
+function findMappedPort(ports: string[] | undefined, containerPort: number): number | undefined {
+    if (!ports) { return undefined; }
+    for (const mapping of ports) {
+        const parts = mapping.split(':');
+        if (parts.length >= 2) {
+            const cPort = parseInt(parts[1]);
+            if (cPort === containerPort) {
+                return parseInt(parts[0]);
+            }
+        }
+    }
+    return undefined;
 }

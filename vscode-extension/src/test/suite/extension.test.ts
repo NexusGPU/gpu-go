@@ -2,21 +2,35 @@ import * as assert from 'assert';
 import * as vscode from 'vscode';
 
 suite('Extension Test Suite', () => {
-    vscode.window.showInformationMessage('Start all tests.');
+    // Increase timeout for activation tests
+    // Note: CLI download is disabled via GPUGO_SKIP_CLI_DOWNLOAD env var in runTest.ts
+    const ACTIVATION_TIMEOUT = 10000;
 
     test('Extension should be present', () => {
         assert.ok(vscode.extensions.getExtension('tensor-fusion.gpu-go'));
     });
 
-    test('Extension should activate', async () => {
+    test('Extension should activate', async function() {
+        this.timeout(ACTIVATION_TIMEOUT);
+        
         const ext = vscode.extensions.getExtension('tensor-fusion.gpu-go');
-        if (ext) {
+        assert.ok(ext, 'Extension should be found');
+        
+        if (!ext.isActive) {
             await ext.activate();
-            assert.ok(ext.isActive);
         }
+        assert.ok(ext.isActive, 'Extension should be active');
     });
 
-    test('Commands should be registered', async () => {
+    test('Commands should be registered', async function() {
+        this.timeout(ACTIVATION_TIMEOUT);
+        
+        // Ensure extension is activated first
+        const ext = vscode.extensions.getExtension('tensor-fusion.gpu-go');
+        if (ext && !ext.isActive) {
+            await ext.activate();
+        }
+        
         const commands = await vscode.commands.getCommands();
         
         const expectedCommands = [

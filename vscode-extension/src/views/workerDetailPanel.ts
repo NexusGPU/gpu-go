@@ -75,13 +75,9 @@ export class WorkerDetailPanel {
     private getHtmlForWebview(worker: Worker | null): string {
         const webview = this._panel.webview;
 
-        // Get URIs for vscode-elements
-        const elementsUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(this._extensionUri, 'node_modules', '@vscode-elements', 'elements', 'dist', 'bundled.js')
-        );
-        const codiconsUri = webview.asWebviewUri(
-            vscode.Uri.joinPath(this._extensionUri, 'node_modules', '@vscode', 'codicons', 'dist', 'codicon.css')
-        );
+        // Note: vscode-elements URIs can be added here if needed:
+        // webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'node_modules', '@vscode-elements', 'elements', 'dist', 'bundled.js'))
+        // webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'node_modules', '@vscode', 'codicons', 'dist', 'codicon.css'))
 
         const nonce = getNonce();
 

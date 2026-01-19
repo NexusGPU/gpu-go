@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/NexusGPU/gpu-go/internal/platform"
+	"github.com/NexusGPU/gpu-go/internal/tui"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -24,11 +25,22 @@ const (
 	defaultTokenTTL = 365 * 24 * time.Hour // 1 year
 )
 
+var outputFormat string
+
 // TokenConfig represents the stored PAT token
 type TokenConfig struct {
 	Token     string    `json:"token"`
 	CreatedAt time.Time `json:"created_at"`
 	ExpiresAt time.Time `json:"expires_at,omitempty"`
+}
+
+// AuthStatusResponse represents the JSON response for auth status
+type AuthStatusResponse struct {
+	LoggedIn  bool   `json:"logged_in"`
+	Token     string `json:"token,omitempty"`
+	CreatedAt string `json:"created_at,omitempty"`
+	ExpiresAt string `json:"expires_at,omitempty"`
+	Expired   bool   `json:"expired,omitempty"`
 }
 
 // NewAuthCmd creates the auth command
@@ -43,9 +55,14 @@ Use 'ggo logout' to remove stored credentials.
 Use 'ggo auth status' to check your current authentication status.`,
 	}
 
+	cmd.PersistentFlags().StringVarP(&outputFormat, "output", "o", "table", "Output format (table, json)")
 	cmd.AddCommand(newStatusCmd())
 
 	return cmd
+}
+
+func getOutput() *tui.Output {
+	return tui.NewOutputWithFormat(tui.ParseOutputFormat(outputFormat))
 }
 
 // NewLoginCmd creates the login command (added to root)
@@ -101,17 +118,19 @@ This will sign you out of the GPU Go CLI and IDE extensions.`,
 			tokenPath := getTokenPath()
 
 			if _, err := os.Stat(tokenPath); os.IsNotExist(err) {
-				fmt.Println("You are not logged in.")
+				fmt.Println(tui.InfoMessage("You are not logged in."))
 				return nil
 			}
 
 			if !force {
-				fmt.Print("Are you sure you want to logout? [y/N]: ")
+				styles := tui.DefaultStyles()
+				fmt.Printf("%s Are you sure you want to logout? [y/N]: ",
+					styles.Warning.Render("!"))
 				reader := bufio.NewReader(os.Stdin)
 				confirm, _ := reader.ReadString('\n')
 				confirm = strings.TrimSpace(strings.ToLower(confirm))
 				if confirm != "y" && confirm != "yes" {
-					fmt.Println("Cancelled.")
+					fmt.Println(tui.InfoMessage("Cancelled."))
 					return nil
 				}
 			}
@@ -121,7 +140,7 @@ This will sign you out of the GPU Go CLI and IDE extensions.`,
 				return err
 			}
 
-			fmt.Println("Successfully logged out.")
+			fmt.Println(tui.SuccessMessage("Successfully logged out."))
 			return nil
 		},
 	}
@@ -137,6 +156,7 @@ func newStatusCmd() *cobra.Command {
 		Short: "Show current authentication status",
 		Long:  `Display information about your current authentication status.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			out := getOutput()
 			tokenConfig, err := LoadToken()
 			if err != nil {
 				log.Error().Err(err).Msg("Failed to load token")
@@ -144,22 +164,60 @@ func newStatusCmd() *cobra.Command {
 			}
 
 			if tokenConfig == nil {
-				fmt.Println("Not logged in.")
+				if out.IsJSON() {
+					return out.PrintJSON(AuthStatusResponse{LoggedIn: false})
+				}
+				fmt.Println(tui.WarningMessage("Not logged in."))
 				fmt.Println()
-				fmt.Println("Run 'ggo login' to authenticate.")
+				fmt.Println("Run " + tui.Code("ggo login") + " to authenticate.")
 				return nil
 			}
 
-			fmt.Println("Authentication Status: Logged in")
-			fmt.Println()
-			fmt.Printf("  Token:      %s...%s\n", tokenConfig.Token[:8], tokenConfig.Token[len(tokenConfig.Token)-4:])
-			fmt.Printf("  Created:    %s\n", tokenConfig.CreatedAt.Format(time.RFC3339))
-			if !tokenConfig.ExpiresAt.IsZero() {
-				if time.Now().After(tokenConfig.ExpiresAt) {
-					fmt.Printf("  Expires:    %s (EXPIRED)\n", tokenConfig.ExpiresAt.Format(time.RFC3339))
-				} else {
-					fmt.Printf("  Expires:    %s\n", tokenConfig.ExpiresAt.Format(time.RFC3339))
+			// Check if expired
+			expired := !tokenConfig.ExpiresAt.IsZero() && time.Now().After(tokenConfig.ExpiresAt)
+
+			if out.IsJSON() {
+				// Mask token for JSON output
+				maskedToken := ""
+				if len(tokenConfig.Token) > 12 {
+					maskedToken = tokenConfig.Token[:8] + "..." + tokenConfig.Token[len(tokenConfig.Token)-4:]
 				}
+				return out.PrintJSON(AuthStatusResponse{
+					LoggedIn:  true,
+					Token:     maskedToken,
+					CreatedAt: tokenConfig.CreatedAt.Format(time.RFC3339),
+					ExpiresAt: tokenConfig.ExpiresAt.Format(time.RFC3339),
+					Expired:   expired,
+				})
+			}
+
+			// Styled output
+			styles := tui.DefaultStyles()
+
+			fmt.Println()
+			fmt.Println(tui.SuccessMessage("Logged in"))
+			fmt.Println()
+
+			// Mask token for display
+			maskedToken := tokenConfig.Token[:8] + "..." + tokenConfig.Token[len(tokenConfig.Token)-4:]
+
+			status := tui.NewStatusTable().
+				Add("Token", maskedToken).
+				Add("Created", tokenConfig.CreatedAt.Format("2006-01-02 15:04:05"))
+
+			if !tokenConfig.ExpiresAt.IsZero() {
+				if expired {
+					status.AddWithStatus("Expires", tokenConfig.ExpiresAt.Format("2006-01-02 15:04:05")+" (EXPIRED)", "error")
+				} else {
+					status.Add("Expires", tokenConfig.ExpiresAt.Format("2006-01-02 15:04:05"))
+				}
+			}
+
+			fmt.Println(status.String())
+
+			if expired {
+				fmt.Println()
+				fmt.Println(styles.Warning.Render("! Your token has expired. Please run ") + tui.Code("ggo login") + styles.Warning.Render(" to re-authenticate."))
 			}
 
 			return nil
@@ -168,28 +226,32 @@ func newStatusCmd() *cobra.Command {
 }
 
 func interactiveLogin(noBrowser bool) error {
-	fmt.Println("GPU Go Login")
-	fmt.Println("============")
+	styles := tui.DefaultStyles()
+
+	fmt.Println()
+	fmt.Println(styles.Title.Render("GPU Go Login"))
 	fmt.Println()
 
 	if !noBrowser {
 		fmt.Println("Opening browser to generate a Personal Access Token (PAT)...")
-		fmt.Printf("URL: %s\n", dashboardURL)
+		fmt.Println()
+		fmt.Println("  " + tui.URL(dashboardURL))
 		fmt.Println()
 
 		if err := openBrowser(dashboardURL); err != nil {
 			log.Warn().Err(err).Msg("Failed to open browser")
-			fmt.Println("Could not open browser automatically.")
+			fmt.Println(tui.WarningMessage("Could not open browser automatically."))
 		}
 	} else {
 		fmt.Println("Please visit the following URL to generate a Personal Access Token (PAT):")
-		fmt.Printf("  %s\n", dashboardURL)
+		fmt.Println()
+		fmt.Println("  " + tui.URL(dashboardURL))
 		fmt.Println()
 	}
 
 	fmt.Println("After generating your PAT, paste it below.")
 	fmt.Println()
-	fmt.Print("Enter PAT: ")
+	fmt.Print(styles.Bold.Render("Enter PAT: "))
 
 	// Try to read securely (no echo)
 	token, err := readSecureInput()
@@ -259,8 +321,9 @@ func saveToken(token string) error {
 	}
 
 	fmt.Println()
-	fmt.Println("Successfully logged in!")
-	fmt.Printf("Token saved to: %s\n", tokenPath)
+	fmt.Println(tui.SuccessMessage("Successfully logged in!"))
+	fmt.Println()
+	fmt.Println(tui.KeyValue("Token saved to", tokenPath))
 
 	return nil
 }

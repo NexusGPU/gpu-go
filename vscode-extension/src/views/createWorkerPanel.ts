@@ -57,12 +57,13 @@ export class CreateWorkerPanel {
                     case 'openDashboard':
                         vscode.env.openExternal(vscode.Uri.parse(this._cli.getDashboardUrl() + '/workers/new'));
                         break;
-                    case 'openTerminal':
+                    case 'openTerminal': {
                         const terminal = vscode.window.createTerminal('GPU Go Worker');
                         terminal.show();
                         terminal.sendText('# Run this on your GPU server:');
                         terminal.sendText('# ggo worker create --agent-id <agent-id> --name my-worker --gpu-ids 0');
                         break;
+                    }
                 }
             },
             null,
@@ -74,7 +75,7 @@ export class CreateWorkerPanel {
         const webview = this._panel.webview;
         const nonce = getNonce();
 
-        const dashboardUrl = this._cli.getDashboardUrl();
+        // Dashboard URL available if needed: this._cli.getDashboardUrl()
 
         const content = `
             <div class="header">

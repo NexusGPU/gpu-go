@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { CLI } from '../cli/cli';
 import { getWebviewContent } from './webviewUtils';
-import { STUDIO_TEMPLATES, getTemplateById, getCategories, StudioTemplate } from '../config/studioTemplates';
+import { STUDIO_TEMPLATES, getTemplateById, getCategories } from '../config/studioTemplates';
 
 export class CreateStudioPanel {
     public static currentPanel: CreateStudioPanel | undefined;
@@ -62,11 +62,10 @@ export class CreateStudioPanel {
     }
 
     private async updateContent() {
-        // Get available backends and images
+        // Get available backends
         const backends = await this._cli.studioBackends();
-        const images = await this._cli.studioImages();
         
-        this._panel.webview.html = this.getHtmlForWebview(backends, images);
+        this._panel.webview.html = this.getHtmlForWebview(backends);
     }
 
     private async createStudio(data: {
@@ -131,7 +130,7 @@ export class CreateStudioPanel {
         }
     }
 
-    private getHtmlForWebview(backends: string[], images: { name: string; tag: string; description: string }[]): string {
+    private getHtmlForWebview(backends: string[]): string {
         const webview = this._panel.webview;
         const nonce = getNonce();
 

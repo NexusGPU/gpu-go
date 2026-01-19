@@ -7,15 +7,71 @@ export interface StudioTemplate {
     name: string;
     image: string;
     description: string;
-    category: 'pytorch' | 'tensorflow' | 'jupyter' | 'rstudio' | 'general' | 'custom';
+    category: 'quickstart' | 'pytorch' | 'tensorflow' | 'jupyter' | 'rstudio' | 'general' | 'custom';
     features: string[];
     defaultPorts?: string[];
     defaultEnv?: Record<string, string>;
     recommendedVolumes?: string[];
     icon: string;
+    /** Recommended for beginners */
+    recommended?: boolean;
+    /** Difficulty level */
+    level?: 'beginner' | 'intermediate' | 'advanced';
+    /** Web UI URLs available after start */
+    webUrls?: { name: string; port: number; path?: string }[];
 }
 
 export const STUDIO_TEMPLATES: StudioTemplate[] = [
+    // ⭐ Quick Start Templates (Recommended for Beginners)
+    {
+        id: 'quickstart-jupyter',
+        name: '⭐ Jupyter Notebook (Recommended)',
+        image: 'jupyter/scipy-notebook:latest',
+        description: 'Best for beginners - Start coding in 1 click with Jupyter',
+        category: 'quickstart',
+        features: ['Jupyter Lab', 'Python 3', 'NumPy', 'Pandas', 'Matplotlib'],
+        defaultPorts: ['8888:8888'],
+        defaultEnv: { 'JUPYTER_ENABLE_LAB': 'yes', 'JUPYTER_TOKEN': '' },
+        icon: '⭐',
+        recommended: true,
+        level: 'beginner',
+        webUrls: [{ name: 'Jupyter Lab', port: 8888, path: '/lab' }]
+    },
+    {
+        id: 'quickstart-pytorch',
+        name: '⭐ PyTorch + Jupyter (Recommended)',
+        image: 'jupyter/pytorch-notebook:latest',
+        description: 'Best for deep learning - PyTorch with Jupyter ready to use',
+        category: 'quickstart',
+        features: ['PyTorch', 'Jupyter Lab', 'CUDA Ready', 'TensorBoard'],
+        defaultPorts: ['8888:8888', '6006:6006'],
+        defaultEnv: { 'JUPYTER_ENABLE_LAB': 'yes', 'JUPYTER_TOKEN': '' },
+        icon: '⭐',
+        recommended: true,
+        level: 'beginner',
+        webUrls: [
+            { name: 'Jupyter Lab', port: 8888, path: '/lab' },
+            { name: 'TensorBoard', port: 6006 }
+        ]
+    },
+    {
+        id: 'quickstart-tensorflow',
+        name: '⭐ TensorFlow + Jupyter',
+        image: 'jupyter/tensorflow-notebook:latest',
+        description: 'TensorFlow with Jupyter - great for Keras tutorials',
+        category: 'quickstart',
+        features: ['TensorFlow', 'Keras', 'Jupyter Lab', 'CUDA Ready'],
+        defaultPorts: ['8888:8888', '6006:6006'],
+        defaultEnv: { 'JUPYTER_ENABLE_LAB': 'yes', 'JUPYTER_TOKEN': '' },
+        icon: '⭐',
+        recommended: true,
+        level: 'beginner',
+        webUrls: [
+            { name: 'Jupyter Lab', port: 8888, path: '/lab' },
+            { name: 'TensorBoard', port: 6006 }
+        ]
+    },
+
     // PyTorch Templates
     {
         id: 'pytorch-latest',
@@ -25,7 +81,8 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
         category: 'pytorch',
         features: ['PyTorch', 'CUDA', 'Python 3', 'NumPy', 'SciPy'],
         defaultPorts: ['8888:8888', '6006:6006'],
-        icon: '🔥'
+        icon: '🔥',
+        level: 'intermediate'
     },
     {
         id: 'pytorch-jupyter',
@@ -35,10 +92,13 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
         category: 'pytorch',
         features: ['PyTorch', 'Jupyter Lab', 'CUDA', 'Python 3'],
         defaultPorts: ['8888:8888', '6006:6006'],
-        defaultEnv: {
-            'JUPYTER_ENABLE_LAB': 'yes'
-        },
-        icon: '🔥'
+        defaultEnv: { 'JUPYTER_ENABLE_LAB': 'yes', 'JUPYTER_TOKEN': '' },
+        icon: '🔥',
+        level: 'beginner',
+        webUrls: [
+            { name: 'Jupyter Lab', port: 8888, path: '/lab' },
+            { name: 'TensorBoard', port: 6006 }
+        ]
     },
     {
         id: 'tensorfusion-torch',
@@ -48,7 +108,12 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
         category: 'pytorch',
         features: ['PyTorch', 'CUDA', 'SSH', 'Jupyter', 'TensorBoard', 'VS Code Server'],
         defaultPorts: ['8888:8888', '6006:6006'],
-        icon: '🔥'
+        icon: '🔥',
+        level: 'intermediate',
+        webUrls: [
+            { name: 'Jupyter Lab', port: 8888, path: '/lab' },
+            { name: 'TensorBoard', port: 6006 }
+        ]
     },
 
     // TensorFlow Templates
@@ -60,7 +125,9 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
         category: 'tensorflow',
         features: ['TensorFlow', 'CUDA', 'Python 3', 'Keras'],
         defaultPorts: ['8888:8888', '6006:6006'],
-        icon: '🧠'
+        icon: '🧠',
+        level: 'intermediate',
+        webUrls: [{ name: 'TensorBoard', port: 6006 }]
     },
     {
         id: 'tensorflow-jupyter',
@@ -70,10 +137,13 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
         category: 'tensorflow',
         features: ['TensorFlow', 'Jupyter Lab', 'CUDA', 'Python 3'],
         defaultPorts: ['8888:8888', '6006:6006'],
-        defaultEnv: {
-            'JUPYTER_ENABLE_LAB': 'yes'
-        },
-        icon: '🧠'
+        defaultEnv: { 'JUPYTER_ENABLE_LAB': 'yes', 'JUPYTER_TOKEN': '' },
+        icon: '🧠',
+        level: 'beginner',
+        webUrls: [
+            { name: 'Jupyter Lab', port: 8888, path: '/lab' },
+            { name: 'TensorBoard', port: 6006 }
+        ]
     },
     {
         id: 'tensorfusion-tensorflow',
@@ -83,7 +153,12 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
         category: 'tensorflow',
         features: ['TensorFlow', 'CUDA', 'SSH', 'Jupyter', 'TensorBoard'],
         defaultPorts: ['8888:8888', '6006:6006'],
-        icon: '🧠'
+        icon: '🧠',
+        level: 'intermediate',
+        webUrls: [
+            { name: 'Jupyter Lab', port: 8888, path: '/lab' },
+            { name: 'TensorBoard', port: 6006 }
+        ]
     },
 
     // Jupyter/Data Science Templates
@@ -95,10 +170,10 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
         category: 'jupyter',
         features: ['Jupyter Lab', 'NumPy', 'Pandas', 'Matplotlib', 'SciPy', 'scikit-learn'],
         defaultPorts: ['8888:8888'],
-        defaultEnv: {
-            'JUPYTER_ENABLE_LAB': 'yes'
-        },
-        icon: '📊'
+        defaultEnv: { 'JUPYTER_ENABLE_LAB': 'yes', 'JUPYTER_TOKEN': '' },
+        icon: '📊',
+        level: 'beginner',
+        webUrls: [{ name: 'Jupyter Lab', port: 8888, path: '/lab' }]
     },
     {
         id: 'jupyter-datascience',
@@ -108,10 +183,10 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
         category: 'jupyter',
         features: ['Jupyter Lab', 'Python', 'R', 'Julia', 'Pandas', 'scikit-learn'],
         defaultPorts: ['8888:8888'],
-        defaultEnv: {
-            'JUPYTER_ENABLE_LAB': 'yes'
-        },
-        icon: '📊'
+        defaultEnv: { 'JUPYTER_ENABLE_LAB': 'yes', 'JUPYTER_TOKEN': '' },
+        icon: '📊',
+        level: 'intermediate',
+        webUrls: [{ name: 'Jupyter Lab', port: 8888, path: '/lab' }]
     },
     {
         id: 'jupyter-all-spark',
@@ -121,10 +196,13 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
         category: 'jupyter',
         features: ['Jupyter Lab', 'Python', 'R', 'Apache Spark', 'PySpark'],
         defaultPorts: ['8888:8888', '4040:4040'],
-        defaultEnv: {
-            'JUPYTER_ENABLE_LAB': 'yes'
-        },
-        icon: '📊'
+        defaultEnv: { 'JUPYTER_ENABLE_LAB': 'yes', 'JUPYTER_TOKEN': '' },
+        icon: '📊',
+        level: 'advanced',
+        webUrls: [
+            { name: 'Jupyter Lab', port: 8888, path: '/lab' },
+            { name: 'Spark UI', port: 4040 }
+        ]
     },
 
     // RStudio Templates
@@ -136,10 +214,10 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
         category: 'rstudio',
         features: ['RStudio Server', 'R', 'tidyverse'],
         defaultPorts: ['8787:8787'],
-        defaultEnv: {
-            'PASSWORD': 'rstudio'
-        },
-        icon: '📈'
+        defaultEnv: { 'PASSWORD': 'rstudio' },
+        icon: '📈',
+        level: 'beginner',
+        webUrls: [{ name: 'RStudio', port: 8787 }]
     },
     {
         id: 'rstudio-verse',
@@ -149,10 +227,10 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
         category: 'rstudio',
         features: ['RStudio Server', 'R', 'tidyverse', 'LaTeX', 'Pandoc'],
         defaultPorts: ['8787:8787'],
-        defaultEnv: {
-            'PASSWORD': 'rstudio'
-        },
-        icon: '📈'
+        defaultEnv: { 'PASSWORD': 'rstudio' },
+        icon: '📈',
+        level: 'intermediate',
+        webUrls: [{ name: 'RStudio', port: 8787 }]
     },
     {
         id: 'rstudio-ml',
@@ -162,10 +240,10 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
         category: 'rstudio',
         features: ['RStudio Server', 'R', 'tidyverse', 'keras', 'tensorflow'],
         defaultPorts: ['8787:8787'],
-        defaultEnv: {
-            'PASSWORD': 'rstudio'
-        },
-        icon: '📈'
+        defaultEnv: { 'PASSWORD': 'rstudio' },
+        icon: '📈',
+        level: 'intermediate',
+        webUrls: [{ name: 'RStudio', port: 8787 }]
     },
 
     // General Purpose Templates
@@ -177,7 +255,8 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
         category: 'general',
         features: ['Python 3', 'conda', 'pip'],
         defaultPorts: ['8888:8888'],
-        icon: '🐍'
+        icon: '🐍',
+        level: 'intermediate'
     },
     {
         id: 'anaconda',
@@ -187,7 +266,8 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
         category: 'general',
         features: ['Python 3', 'conda', 'NumPy', 'Pandas', 'Matplotlib', 'scikit-learn'],
         defaultPorts: ['8888:8888'],
-        icon: '🐍'
+        icon: '🐍',
+        level: 'beginner'
     },
     {
         id: 'python-base',
@@ -197,7 +277,8 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
         category: 'general',
         features: ['Python 3.11', 'pip'],
         defaultPorts: ['8888:8888'],
-        icon: '🐍'
+        icon: '🐍',
+        level: 'advanced'
     },
     {
         id: 'ubuntu-cuda',
@@ -206,7 +287,8 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
         description: 'Ubuntu 22.04 with CUDA 12.2 development tools',
         category: 'general',
         features: ['Ubuntu 22.04', 'CUDA 12.2', 'cuDNN', 'Development Tools'],
-        icon: '🖥️'
+        icon: '🖥️',
+        level: 'advanced'
     },
     {
         id: 'tensorfusion-full',
@@ -216,7 +298,12 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
         category: 'general',
         features: ['PyTorch', 'TensorFlow', 'Jupyter', 'SSH', 'VS Code Server', 'CUDA'],
         defaultPorts: ['8888:8888', '6006:6006'],
-        icon: '⚡'
+        icon: '⚡',
+        level: 'intermediate',
+        webUrls: [
+            { name: 'Jupyter Lab', port: 8888, path: '/lab' },
+            { name: 'TensorBoard', port: 6006 }
+        ]
     },
 
     // Custom
@@ -227,7 +314,8 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
         description: 'Enter your own Docker image',
         category: 'custom',
         features: [],
-        icon: '🔧'
+        icon: '🔧',
+        level: 'advanced'
     }
 ];
 
@@ -250,6 +338,7 @@ export function getTemplateById(id: string): StudioTemplate | undefined {
  */
 export function getCategories(): Array<{ id: string; name: string; icon: string }> {
     return [
+        { id: 'quickstart', name: '⭐ Quick Start (Recommended)', icon: '⭐' },
         { id: 'pytorch', name: 'PyTorch', icon: '🔥' },
         { id: 'tensorflow', name: 'TensorFlow', icon: '🧠' },
         { id: 'jupyter', name: 'Jupyter / Data Science', icon: '📊' },
@@ -257,4 +346,19 @@ export function getCategories(): Array<{ id: string; name: string; icon: string 
         { id: 'general', name: 'General Purpose', icon: '🐍' },
         { id: 'custom', name: 'Custom Image', icon: '🔧' }
     ];
+}
+
+/**
+ * Get recommended templates for beginners
+ */
+export function getRecommendedTemplates(): StudioTemplate[] {
+    return STUDIO_TEMPLATES.filter(t => t.recommended);
+}
+
+/**
+ * Get web URLs for a template
+ */
+export function getTemplateWebUrls(templateId: string): { name: string; port: number; path?: string }[] {
+    const template = getTemplateById(templateId);
+    return template?.webUrls || [];
 }

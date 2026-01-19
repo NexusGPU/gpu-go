@@ -6,14 +6,17 @@ import (
 	"os"
 	"time"
 
+	"github.com/NexusGPU/gpu-go/cmd/ggo/auth"
 	"github.com/NexusGPU/gpu-go/internal/api"
+	"github.com/NexusGPU/gpu-go/internal/tui"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 )
 
 var (
-	serverURL string
-	userToken string
+	serverURL    string
+	userToken    string
+	outputFormat string
 )
 
 // NewShareCmd creates the share command
@@ -24,8 +27,9 @@ func NewShareCmd() *cobra.Command {
 		Long:  `The share command manages share links that allow others to connect to your GPU workers.`,
 	}
 
-	cmd.PersistentFlags().StringVar(&serverURL, "server", "https://api.gpu.tf", "Server URL")
+	cmd.PersistentFlags().StringVar(&serverURL, "server", api.GetDefaultBaseURL(), "Server URL (or set GPU_GO_ENDPOINT env var)")
 	cmd.PersistentFlags().StringVar(&userToken, "token", "", "User authentication token")
+	cmd.PersistentFlags().StringVarP(&outputFormat, "output", "o", "table", "Output format (table, json)")
 
 	cmd.AddCommand(newShareCreateCmd())
 	cmd.AddCommand(newShareListCmd())
@@ -38,12 +42,25 @@ func NewShareCmd() *cobra.Command {
 func getClient() *api.Client {
 	token := userToken
 	if token == "" {
+		token = os.Getenv("GPU_GO_TOKEN")
+	}
+	if token == "" {
 		token = os.Getenv("GPU_GO_USER_TOKEN")
+	}
+	// Fall back to token from ~/.gpugo/token.json
+	if token == "" {
+		if savedToken, err := auth.GetToken(); err == nil && savedToken != "" {
+			token = savedToken
+		}
 	}
 	return api.NewClient(
 		api.WithBaseURL(serverURL),
 		api.WithUserToken(token),
 	)
+}
+
+func getOutput() *tui.Output {
+	return tui.NewOutputWithFormat(tui.ParseOutputFormat(outputFormat))
 }
 
 func newShareCreateCmd() *cobra.Command {
@@ -60,6 +77,7 @@ func newShareCreateCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := getClient()
 			ctx := context.Background()
+			out := getOutput()
 
 			// If worker name provided as arg, use it
 			if len(args) > 0 && workerID == "" {
@@ -114,22 +132,37 @@ func newShareCreateCmd() *cobra.Command {
 				return err
 			}
 
-			fmt.Println("\n🔗 Share link created successfully!")
+			if out.IsJSON() {
+				return out.PrintJSON(resp)
+			}
+
+			// Styled output
+			styles := tui.DefaultStyles()
+
 			fmt.Println()
-			fmt.Printf("  Short Link:     %s\n", resp.ShortLink)
-			fmt.Printf("  Short Code:     %s\n", resp.ShortCode)
-			fmt.Printf("  Worker ID:      %s\n", resp.WorkerID)
-			fmt.Printf("  Connection URL: %s\n", resp.ConnectionURL)
+			fmt.Println(tui.SuccessMessage("Share link created successfully!"))
+			fmt.Println()
+
+			status := tui.NewStatusTable().
+				Add("Short Code", styles.Bold.Render(resp.ShortCode)).
+				Add("Short Link", tui.URL(resp.ShortLink)).
+				Add("Worker ID", resp.WorkerID).
+				Add("Connection URL", resp.ConnectionURL)
 
 			if resp.ExpiresAt != nil {
-				fmt.Printf("  Expires At:     %s\n", resp.ExpiresAt.Format("2006-01-02 15:04:05"))
+				status.Add("Expires At", resp.ExpiresAt.Format("2006-01-02 15:04:05"))
 			}
 			if resp.MaxUses != nil {
-				fmt.Printf("  Max Uses:       %d\n", *resp.MaxUses)
+				status.Add("Max Uses", fmt.Sprintf("%d", *resp.MaxUses))
 			}
+
+			fmt.Println(status.String())
+
 			fmt.Println()
-			fmt.Println("Share this link with others to give them access to your GPU worker:")
-			fmt.Printf("\n  ggo use %s\n\n", resp.ShortCode)
+			fmt.Println(styles.Subtitle.Render("Share this with others:"))
+			fmt.Println()
+			fmt.Println("  " + tui.Code(fmt.Sprintf("ggo use %s", resp.ShortCode)))
+			fmt.Println()
 
 			return nil
 		},
@@ -151,6 +184,7 @@ func newShareListCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := getClient()
 			ctx := context.Background()
+			out := getOutput()
 
 			resp, err := client.ListShares(ctx)
 			if err != nil {
@@ -159,24 +193,47 @@ func newShareListCmd() *cobra.Command {
 			}
 
 			if len(resp.Shares) == 0 {
-				log.Info().Msg("No share links found")
+				if out.IsJSON() {
+					return out.PrintJSON(tui.NewListResult([]api.ShareInfo{}))
+				}
+				out.Info("No share links found")
 				return nil
 			}
 
-			fmt.Printf("%-15s %-25s %-10s %-10s %-20s\n", "SHORT CODE", "SHORT LINK", "USED", "MAX", "EXPIRES")
-			fmt.Println("--------------------------------------------------------------------------------")
+			if out.IsJSON() {
+				return out.PrintJSON(tui.NewListResult(resp.Shares))
+			}
+
+			// Table output
+			styles := tui.DefaultStyles()
+			var rows [][]string
 			for _, s := range resp.Shares {
-				maxStr := "∞"
+				maxStr := styles.Muted.Render("∞")
 				if s.MaxUses != nil {
 					maxStr = fmt.Sprintf("%d", *s.MaxUses)
 				}
-				expiresStr := "never"
+				expiresStr := styles.Muted.Render("never")
 				if s.ExpiresAt != nil {
-					expiresStr = s.ExpiresAt.Format("2006-01-02")
+					if s.ExpiresAt.Before(time.Now()) {
+						expiresStr = styles.Error.Render("expired")
+					} else {
+						expiresStr = s.ExpiresAt.Format("2006-01-02")
+					}
 				}
-				fmt.Printf("%-15s %-25s %-10d %-10s %-20s\n", s.ShortCode, s.ShortLink, s.UsedCount, maxStr, expiresStr)
+				rows = append(rows, []string{
+					styles.Bold.Render(s.ShortCode),
+					tui.URL(s.ShortLink),
+					fmt.Sprintf("%d", s.UsedCount),
+					maxStr,
+					expiresStr,
+				})
 			}
 
+			table := tui.NewTable().
+				Headers("SHORT CODE", "SHORT LINK", "USED", "MAX", "EXPIRES").
+				Rows(rows)
+
+			fmt.Println(table.String())
 			return nil
 		},
 	}
@@ -194,6 +251,7 @@ func newShareGetCmd() *cobra.Command {
 			shortCode := args[0]
 			client := getClient()
 			ctx := context.Background()
+			out := getOutput()
 
 			resp, err := client.GetSharePublic(ctx, shortCode)
 			if err != nil {
@@ -201,10 +259,23 @@ func newShareGetCmd() *cobra.Command {
 				return err
 			}
 
-			fmt.Printf("Worker ID:       %s\n", resp.WorkerID)
-			fmt.Printf("Hardware Vendor: %s\n", resp.HardwareVendor)
-			fmt.Printf("Connection URL:  %s\n", resp.ConnectionURL)
+			if out.IsJSON() {
+				return out.PrintJSON(tui.NewDetailResult(resp))
+			}
 
+			// Styled output
+			styles := tui.DefaultStyles()
+
+			fmt.Println()
+			fmt.Println(styles.Title.Render("Share Details"))
+			fmt.Println()
+
+			status := tui.NewStatusTable().
+				Add("Worker ID", resp.WorkerID).
+				Add("Hardware Vendor", resp.HardwareVendor).
+				Add("Connection URL", tui.URL(resp.ConnectionURL))
+
+			fmt.Println(status.String())
 			return nil
 		},
 	}
@@ -224,13 +295,17 @@ func newShareDeleteCmd() *cobra.Command {
 			shareID := args[0]
 			client := getClient()
 			ctx := context.Background()
+			out := getOutput()
 
-			if !force {
-				fmt.Printf("Are you sure you want to delete share %s? [y/N]: ", shareID)
+			if !force && !out.IsJSON() {
+				styles := tui.DefaultStyles()
+				fmt.Printf("%s Are you sure you want to delete share %s? [y/N]: ",
+					styles.Warning.Render("!"),
+					styles.Bold.Render(shareID))
 				var confirm string
 				fmt.Scanln(&confirm)
 				if confirm != "y" && confirm != "Y" {
-					log.Info().Msg("Cancelled")
+					out.Info("Cancelled")
 					return nil
 				}
 			}
@@ -240,7 +315,12 @@ func newShareDeleteCmd() *cobra.Command {
 				return err
 			}
 
-			log.Info().Str("share_id", shareID).Msg("Share deleted successfully")
+			if out.IsJSON() {
+				return out.PrintJSON(tui.NewActionResult(true, "Share deleted successfully", shareID))
+			}
+
+			fmt.Println()
+			fmt.Println(tui.SuccessMessage(fmt.Sprintf("Share %s deleted successfully!", shareID)))
 			return nil
 		},
 	}

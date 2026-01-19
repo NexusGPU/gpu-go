@@ -159,6 +159,24 @@
         "category": "GPU Go"
       },
       {
+        "command": "gpugo.openJupyter",
+        "title": "Open Jupyter Lab",
+        "icon": "$(notebook)",
+        "category": "GPU Go"
+      },
+      {
+        "command": "gpugo.openTensorBoard",
+        "title": "Open TensorBoard",
+        "icon": "$(graph)",
+        "category": "GPU Go"
+      },
+      {
+        "command": "gpugo.openWebUI",
+        "title": "Open Web Interface",
+        "icon": "$(globe)",
+        "category": "GPU Go"
+      },
+      {
         "command": "gpugo.openWorkerDetails",
         "title": "Open Worker Details",
         "category": "GPU Go"
@@ -244,6 +262,16 @@
           "command": "gpugo.showStudioLogs",
           "when": "view == gpugo.studio && viewItem =~ /^studio-/",
           "group": "2_logs"
+        },
+        {
+          "command": "gpugo.openJupyter",
+          "when": "view == gpugo.studio && viewItem == studio-running",
+          "group": "3_webui"
+        },
+        {
+          "command": "gpugo.openTensorBoard",
+          "when": "view == gpugo.studio && viewItem == studio-running",
+          "group": "3_webui"
         }
       ]
     },

@@ -9,6 +9,13 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// Test constants for platform strings
+const (
+	testOSWindows = "windows"
+	testOSDarwin  = "darwin"
+	testOSLinux   = "linux"
+)
+
 func TestDefaultPaths(t *testing.T) {
 	p := DefaultPaths()
 
@@ -85,15 +92,15 @@ func TestWithStateDir(t *testing.T) {
 
 func TestPlatformDetection(t *testing.T) {
 	switch runtime.GOOS {
-	case "windows":
+	case testOSWindows:
 		assert.True(t, IsWindows())
 		assert.False(t, IsDarwin())
 		assert.False(t, IsLinux())
-	case "darwin":
+	case testOSDarwin:
 		assert.False(t, IsWindows())
 		assert.True(t, IsDarwin())
 		assert.False(t, IsLinux())
-	case "linux":
+	case testOSLinux:
 		assert.False(t, IsWindows())
 		assert.False(t, IsDarwin())
 		assert.True(t, IsLinux())

@@ -4,16 +4,20 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
+	"github.com/NexusGPU/gpu-go/cmd/ggo/auth"
 	"github.com/NexusGPU/gpu-go/internal/api"
 	"github.com/NexusGPU/gpu-go/internal/config"
+	"github.com/NexusGPU/gpu-go/internal/tui"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 )
 
 var (
-	serverURL string
-	userToken string
+	serverURL    string
+	userToken    string
+	outputFormat string
 )
 
 // NewWorkerCmd creates the worker command
@@ -24,8 +28,9 @@ func NewWorkerCmd() *cobra.Command {
 		Long:  `The worker command manages GPU workers on remote servers.`,
 	}
 
-	cmd.PersistentFlags().StringVar(&serverURL, "server", "https://api.gpu.tf", "Server URL")
+	cmd.PersistentFlags().StringVar(&serverURL, "server", api.GetDefaultBaseURL(), "Server URL (or set GPU_GO_ENDPOINT env var)")
 	cmd.PersistentFlags().StringVar(&userToken, "token", "", "User authentication token")
+	cmd.PersistentFlags().StringVarP(&outputFormat, "output", "o", "table", "Output format (table, json)")
 
 	cmd.AddCommand(newWorkerListCmd())
 	cmd.AddCommand(newWorkerCreateCmd())
@@ -39,12 +44,25 @@ func NewWorkerCmd() *cobra.Command {
 func getClient() *api.Client {
 	token := userToken
 	if token == "" {
+		token = os.Getenv("GPU_GO_TOKEN")
+	}
+	if token == "" {
 		token = os.Getenv("GPU_GO_USER_TOKEN")
+	}
+	// Fall back to token from ~/.gpugo/token.json
+	if token == "" {
+		if savedToken, err := auth.GetToken(); err == nil && savedToken != "" {
+			token = savedToken
+		}
 	}
 	return api.NewClient(
 		api.WithBaseURL(serverURL),
 		api.WithUserToken(token),
 	)
+}
+
+func getOutput() *tui.Output {
+	return tui.NewOutputWithFormat(tui.ParseOutputFormat(outputFormat))
 }
 
 func newWorkerListCmd() *cobra.Command {
@@ -58,6 +76,7 @@ func newWorkerListCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := getClient()
 			ctx := context.Background()
+			out := getOutput()
 
 			resp, err := client.ListWorkers(ctx, agentID, hostname)
 			if err != nil {
@@ -66,20 +85,42 @@ func newWorkerListCmd() *cobra.Command {
 			}
 
 			if len(resp.Workers) == 0 {
-				log.Info().Msg("No workers found")
+				if out.IsJSON() {
+					return out.PrintJSON(tui.NewListResult([]api.WorkerInfo{}))
+				}
+				out.Info("No workers found")
 				return nil
 			}
 
-			fmt.Printf("%-20s %-20s %-15s %-10s %-10s\n", "WORKER ID", "NAME", "STATUS", "PORT", "ENABLED")
-			fmt.Println("--------------------------------------------------------------------------------")
-			for _, w := range resp.Workers {
-				enabled := "no"
-				if w.Enabled {
-					enabled = "yes"
-				}
-				fmt.Printf("%-20s %-20s %-15s %-10d %-10s\n", w.WorkerID, w.Name, w.Status, w.ListenPort, enabled)
+			// JSON output
+			if out.IsJSON() {
+				return out.PrintJSON(tui.NewListResult(resp.Workers))
 			}
 
+			// Table output
+			styles := tui.DefaultStyles()
+			var rows [][]string
+			for _, w := range resp.Workers {
+				statusIcon := tui.StatusIcon(w.Status)
+				statusStyled := styles.StatusStyle(w.Status).Render(statusIcon + " " + w.Status)
+
+				enabledIcon := tui.StatusIcon(boolToYesNo(w.Enabled))
+				enabledStyled := styles.StatusStyle(boolToYesNo(w.Enabled)).Render(enabledIcon)
+
+				rows = append(rows, []string{
+					w.WorkerID,
+					w.Name,
+					statusStyled,
+					fmt.Sprintf("%d", w.ListenPort),
+					enabledStyled,
+				})
+			}
+
+			table := tui.NewTable().
+				Headers("WORKER ID", "NAME", "STATUS", "PORT", "ENABLED").
+				Rows(rows)
+
+			fmt.Println(table.String())
 			return nil
 		},
 	}
@@ -104,6 +145,7 @@ func newWorkerCreateCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := getClient()
 			ctx := context.Background()
+			out := getOutput()
 
 			req := &api.WorkerCreateRequest{
 				AgentID:    agentID,
@@ -119,12 +161,21 @@ func newWorkerCreateCmd() *cobra.Command {
 				return err
 			}
 
-			log.Info().
-				Str("worker_id", resp.WorkerID).
-				Str("name", resp.Name).
-				Str("status", resp.Status).
-				Msg("Worker created successfully")
+			if out.IsJSON() {
+				return out.PrintJSON(tui.NewActionResult(true, "Worker created successfully", resp.WorkerID))
+			}
 
+			// Styled output
+			fmt.Println()
+			fmt.Println(tui.SuccessMessage("Worker created successfully!"))
+			fmt.Println()
+
+			status := tui.NewStatusTable().
+				Add("Worker ID", resp.WorkerID).
+				Add("Name", resp.Name).
+				AddWithStatus("Status", resp.Status, resp.Status)
+
+			fmt.Println(status.String())
 			return nil
 		},
 	}
@@ -152,6 +203,7 @@ func newWorkerGetCmd() *cobra.Command {
 			workerID := args[0]
 			client := getClient()
 			ctx := context.Background()
+			out := getOutput()
 
 			resp, err := client.GetWorker(ctx, workerID)
 			if err != nil {
@@ -159,19 +211,46 @@ func newWorkerGetCmd() *cobra.Command {
 				return err
 			}
 
-			fmt.Printf("Worker ID:    %s\n", resp.WorkerID)
-			fmt.Printf("Name:         %s\n", resp.Name)
-			fmt.Printf("Agent ID:     %s\n", resp.AgentID)
-			fmt.Printf("Status:       %s\n", resp.Status)
-			fmt.Printf("Listen Port:  %d\n", resp.ListenPort)
-			fmt.Printf("Enabled:      %v\n", resp.Enabled)
-			fmt.Printf("GPU IDs:      %v\n", resp.GPUIDs)
+			if out.IsJSON() {
+				return out.PrintJSON(tui.NewDetailResult(resp))
+			}
+
+			// Styled output
+			styles := tui.DefaultStyles()
+
+			fmt.Println()
+			fmt.Println(styles.Title.Render("Worker Details"))
+			fmt.Println()
+
+			status := tui.NewStatusTable().
+				Add("Worker ID", resp.WorkerID).
+				Add("Name", resp.Name).
+				Add("Agent ID", resp.AgentID).
+				AddWithStatus("Status", resp.Status, resp.Status).
+				Add("Listen Port", fmt.Sprintf("%d", resp.ListenPort)).
+				AddWithStatus("Enabled", boolToYesNo(resp.Enabled), boolToYesNo(resp.Enabled)).
+				Add("GPU IDs", strings.Join(resp.GPUIDs, ", "))
+
+			fmt.Println(status.String())
 
 			if len(resp.Connections) > 0 {
-				fmt.Printf("\nActive Connections:\n")
+				fmt.Println()
+				fmt.Println(styles.Subtitle.Render("Active Connections"))
+				fmt.Println()
+
+				var rows [][]string
 				for _, conn := range resp.Connections {
-					fmt.Printf("  - %s (connected at %s)\n", conn.ClientIP, conn.ConnectedAt.Format("2006-01-02 15:04:05"))
+					rows = append(rows, []string{
+						conn.ClientIP,
+						conn.ConnectedAt.Format("2006-01-02 15:04:05"),
+					})
 				}
+
+				connTable := tui.NewTable().
+					Headers("CLIENT IP", "CONNECTED AT").
+					Rows(rows)
+
+				fmt.Println(connTable.String())
 			}
 
 			return nil
@@ -197,6 +276,7 @@ func newWorkerUpdateCmd() *cobra.Command {
 			workerID := args[0]
 			client := getClient()
 			ctx := context.Background()
+			out := getOutput()
 
 			req := &api.WorkerUpdateRequest{}
 
@@ -223,11 +303,19 @@ func newWorkerUpdateCmd() *cobra.Command {
 				return err
 			}
 
-			log.Info().
-				Str("worker_id", resp.WorkerID).
-				Str("status", resp.Status).
-				Msg("Worker updated successfully")
+			if out.IsJSON() {
+				return out.PrintJSON(tui.NewActionResult(true, "Worker updated successfully", resp.WorkerID))
+			}
 
+			fmt.Println()
+			fmt.Println(tui.SuccessMessage("Worker updated successfully!"))
+			fmt.Println()
+
+			status := tui.NewStatusTable().
+				Add("Worker ID", resp.WorkerID).
+				AddWithStatus("Status", resp.Status, resp.Status)
+
+			fmt.Println(status.String())
 			return nil
 		},
 	}
@@ -253,13 +341,17 @@ func newWorkerDeleteCmd() *cobra.Command {
 			workerID := args[0]
 			client := getClient()
 			ctx := context.Background()
+			out := getOutput()
 
-			if !force {
-				fmt.Printf("Are you sure you want to delete worker %s? [y/N]: ", workerID)
+			if !force && !out.IsJSON() {
+				styles := tui.DefaultStyles()
+				fmt.Printf("%s Are you sure you want to delete worker %s? [y/N]: ",
+					styles.Warning.Render("!"),
+					styles.Bold.Render(workerID))
 				var confirm string
 				fmt.Scanln(&confirm)
 				if confirm != "y" && confirm != "Y" {
-					log.Info().Msg("Cancelled")
+					out.Info("Cancelled")
 					return nil
 				}
 			}
@@ -269,7 +361,12 @@ func newWorkerDeleteCmd() *cobra.Command {
 				return err
 			}
 
-			log.Info().Str("worker_id", workerID).Msg("Worker deleted successfully")
+			if out.IsJSON() {
+				return out.PrintJSON(tui.NewActionResult(true, "Worker deleted successfully", workerID))
+			}
+
+			fmt.Println()
+			fmt.Println(tui.SuccessMessage(fmt.Sprintf("Worker %s deleted successfully!", workerID)))
 			return nil
 		},
 	}
@@ -283,4 +380,11 @@ func newWorkerDeleteCmd() *cobra.Command {
 func LoadLocalWorkers(configDir string) ([]config.WorkerConfig, error) {
 	configMgr := config.NewManager(configDir, "")
 	return configMgr.LoadWorkers()
+}
+
+func boolToYesNo(b bool) string {
+	if b {
+		return "yes"
+	}
+	return "no"
 }
