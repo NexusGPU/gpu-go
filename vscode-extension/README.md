@@ -126,6 +126,6 @@ Use the **"Create Studio"** button in the extension to create a new development 
 
 ## 📄 License
 
-Proprietary - Copyright © 2026 Tensor Fusion, Inc. All rights reserved.
+Proprietary - Copyright © 2026 NexusGPU PTE. LTD. All rights reserved.
 
 See [LICENSE](LICENSE) for details.

@@ -2,7 +2,7 @@
   "name": "gpu-go",
   "displayName": "GPU Go",
   "description": "Use GPU Like NFS - Manage AI studio environments with remote GPU access. Create, connect, and manage GPU-powered development environments.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "nexusgpu",
   "license": "SEE LICENSE IN LICENSE",
   "icon": "images/icon.png",

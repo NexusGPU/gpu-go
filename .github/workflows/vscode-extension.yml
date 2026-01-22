@@ -126,6 +126,8 @@ jobs:
     name: Publish Extension
     needs: [build, test]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     if: |
       (github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'chore(release): vscode-extension')) ||
       (github.event_name == 'workflow_dispatch' && github.event.inputs.publish == 'true')
@@ -179,7 +181,7 @@ jobs:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: vscode-extension-v${{ steps.version.outputs.version }}
           name: VS Code Extension v${{ steps.version.outputs.version }}
@@ -196,8 +198,6 @@ jobs:
             ```
           files: |
             vscode-extension/*.vsix
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # Pre-release publishing for development branches
   publish-prerelease:
