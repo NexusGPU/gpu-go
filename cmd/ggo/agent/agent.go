@@ -16,11 +16,14 @@ import (
 )
 
 var (
-	configDir    string
-	stateDir     string
-	serverURL    string
-	outputFormat string
-	paths        = platform.DefaultPaths()
+	configDir      string
+	stateDir       string
+	serverURL      string
+	outputFormat   string
+	acceleratorLib string
+	workerBinary   string
+	singleNode     bool
+	paths          = platform.DefaultPaths()
 )
 
 // NewAgentCmd creates the agent command
@@ -35,6 +38,9 @@ func NewAgentCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVar(&stateDir, "state-dir", paths.StateDir(), "State directory for tensor-fusion")
 	cmd.PersistentFlags().StringVar(&serverURL, "server", api.GetDefaultBaseURL(), "Server URL (or set GPU_GO_ENDPOINT env var)")
 	cmd.PersistentFlags().StringVarP(&outputFormat, "output", "o", "table", "Output format (table, json)")
+	cmd.PersistentFlags().StringVar(&acceleratorLib, "accelerator-lib", "", "Path to accelerator library (auto-detected if not specified)")
+	cmd.PersistentFlags().StringVar(&workerBinary, "worker-binary", "tensor-fusion-worker", "Path to worker binary")
+	cmd.PersistentFlags().BoolVar(&singleNode, "single-node", false, "Enable single-node mode with local worker management")
 
 	cmd.AddCommand(newRegisterCmd())
 	cmd.AddCommand(newStartCmd())
@@ -138,7 +144,8 @@ func newStartCmd() *cobra.Command {
 				api.WithAgentSecret(cfg.AgentSecret),
 			)
 
-			agentInstance := agent.NewAgent(client, configMgr)
+			// Create agent with single-node options
+			agentInstance := agent.NewAgentWithOptions(client, configMgr, singleNode, workerBinary)
 			if err := agentInstance.Start(); err != nil {
 				// Runtime error - don't show help
 				cmd.SilenceUsage = true
@@ -148,9 +155,14 @@ func newStartCmd() *cobra.Command {
 
 			if !out.IsJSON() {
 				styles := tui.DefaultStyles()
-				fmt.Printf("%s Agent started (ID: %s)\n",
+				modeStr := ""
+				if singleNode {
+					modeStr = " [single-node]"
+				}
+				fmt.Printf("%s Agent started (ID: %s)%s\n",
 					styles.Success.Render("●"),
-					styles.Bold.Render(cfg.AgentID))
+					styles.Bold.Render(cfg.AgentID),
+					modeStr)
 				fmt.Println(tui.Muted("Press Ctrl+C to stop..."))
 			}
 
@@ -287,23 +299,68 @@ func newStatusCmd() *cobra.Command {
 	return cmd
 }
 
-// discoverGPUs discovers GPUs on the system (placeholder implementation)
+// discoverGPUs discovers GPUs on the system using the Hypervisor's AcceleratorInterface
 func discoverGPUs() []api.GPUInfo {
-	// In real implementation, use NVML or similar to discover GPUs
-	// For now, return empty list or mock data based on environment
-	if os.Getenv("GPU_GO_MOCK_GPUS") != "" {
-		return []api.GPUInfo{
-			{
-				GPUID:         "GPU-0",
-				Vendor:        "nvidia",
-				Model:         "RTX 4090",
-				VRAMMb:        24576,
-				DriverVersion: "535.104.05",
-				CUDAVersion:   "12.2",
-			},
+	// Check for mock mode first (for testing without real GPUs)
+	mockEnv := os.Getenv("GPU_GO_MOCK_GPUS")
+	if mockEnv != "" {
+		return getMockGPUs(mockEnv)
+	}
+
+	// Try to use the accelerator library for real GPU discovery
+	libPath := acceleratorLib
+	if libPath == "" {
+		libPath = os.Getenv("TENSOR_FUSION_ACCELERATOR_LIB")
+	}
+
+	// If no library specified and no path found, use mock GPUs or return empty
+	if libPath == "" {
+		libPath = agent.GetExampleLibraryPath()
+	}
+
+	if libPath == "" {
+		log.Debug().Msg("no accelerator library found, use --accelerator-lib or set GPU_GO_MOCK_GPUS env var")
+		return nil
+	}
+
+	// Try to initialize device discovery
+	discovery, err := agent.NewDeviceDiscovery(libPath)
+	if err != nil {
+		log.Debug().Err(err).Str("lib_path", libPath).Msg("failed to initialize device discovery")
+		return nil
+	}
+	defer discovery.Close()
+
+	gpus, err := discovery.DiscoverGPUs()
+	if err != nil {
+		log.Error().Err(err).Msg("failed to discover GPUs")
+		return nil
+	}
+
+	return gpus
+}
+
+// getMockGPUs returns mock GPU information based on the mock env value
+// Value can be a number (e.g., "2" for 2 GPUs) or "1" for a single default GPU
+func getMockGPUs(mockEnv string) []api.GPUInfo {
+	count := 1
+	var n int
+	if _, err := fmt.Sscanf(mockEnv, "%d", &n); err == nil && n > 0 {
+		count = n
+	}
+
+	gpus := make([]api.GPUInfo, count)
+	for i := 0; i < count; i++ {
+		gpus[i] = api.GPUInfo{
+			GPUID:         fmt.Sprintf("GPU-%d", i),
+			Vendor:        "nvidia",
+			Model:         "RTX 4090",
+			VRAMMb:        24576,
+			DriverVersion: "535.104.05",
+			CUDAVersion:   "12.2",
 		}
 	}
-	return nil
+	return gpus
 }
 
 func boolToYesNo(b bool) string {

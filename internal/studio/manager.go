@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/NexusGPU/gpu-go/internal/errors"
 	"github.com/NexusGPU/gpu-go/internal/platform"
 )
 
@@ -47,7 +48,7 @@ func (m *Manager) GetBackend(mode Mode) (Backend, error) {
 
 	backend, ok := m.backends[mode]
 	if !ok {
-		return nil, fmt.Errorf("backend not registered for mode: %s", mode)
+		return nil, errors.NotFoundf("backend not registered for mode: %s", mode)
 	}
 	return backend, nil
 }
@@ -77,7 +78,7 @@ func (m *Manager) detectBestBackend() (Backend, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("no available backend found for platform: %s", runtime.GOOS)
+	return nil, errors.Unavailable("no backend available for platform: " + runtime.GOOS)
 }
 
 // ListAvailableBackends returns all available backends
@@ -130,7 +131,7 @@ func (m *Manager) Get(ctx context.Context, idOrName string) (*Environment, error
 		}
 	}
 
-	return nil, fmt.Errorf("environment not found: %s", idOrName)
+	return nil, errors.NotFound("environment", idOrName)
 }
 
 // List lists all environments across all backends
@@ -206,7 +207,7 @@ func (m *Manager) Remove(ctx context.Context, idOrName string) error {
 // AddSSHConfig adds an SSH config entry for an environment
 func (m *Manager) AddSSHConfig(env *Environment) error {
 	if env.SSHHost == "" || env.SSHPort == 0 {
-		return fmt.Errorf("environment does not have SSH configured")
+		return errors.BadRequest("environment does not have SSH configured")
 	}
 
 	sshConfigPath := m.getSSHConfigPath()
@@ -240,12 +241,12 @@ Host %s
 
 	// Ensure directory exists
 	if err := os.MkdirAll(filepath.Dir(sshConfigPath), 0700); err != nil {
-		return fmt.Errorf("failed to create SSH config directory: %w", err)
+		return errors.Wrap(err, "failed to create SSH config directory")
 	}
 
 	// Write config
 	if err := os.WriteFile(sshConfigPath, []byte(newConfig), 0600); err != nil {
-		return fmt.Errorf("failed to write SSH config: %w", err)
+		return errors.Wrap(err, "failed to write SSH config")
 	}
 
 	return nil

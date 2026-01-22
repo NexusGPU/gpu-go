@@ -134,17 +134,42 @@ export class CreateStudioPanel {
         const webview = this._panel.webview;
         const nonce = getNonce();
 
-        const backendOptions = backends.length > 0 
-            ? backends.map(b => `<vscode-option value="${b}">${b}</vscode-option>`).join('')
-            : '<vscode-option value="auto">auto (detect available)</vscode-option>';
+        // Backend options - filter out duplicates and add display-friendly labels
+        const backendDisplayNames: Record<string, string> = {
+            'auto': 'Auto-detect',
+            'docker': 'Docker',
+            'colima': 'Colima',
+            'wsl': 'WSL (Windows)',
+            'apple': 'Apple Container (macOS)',
+            'podman': 'Podman',
+            'lima': 'Lima'
+        };
+        
+        // Ensure "auto" is always first if available, and no duplicates
+        const uniqueBackends = backends.length > 0 
+            ? [...new Set(backends)]
+            : ['auto'];
+        
+        // Sort: auto first, then alphabetically
+        uniqueBackends.sort((a, b) => {
+            if (a === 'auto') return -1;
+            if (b === 'auto') return 1;
+            return a.localeCompare(b);
+        });
+        
+        const backendOptions = uniqueBackends
+            .map(b => `<vscode-option value="${b}">${backendDisplayNames[b] || b}</vscode-option>`)
+            .join('');
 
-        // Generate template options grouped by category
+        // Generate template options grouped by category with cleaner display
         const categories = getCategories();
         const templateOptionsHtml = categories.map(category => {
             const templates = STUDIO_TEMPLATES.filter(t => t.category === category.id);
-            const options = templates.map(t => 
-                `<vscode-option value="${t.id}">${t.icon} ${t.name} - ${t.description}</vscode-option>`
-            ).join('');
+            const options = templates.map(t => {
+                // Shorter option text - just icon and name for dropdown
+                const levelBadge = t.level === 'beginner' ? '⭐' : t.level === 'advanced' ? '🔧' : '';
+                return `<vscode-option value="${t.id}">${t.icon} ${t.name}${levelBadge ? ' ' + levelBadge : ''}</vscode-option>`;
+            }).join('');
             return options;
         }).join('');
 
@@ -173,10 +198,9 @@ export class CreateStudioPanel {
                 <vscode-form-group variant="vertical">
                     <vscode-label for="mode">Backend Mode</vscode-label>
                     <vscode-single-select id="mode" name="mode">
-                        <vscode-option value="">Auto-detect</vscode-option>
                         ${backendOptions}
                     </vscode-single-select>
-                    <vscode-form-helper>Container runtime to use (Docker, Colima, WSL, etc.)</vscode-form-helper>
+                    <vscode-form-helper>Container runtime for running the studio environment</vscode-form-helper>
                 </vscode-form-group>
 
                 <vscode-form-group variant="vertical">
@@ -193,13 +217,29 @@ export class CreateStudioPanel {
                     <vscode-form-helper>Enter your custom Docker image</vscode-form-helper>
                 </vscode-form-group>
 
-                <div id="template-info" style="margin: 10px 0; padding: 10px; background: var(--vscode-textBlockQuote-background); border-left: 3px solid var(--vscode-textLink-foreground); display: none;">
-                    <div style="font-weight: bold; margin-bottom: 5px;">
-                        <span id="info-icon"></span>
-                        <span id="info-name"></span>
+                <div id="template-info" class="template-info-box" style="margin: 16px 0; padding: 16px; background: var(--vscode-textBlockQuote-background); border-radius: 6px; border-left: 4px solid var(--vscode-textLink-foreground); display: none;">
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                        <span id="info-icon" style="font-size: 1.5em;"></span>
+                        <div>
+                            <div id="info-name" style="font-weight: 600; font-size: 1.1em;"></div>
+                            <div id="info-description" style="color: var(--vscode-descriptionForeground); font-size: 0.9em;"></div>
+                        </div>
+                        <vscode-badge id="info-level" style="margin-left: auto;"></vscode-badge>
                     </div>
-                    <div id="info-features" style="margin-bottom: 5px; color: var(--vscode-descriptionForeground);"></div>
-                    <div id="info-ports" style="font-size: 0.9em; color: var(--vscode-descriptionForeground);"></div>
+                    
+                    <div style="display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; font-size: 0.9em;">
+                        <span style="color: var(--vscode-descriptionForeground);">🐳 Image:</span>
+                        <code id="info-image" style="font-family: var(--vscode-editor-font-family); background: var(--vscode-textCodeBlock-background); padding: 2px 6px; border-radius: 4px;"></code>
+                        
+                        <span id="info-features-label" style="color: var(--vscode-descriptionForeground);">📦 Features:</span>
+                        <span id="info-features"></span>
+                        
+                        <span id="info-ports-label" style="color: var(--vscode-descriptionForeground); display: none;">🔌 Ports:</span>
+                        <span id="info-ports" style="display: none;"></span>
+                        
+                        <span id="info-urls-label" style="color: var(--vscode-descriptionForeground); display: none;">🌐 Web Access:</span>
+                        <span id="info-urls" style="display: none;"></span>
+                    </div>
                 </div>
 
                 <vscode-form-group variant="vertical">
@@ -282,16 +322,51 @@ export class CreateStudioPanel {
                         const infoBox = document.getElementById('template-info');
                         if (template.id !== 'custom') {
                             infoBox.style.display = 'block';
+                            
+                            // Basic info
                             document.getElementById('info-icon').textContent = template.icon;
                             document.getElementById('info-name').textContent = template.name;
-                            document.getElementById('info-features').textContent = 
-                                'Features: ' + template.features.join(', ');
+                            document.getElementById('info-description').textContent = template.description;
+                            document.getElementById('info-image').textContent = template.image;
                             
+                            // Level badge
+                            const levelBadge = document.getElementById('info-level');
+                            const levelLabels = {
+                                'beginner': '⭐ Beginner',
+                                'intermediate': '📚 Intermediate',
+                                'advanced': '🔧 Advanced'
+                            };
+                            levelBadge.textContent = levelLabels[template.level] || '';
+                            levelBadge.style.display = template.level ? 'inline-block' : 'none';
+                            
+                            // Features
+                            document.getElementById('info-features').textContent = template.features.join(', ') || 'N/A';
+                            
+                            // Ports
+                            const portsLabel = document.getElementById('info-ports-label');
+                            const portsEl = document.getElementById('info-ports');
                             if (template.defaultPorts && template.defaultPorts.length > 0) {
-                                document.getElementById('info-ports').textContent = 
-                                    'Default ports: ' + template.defaultPorts.join(', ');
+                                portsLabel.style.display = 'block';
+                                portsEl.style.display = 'block';
+                                portsEl.textContent = template.defaultPorts.join(', ');
                             } else {
-                                document.getElementById('info-ports').textContent = '';
+                                portsLabel.style.display = 'none';
+                                portsEl.style.display = 'none';
+                            }
+                            
+                            // Web URLs
+                            const urlsLabel = document.getElementById('info-urls-label');
+                            const urlsEl = document.getElementById('info-urls');
+                            if (template.webUrls && template.webUrls.length > 0) {
+                                urlsLabel.style.display = 'block';
+                                urlsEl.style.display = 'block';
+                                urlsEl.innerHTML = template.webUrls.map(u => 
+                                    '<span style="background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); padding: 2px 8px; border-radius: 4px; margin-right: 6px; font-size: 0.85em;">' +
+                                    u.name + ' :' + u.port + '</span>'
+                                ).join('');
+                            } else {
+                                urlsLabel.style.display = 'none';
+                                urlsEl.style.display = 'none';
                             }
 
                             // Auto-fill ports if not specified

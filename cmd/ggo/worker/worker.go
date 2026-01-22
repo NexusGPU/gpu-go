@@ -12,7 +12,6 @@ import (
 	"github.com/NexusGPU/gpu-go/internal/tui"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
-	"github.com/NexusGPU/tensor-fusion/hypervisor/"
 )
 
 var (

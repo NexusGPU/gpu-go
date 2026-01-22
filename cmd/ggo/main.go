@@ -11,8 +11,7 @@ import (
 	"github.com/NexusGPU/gpu-go/cmd/ggo/studio"
 	"github.com/NexusGPU/gpu-go/cmd/ggo/use"
 	"github.com/NexusGPU/gpu-go/cmd/ggo/worker"
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
+	"github.com/NexusGPU/gpu-go/internal/log"
 	"github.com/spf13/cobra"
 )
 
@@ -29,14 +28,9 @@ It provides commands to:
   - Manage workers on GPU servers
   - Share GPU workers with others via share links`,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
-			// Configure logging
-			zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-			if verbose {
-				zerolog.SetGlobalLevel(zerolog.DebugLevel)
-			} else {
-				zerolog.SetGlobalLevel(zerolog.InfoLevel)
-			}
-			log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+			// Configure logging using centralized log package
+			log.SetVerbose(verbose)
+			log.Default = log.New(os.Stderr)
 		},
 	}
 )
