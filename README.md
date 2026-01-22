@@ -222,8 +222,6 @@ gpu-go/
 │   ├── deps/                # Dependency management
 │   ├── platform/            # Cross-platform utilities
 │   └── studio/              # Studio backend implementations
-├── second-party/
-│   └── hypervisor/          # Tensor Fusion hypervisor (vendored)
 ├── .github/workflows/       # CI/CD
 ├── install.sh               # Unix install script
 ├── install.ps1              # Windows install script
