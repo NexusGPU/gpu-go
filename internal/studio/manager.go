@@ -40,11 +40,11 @@ func (m *Manager) RegisterBackend(backend Backend) {
 func (m *Manager) GetBackend(mode Mode) (Backend, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	if mode == ModeAuto {
 		return m.detectBestBackend()
 	}
-	
+
 	backend, ok := m.backends[mode]
 	if !ok {
 		return nil, fmt.Errorf("backend not registered for mode: %s", mode)
@@ -55,7 +55,7 @@ func (m *Manager) GetBackend(mode Mode) (Backend, error) {
 // detectBestBackend detects the best available backend for the current platform
 func (m *Manager) detectBestBackend() (Backend, error) {
 	ctx := context.Background()
-	
+
 	// Platform-specific preference order
 	var preferenceOrder []Mode
 	switch runtime.GOOS {
@@ -68,7 +68,7 @@ func (m *Manager) detectBestBackend() (Backend, error) {
 	default:
 		preferenceOrder = []Mode{ModeDocker, ModeKubernetes}
 	}
-	
+
 	for _, mode := range preferenceOrder {
 		if backend, ok := m.backends[mode]; ok {
 			if backend.IsAvailable(ctx) {
@@ -76,7 +76,7 @@ func (m *Manager) detectBestBackend() (Backend, error) {
 			}
 		}
 	}
-	
+
 	return nil, fmt.Errorf("no available backend found for platform: %s", runtime.GOOS)
 }
 
@@ -84,7 +84,7 @@ func (m *Manager) detectBestBackend() (Backend, error) {
 func (m *Manager) ListAvailableBackends(ctx context.Context) []Backend {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	var available []Backend
 	for _, backend := range m.backends {
 		if backend.IsAvailable(ctx) {
@@ -100,18 +100,18 @@ func (m *Manager) Create(ctx context.Context, opts *CreateOptions) (*Environment
 	if err != nil {
 		return nil, err
 	}
-	
+
 	env, err := backend.Create(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Save environment to local state
 	if err := m.saveEnvironment(env); err != nil {
 		// Log but don't fail
 		fmt.Fprintf(os.Stderr, "Warning: failed to save environment state: %v\n", err)
 	}
-	
+
 	return env, nil
 }
 
@@ -119,7 +119,7 @@ func (m *Manager) Create(ctx context.Context, opts *CreateOptions) (*Environment
 func (m *Manager) Get(ctx context.Context, idOrName string) (*Environment, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	for _, backend := range m.backends {
 		if !backend.IsAvailable(ctx) {
 			continue
@@ -129,7 +129,7 @@ func (m *Manager) Get(ctx context.Context, idOrName string) (*Environment, error
 			return env, nil
 		}
 	}
-	
+
 	return nil, fmt.Errorf("environment not found: %s", idOrName)
 }
 
@@ -137,7 +137,7 @@ func (m *Manager) Get(ctx context.Context, idOrName string) (*Environment, error
 func (m *Manager) List(ctx context.Context) ([]*Environment, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	var allEnvs []*Environment
 	for _, backend := range m.backends {
 		if !backend.IsAvailable(ctx) {
@@ -149,7 +149,7 @@ func (m *Manager) List(ctx context.Context) ([]*Environment, error) {
 		}
 		allEnvs = append(allEnvs, envs...)
 	}
-	
+
 	return allEnvs, nil
 }
 
@@ -159,12 +159,12 @@ func (m *Manager) Stop(ctx context.Context, idOrName string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	backend, err := m.GetBackend(env.Mode)
 	if err != nil {
 		return err
 	}
-	
+
 	return backend.Stop(ctx, env.ID)
 }
 
@@ -174,12 +174,12 @@ func (m *Manager) Start(ctx context.Context, idOrName string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	backend, err := m.GetBackend(env.Mode)
 	if err != nil {
 		return err
 	}
-	
+
 	return backend.Start(ctx, env.ID)
 }
 
@@ -189,16 +189,16 @@ func (m *Manager) Remove(ctx context.Context, idOrName string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	backend, err := m.GetBackend(env.Mode)
 	if err != nil {
 		return err
 	}
-	
+
 	if err := backend.Remove(ctx, env.ID); err != nil {
 		return err
 	}
-	
+
 	// Remove from local state
 	return m.removeEnvironment(env.ID)
 }
@@ -208,15 +208,15 @@ func (m *Manager) AddSSHConfig(env *Environment) error {
 	if env.SSHHost == "" || env.SSHPort == 0 {
 		return fmt.Errorf("environment does not have SSH configured")
 	}
-	
+
 	sshConfigPath := m.getSSHConfigPath()
-	
+
 	// Read existing config
 	existingConfig := ""
 	if data, err := os.ReadFile(sshConfigPath); err == nil {
 		existingConfig = string(data)
 	}
-	
+
 	// Generate new entry
 	hostName := fmt.Sprintf("ggo-%s", env.Name)
 	entry := fmt.Sprintf(`
@@ -228,33 +228,33 @@ Host %s
     StrictHostKeyChecking no
     UserKnownHostsFile /dev/null
 `, env.Name, hostName, env.SSHHost, env.SSHPort, env.SSHUser)
-	
+
 	// Check if entry already exists
 	if strings.Contains(existingConfig, fmt.Sprintf("Host %s", hostName)) {
 		// Update existing entry by removing old and adding new
 		existingConfig = m.removeSSHConfigEntry(existingConfig, hostName)
 	}
-	
+
 	// Append new entry
 	newConfig := existingConfig + entry
-	
+
 	// Ensure directory exists
 	if err := os.MkdirAll(filepath.Dir(sshConfigPath), 0700); err != nil {
 		return fmt.Errorf("failed to create SSH config directory: %w", err)
 	}
-	
+
 	// Write config
 	if err := os.WriteFile(sshConfigPath, []byte(newConfig), 0600); err != nil {
 		return fmt.Errorf("failed to write SSH config: %w", err)
 	}
-	
+
 	return nil
 }
 
 // RemoveSSHConfig removes an SSH config entry for an environment
 func (m *Manager) RemoveSSHConfig(envName string) error {
 	sshConfigPath := m.getSSHConfigPath()
-	
+
 	data, err := os.ReadFile(sshConfigPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -262,10 +262,10 @@ func (m *Manager) RemoveSSHConfig(envName string) error {
 		}
 		return err
 	}
-	
+
 	hostName := fmt.Sprintf("ggo-%s", envName)
 	newConfig := m.removeSSHConfigEntry(string(data), hostName)
-	
+
 	return os.WriteFile(sshConfigPath, []byte(newConfig), 0600)
 }
 
@@ -273,10 +273,10 @@ func (m *Manager) removeSSHConfigEntry(config, hostName string) string {
 	lines := strings.Split(config, "\n")
 	var result []string
 	inEntry := false
-	
+
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		
+
 		// Check if this is the start of our entry
 		if strings.HasPrefix(trimmed, "# GPU Go Studio Environment:") {
 			inEntry = true
@@ -286,17 +286,17 @@ func (m *Manager) removeSSHConfigEntry(config, hostName string) string {
 			inEntry = true
 			continue
 		}
-		
+
 		// Check if we're exiting the entry
 		if inEntry && (strings.HasPrefix(trimmed, "Host ") || strings.HasPrefix(trimmed, "# ")) {
 			inEntry = false
 		}
-		
+
 		if !inEntry {
 			result = append(result, line)
 		}
 	}
-	
+
 	return strings.Join(result, "\n")
 }
 
@@ -319,7 +319,7 @@ func (m *Manager) loadState() (map[string]*Environment, error) {
 		}
 		return nil, err
 	}
-	
+
 	var state map[string]*Environment
 	if err := json.Unmarshal(data, &state); err != nil {
 		return nil, err
@@ -332,11 +332,11 @@ func (m *Manager) saveState(state map[string]*Environment) error {
 	if err != nil {
 		return err
 	}
-	
+
 	if err := os.MkdirAll(filepath.Dir(m.getStatePath()), 0755); err != nil {
 		return err
 	}
-	
+
 	return os.WriteFile(m.getStatePath(), data, 0644)
 }
 
@@ -345,7 +345,7 @@ func (m *Manager) saveEnvironment(env *Environment) error {
 	if err != nil {
 		state = make(map[string]*Environment)
 	}
-	
+
 	state[env.ID] = env
 	return m.saveState(state)
 }
@@ -355,7 +355,7 @@ func (m *Manager) removeEnvironment(id string) error {
 	if err != nil {
 		return nil
 	}
-	
+
 	delete(state, id)
 	return m.saveState(state)
 }

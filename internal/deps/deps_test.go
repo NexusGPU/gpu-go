@@ -109,7 +109,7 @@ func TestCleanCache(t *testing.T) {
 
 func TestVGPULibraries(t *testing.T) {
 	libs := VGPULibraries()
-	
+
 	switch runtime.GOOS {
 	case testOSLinux:
 		assert.Contains(t, libs, "libcuda.so.1")

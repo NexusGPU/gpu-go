@@ -161,10 +161,10 @@ func (st *StatusTable) String() string {
 // DetailBox creates a styled box for detail views
 func DetailBox(title string, content string) string {
 	styles := DefaultStyles()
-	
+
 	titleRendered := styles.Title.Render(title)
 	box := styles.Box.Render(content)
-	
+
 	return titleRendered + "\n" + box
 }
 

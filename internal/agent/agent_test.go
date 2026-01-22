@@ -190,10 +190,10 @@ func TestAgent_PullConfig(t *testing.T) {
 	)
 
 	agent := &Agent{
-		client:   client,
-		config:   configMgr,
-		ctx:      context.Background(),
-		agentID:  "agent_test123",
+		client:  client,
+		config:  configMgr,
+		ctx:     context.Background(),
+		agentID: "agent_test123",
 	}
 
 	err = agent.pullConfig()
@@ -228,7 +228,7 @@ func TestAgent_ReportStatus(t *testing.T) {
 	defer server.Close()
 
 	configMgr := config.NewManager(configDir, stateDir)
-	
+
 	// Save GPUs
 	gpus := []config.GPUConfig{
 		{GPUID: "GPU-0", Vendor: "nvidia", Model: "RTX 4090", VRAMMb: 24576},
@@ -356,7 +356,7 @@ func TestAgent_ComputeFileHash(t *testing.T) {
 	stateDir := filepath.Join(tmpDir, "state")
 
 	configMgr := config.NewManager(configDir, stateDir)
-	
+
 	// Create directories
 	err := configMgr.EnsureDirs()
 	require.NoError(t, err)

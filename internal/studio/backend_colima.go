@@ -11,12 +11,6 @@ import (
 	"time"
 )
 
-// Platform constants for runtime.GOOS comparisons
-const (
-	osDarwin = "darwin"
-	osLinux  = "linux"
-)
-
 // ColimaBackend implements the Backend interface using Colima (macOS/Linux)
 type ColimaBackend struct {
 	dockerBackend *DockerBackend
@@ -61,7 +55,7 @@ func (b *ColimaBackend) Mode() Mode {
 }
 
 func (b *ColimaBackend) IsAvailable(ctx context.Context) bool {
-	if runtime.GOOS != osDarwin && runtime.GOOS != osLinux {
+	if runtime.GOOS != OSDarwin && runtime.GOOS != OSLinux {
 		return false
 	}
 
@@ -141,7 +135,7 @@ func (b *ColimaBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	for _, vol := range opts.Volumes {
 		mountOpt := fmt.Sprintf("%s:%s", vol.HostPath, vol.ContainerPath)
 		if vol.ReadOnly {
-			mountOpt += ":ro"
+			mountOpt += MountOptionReadOnly
 		}
 		args = append(args, "-v", mountOpt)
 	}
@@ -157,7 +151,7 @@ func (b *ColimaBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	// Add image
 	image := opts.Image
 	if image == "" {
-		image = "tensorfusion/studio-torch:latest"
+		image = DefaultImageStudioTorch
 	}
 	args = append(args, image)
 
@@ -254,7 +248,7 @@ func (b *ColimaBackend) List(ctx context.Context) ([]*Environment, error) {
 		sshPort := parseSSHPort(container.Ports)
 
 		status := StatusStopped
-		if container.State == "running" {
+		if container.State == DockerStateRunning {
 			status = StatusRunning
 		}
 
@@ -292,7 +286,7 @@ func (b *ColimaBackend) GetColimaIP(ctx context.Context) (string, error) {
 	cmd := exec.CommandContext(ctx, "colima", "status", "-p", b.profile, "--json")
 	output, err := cmd.Output()
 	if err != nil {
-		return "localhost", nil
+		return DefaultHostLocalhost, nil
 	}
 
 	var status struct {
@@ -302,14 +296,14 @@ func (b *ColimaBackend) GetColimaIP(ctx context.Context) (string, error) {
 	}
 
 	if err := json.Unmarshal(output, &status); err != nil {
-		return "localhost", nil
+		return DefaultHostLocalhost, nil
 	}
 
 	if status.Runtime.IPAddress != "" {
 		return status.Runtime.IPAddress, nil
 	}
 
-	return "localhost", nil
+	return DefaultHostLocalhost, nil
 }
 
 // GetProfile returns the Colima profile name

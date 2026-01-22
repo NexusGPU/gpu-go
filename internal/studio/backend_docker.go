@@ -64,15 +64,15 @@ func (b *DockerBackend) setDockerEnv(cmd *exec.Cmd) {
 func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Environment, error) {
 	// Generate container name
 	containerName := fmt.Sprintf("ggo-%s", opts.Name)
-	
+
 	// Build docker run command
 	args := []string{"run", "-d", "--name", containerName}
-	
+
 	// Add labels
 	args = append(args, "--label", "ggo.managed=true")
 	args = append(args, "--label", fmt.Sprintf("ggo.name=%s", opts.Name))
 	args = append(args, "--label", "ggo.mode=docker")
-	
+
 	// Add port mappings
 	sshPort := 0
 	for _, port := range opts.Ports {
@@ -82,13 +82,13 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 		}
 		args = append(args, "-p", fmt.Sprintf("%d:%d/%s", port.HostPort, port.ContainerPort, protocol))
 	}
-	
+
 	// Add default SSH port if not specified
 	if sshPort == 0 {
 		sshPort = findAvailablePort(2222)
 		args = append(args, "-p", fmt.Sprintf("%d:22/tcp", sshPort))
 	}
-	
+
 	// Setup GPU connection environment
 	if opts.GPUWorkerURL != "" {
 		// Parse worker URL to extract connection info
@@ -96,23 +96,23 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse GPU worker URL: %w", err)
 		}
-		
+
 		// Add TENSOR_FUSION_CONNECTION env var with connection details
 		args = append(args, "-e", fmt.Sprintf("TENSOR_FUSION_CONNECTION=%s", connInfo))
 		args = append(args, "-e", fmt.Sprintf("GPU_WORKER_URL=%s", opts.GPUWorkerURL))
 		args = append(args, "-e", "CUDA_VISIBLE_DEVICES=0")
-		
+
 		// Mount directory for GPU libraries
 		args = append(args, "-v", "/tmp/tensor-fusion/libs:/usr/local/tensor-fusion/libs:ro")
-		
+
 		// Set LD_LIBRARY_PATH to include GPU libraries
 		args = append(args, "-e", "LD_LIBRARY_PATH=/usr/local/tensor-fusion/libs:$LD_LIBRARY_PATH")
 	}
-	
+
 	for k, v := range opts.Envs {
 		args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
 	}
-	
+
 	// Add volume mounts
 	for _, vol := range opts.Volumes {
 		mountOpt := fmt.Sprintf("%s:%s", vol.HostPath, vol.ContainerPath)
@@ -121,7 +121,7 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 		}
 		args = append(args, "-v", mountOpt)
 	}
-	
+
 	// Add resource limits
 	if opts.Resources.CPUs > 0 {
 		args = append(args, "--cpus", fmt.Sprintf("%.2f", opts.Resources.CPUs))
@@ -129,19 +129,19 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	if opts.Resources.Memory != "" {
 		args = append(args, "--memory", opts.Resources.Memory)
 	}
-	
+
 	// Add working directory
 	if opts.WorkDir != "" {
 		args = append(args, "-w", opts.WorkDir)
 	}
-	
+
 	// Add image
 	image := opts.Image
 	if image == "" {
 		image = "tensorfusion/studio-torch:latest"
 	}
 	args = append(args, image)
-	
+
 	// Run container
 	cmd := exec.CommandContext(ctx, b.dockerCmd, args...)
 	b.setDockerEnv(cmd)
@@ -149,24 +149,24 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	if err != nil {
 		return nil, fmt.Errorf("failed to create container: %w, output: %s", err, string(output))
 	}
-	
+
 	containerID := strings.TrimSpace(string(output))
-	
+
 	// Get container info
 	env := &Environment{
-		ID:        containerID[:12],
-		Name:      opts.Name,
-		Mode:      ModeDocker,
-		Image:     image,
-		Status:    StatusRunning,
-		SSHHost:   "localhost",
-		SSHPort:   sshPort,
-		SSHUser:   "root",
+		ID:           containerID[:12],
+		Name:         opts.Name,
+		Mode:         ModeDocker,
+		Image:        image,
+		Status:       StatusRunning,
+		SSHHost:      "localhost",
+		SSHPort:      sshPort,
+		SSHUser:      "root",
 		GPUWorkerURL: opts.GPUWorkerURL,
-		CreatedAt: time.Now(),
-		Labels:    opts.Labels,
+		CreatedAt:    time.Now(),
+		Labels:       opts.Labels,
 	}
-	
+
 	return env, nil
 }
 
@@ -193,7 +193,7 @@ func (b *DockerBackend) Stop(ctx context.Context, envID string) error {
 func (b *DockerBackend) Remove(ctx context.Context, envID string) error {
 	// Stop first
 	_ = b.Stop(ctx, envID)
-	
+
 	cmd := exec.CommandContext(ctx, b.dockerCmd, "rm", "-f", envID)
 	b.setDockerEnv(cmd)
 	output, err := cmd.CombinedOutput()
@@ -211,19 +211,19 @@ func (b *DockerBackend) List(ctx context.Context) ([]*Environment, error) {
 		"--filter", "label=ggo.mode=docker",
 		"--format", "{{json .}}")
 	b.setDockerEnv(cmd)
-	
+
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list containers: %w", err)
 	}
-	
+
 	var envs []*Environment
 	for _, line := range strings.Split(string(output), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		
+
 		var container struct {
 			ID      string `json:"ID"`
 			Names   string `json:"Names"`
@@ -234,42 +234,42 @@ func (b *DockerBackend) List(ctx context.Context) ([]*Environment, error) {
 			Labels  string `json:"Labels"`
 			Created string `json:"CreatedAt"`
 		}
-		
+
 		if err := json.Unmarshal([]byte(line), &container); err != nil {
 			continue
 		}
-		
+
 		// Parse name
 		name := strings.TrimPrefix(container.Names, "ggo-")
-		
+
 		// Parse SSH port from ports
 		sshPort := parseSSHPort(container.Ports)
-		
+
 		// Parse status
 		status := StatusStopped
 		switch container.State {
-		case "running":
+		case DockerStateRunning:
 			status = StatusRunning
-		case "exited":
+		case DockerStateExited:
 			status = StatusStopped
-		case "created":
+		case DockerStateCreated:
 			status = StatusPending
 		}
-		
+
 		env := &Environment{
-			ID:        container.ID,
-			Name:      name,
-			Mode:      ModeDocker,
-			Image:     container.Image,
-			Status:    status,
-			SSHHost:   "localhost",
-			SSHPort:   sshPort,
-			SSHUser:   "root",
+			ID:      container.ID,
+			Name:    name,
+			Mode:    ModeDocker,
+			Image:   container.Image,
+			Status:  status,
+			SSHHost: "localhost",
+			SSHPort: sshPort,
+			SSHUser: "root",
 		}
-		
+
 		envs = append(envs, env)
 	}
-	
+
 	return envs, nil
 }
 
@@ -279,7 +279,7 @@ func (b *DockerBackend) Get(ctx context.Context, idOrName string) (*Environment,
 	if !strings.HasPrefix(idOrName, "ggo-") {
 		containerName = "ggo-" + idOrName
 	}
-	
+
 	cmd := exec.CommandContext(ctx, b.dockerCmd, "inspect", containerName)
 	b.setDockerEnv(cmd)
 	output, err := cmd.Output()
@@ -292,11 +292,11 @@ func (b *DockerBackend) Get(ctx context.Context, idOrName string) (*Environment,
 			return nil, fmt.Errorf("environment not found: %s", idOrName)
 		}
 	}
-	
+
 	var containers []struct {
-		ID     string `json:"Id"`
-		Name   string `json:"Name"`
-		State  struct {
+		ID    string `json:"Id"`
+		Name  string `json:"Name"`
+		State struct {
 			Status string `json:"Status"`
 		} `json:"State"`
 		Config struct {
@@ -310,23 +310,23 @@ func (b *DockerBackend) Get(ctx context.Context, idOrName string) (*Environment,
 			} `json:"Ports"`
 		} `json:"NetworkSettings"`
 	}
-	
+
 	if err := json.Unmarshal(output, &containers); err != nil {
 		return nil, fmt.Errorf("failed to parse container info: %w", err)
 	}
-	
+
 	if len(containers) == 0 {
 		return nil, fmt.Errorf("environment not found: %s", idOrName)
 	}
-	
+
 	c := containers[0]
-	
+
 	// Parse name
 	name := strings.TrimPrefix(strings.TrimPrefix(c.Name, "/"), "ggo-")
 	if labelName, ok := c.Config.Labels["ggo.name"]; ok {
 		name = labelName
 	}
-	
+
 	// Parse SSH port
 	sshPort := 22
 	if ports, ok := c.NetworkSettings.Ports["22/tcp"]; ok && len(ports) > 0 {
@@ -334,7 +334,7 @@ func (b *DockerBackend) Get(ctx context.Context, idOrName string) (*Environment,
 			sshPort = p
 		}
 	}
-	
+
 	// Parse GPU worker URL from env
 	gpuWorkerURL := ""
 	for _, env := range c.Config.Env {
@@ -343,7 +343,7 @@ func (b *DockerBackend) Get(ctx context.Context, idOrName string) (*Environment,
 			break
 		}
 	}
-	
+
 	// Parse status
 	status := StatusStopped
 	switch c.State.Status {
@@ -354,7 +354,7 @@ func (b *DockerBackend) Get(ctx context.Context, idOrName string) (*Environment,
 	case "created":
 		status = StatusPending
 	}
-	
+
 	env := &Environment{
 		ID:           c.ID[:12],
 		Name:         name,
@@ -367,7 +367,7 @@ func (b *DockerBackend) Get(ctx context.Context, idOrName string) (*Environment,
 		GPUWorkerURL: gpuWorkerURL,
 		Labels:       c.Config.Labels,
 	}
-	
+
 	return env, nil
 }
 
@@ -384,19 +384,19 @@ func (b *DockerBackend) Logs(ctx context.Context, envID string, follow bool) (<-
 		args = append(args, "-f")
 	}
 	args = append(args, envID)
-	
+
 	cmd := exec.CommandContext(ctx, b.dockerCmd, args...)
 	b.setDockerEnv(cmd)
-	
+
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, err
 	}
-	
+
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	
+
 	logCh := make(chan string, 100)
 	go func() {
 		defer close(logCh)
@@ -412,7 +412,7 @@ func (b *DockerBackend) Logs(ctx context.Context, envID string, follow bool) (<-
 		}
 		_ = cmd.Wait()
 	}()
-	
+
 	return logCh, nil
 }
 
@@ -465,7 +465,7 @@ fi
 
 echo "GPU environment configured successfully"
 `, workerURL, workerURL)
-	
+
 	// Execute setup script
 	_, err := b.Exec(ctx, envID, []string{"bash", "-c", setupScript})
 	return err

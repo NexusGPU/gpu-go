@@ -26,17 +26,17 @@ const (
 
 // Resource represents resource requests/limits
 type Resource struct {
-	Tflops   float64 `json:"tflops,omitempty"`
+	Tflops    float64 `json:"tflops,omitempty"`
 	VRAMBytes uint64  `json:"vram_bytes,omitempty"`
 }
 
 // WorkerInfo represents worker process information
 // +k8s:deepcopy-gen=true
 type WorkerInfo struct {
-	WorkerUID        string   `json:"worker_uid"`
-	Namespace        string   `json:"namespace,omitempty"`
-	WorkerName       string   `json:"worker_name,omitempty"`
-	AllocatedDevices []string `json:"allocated_devices"`
+	WorkerUID        string       `json:"worker_uid"`
+	Namespace        string       `json:"namespace,omitempty"`
+	WorkerName       string       `json:"worker_name,omitempty"`
+	AllocatedDevices []string     `json:"allocated_devices"`
 	Status           WorkerStatus `json:"status"`
 
 	QoS           QoSLevel      `json:"qos,omitempty"`

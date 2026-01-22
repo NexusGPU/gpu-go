@@ -56,7 +56,7 @@ func newRegisterCmd() *cobra.Command {
 		Long:  `Register this GPU server as an agent with the GPU Go platform.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := getOutput()
-			
+
 			if token == "" {
 				token = os.Getenv("GPU_GO_TOKEN")
 			}
@@ -103,7 +103,7 @@ func newStartCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := getOutput()
 			configMgr := config.NewManager(configDir, stateDir)
-			
+
 			// Check if agent is registered
 			if !configMgr.ConfigExists() {
 				if !out.IsJSON() {
@@ -198,23 +198,23 @@ func newStatusCmd() *cobra.Command {
 
 			// Styled output
 			styles := tui.DefaultStyles()
-			
+
 			fmt.Println()
 			fmt.Println(styles.Title.Render("Agent Status"))
 			fmt.Println()
-			
+
 			status := tui.NewStatusTable().
 				Add("Agent ID", cfg.AgentID).
 				Add("Config Version", fmt.Sprintf("%d", cfg.ConfigVersion)).
 				Add("Server URL", cfg.ServerURL)
-			
+
 			fmt.Println(status.String())
 
 			if len(gpus) > 0 {
 				fmt.Println()
 				fmt.Println(styles.Subtitle.Render(fmt.Sprintf("GPUs (%d)", len(gpus))))
 				fmt.Println()
-				
+
 				var rows [][]string
 				for _, gpu := range gpus {
 					vram := fmt.Sprintf("%.1f GB", float64(gpu.VRAMMb)/1024)
@@ -225,11 +225,11 @@ func newStatusCmd() *cobra.Command {
 						vram,
 					})
 				}
-				
+
 				table := tui.NewTable().
 					Headers("ID", "VENDOR", "MODEL", "VRAM").
 					Rows(rows)
-				
+
 				fmt.Println(table.String())
 			}
 
@@ -237,15 +237,15 @@ func newStatusCmd() *cobra.Command {
 				fmt.Println()
 				fmt.Println(styles.Subtitle.Render(fmt.Sprintf("Workers (%d)", len(workers))))
 				fmt.Println()
-				
+
 				var rows [][]string
 				for _, w := range workers {
 					statusIcon := tui.StatusIcon(w.Status)
 					statusStyled := styles.StatusStyle(w.Status).Render(statusIcon + " " + w.Status)
-					
+
 					enabledIcon := tui.StatusIcon(boolToYesNo(w.Enabled))
 					enabledStyled := styles.StatusStyle(boolToYesNo(w.Enabled)).Render(enabledIcon)
-					
+
 					rows = append(rows, []string{
 						w.WorkerID,
 						fmt.Sprintf("%d", w.ListenPort),
@@ -253,11 +253,11 @@ func newStatusCmd() *cobra.Command {
 						statusStyled,
 					})
 				}
-				
+
 				table := tui.NewTable().
 					Headers("ID", "PORT", "ENABLED", "STATUS").
 					Rows(rows)
-				
+
 				fmt.Println(table.String())
 			}
 

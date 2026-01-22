@@ -9,8 +9,8 @@ import (
 )
 
 var (
-	cdnURL  string
-	version string
+	cdnURL   string
+	version  string
 	cacheDir string
 )
 
@@ -51,30 +51,30 @@ func newDownloadCmd() *cobra.Command {
 The libraries are cached locally and used by studio environments for remote GPU access.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			downloader := studio.NewLibraryDownloader(cdnURL, version)
-			
+
 			if cacheDir != "" {
 				downloader.SetCacheDir(cacheDir)
 			}
-			
+
 			arch := studio.DetectArchitecture()
 			fmt.Printf("Detected architecture: %s\n", arch.String())
 			fmt.Printf("CDN URL: %s\n", cdnURL)
 			fmt.Printf("Version: %s\n", version)
 			fmt.Printf("Cache directory: %s\n", downloader.GetCacheDir())
 			fmt.Println()
-			
+
 			fmt.Println("Downloading libraries...")
 			paths, err := downloader.DownloadDefaultLibraries()
 			if err != nil {
 				return fmt.Errorf("failed to download libraries: %w", err)
 			}
-			
+
 			fmt.Println()
 			fmt.Println("Successfully downloaded libraries:")
 			for _, path := range paths {
 				fmt.Printf("  - %s\n", path)
 			}
-			
+
 			return nil
 		},
 	}
@@ -93,23 +93,23 @@ func newInfoCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			arch := studio.DetectArchitecture()
 			downloader := studio.NewLibraryDownloader(cdnURL, version)
-			
+
 			if cacheDir != "" {
 				downloader.SetCacheDir(cacheDir)
 			}
-			
+
 			fmt.Println("System Information:")
 			fmt.Printf("  OS:           %s\n", runtime.GOOS)
 			fmt.Printf("  Architecture: %s\n", runtime.GOARCH)
 			fmt.Printf("  Detected:     %s\n", arch.String())
 			fmt.Println()
-			
+
 			fmt.Println("Library Configuration:")
 			fmt.Printf("  CDN URL:      %s\n", cdnURL)
 			fmt.Printf("  Version:      %s\n", version)
 			fmt.Printf("  Cache Dir:    %s\n", downloader.GetCacheDir())
 			fmt.Println()
-			
+
 			fmt.Println("Default Libraries:")
 			libraries := []string{"cuda-vgpu", "cudart", "tensor-fusion-runtime"}
 			for _, lib := range libraries {
@@ -122,7 +122,7 @@ func newInfoCmd() *cobra.Command {
 				fmt.Printf("  - %s\n", lib)
 				fmt.Printf("    URL: %s\n", url)
 			}
-			
+
 			return nil
 		},
 	}
@@ -134,15 +134,15 @@ func newCleanCmd() *cobra.Command {
 		Short: "Clean library cache",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			downloader := studio.NewLibraryDownloader(cdnURL, version)
-			
+
 			if cacheDir != "" {
 				downloader.SetCacheDir(cacheDir)
 			}
-			
+
 			fmt.Printf("Cleaning cache directory: %s\n", downloader.GetCacheDir())
 			// In production, implement actual cache cleaning
 			fmt.Println("Cache cleaned successfully")
-			
+
 			return nil
 		},
 	}

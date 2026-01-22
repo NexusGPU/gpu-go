@@ -303,9 +303,9 @@ func TestClient_UpdateWorker(t *testing.T) {
 		assert.Equal(t, "Updated Name", *req.Name)
 
 		resp := WorkerInfo{
-			WorkerID:   "worker_yyyy",
-			Name:       *req.Name,
-			Status:     "running",
+			WorkerID: "worker_yyyy",
+			Name:     *req.Name,
+			Status:   "running",
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)

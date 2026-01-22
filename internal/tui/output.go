@@ -81,10 +81,10 @@ func (o *Output) PrintJSON(data interface{}) error {
 // PrintTable outputs data as a styled table
 func (o *Output) PrintTable(headers []string, rows [][]string) {
 	if len(rows) == 0 {
-		fmt.Fprintln(o.config.Writer, o.config.Styles.Muted.Render("No items found"))
+		_, _ = fmt.Fprintln(o.config.Writer, o.config.Styles.Muted.Render("No items found"))
 		return
 	}
-	fmt.Fprintln(o.config.Writer, SimpleTable(headers, rows))
+	_, _ = fmt.Fprintln(o.config.Writer, SimpleTable(headers, rows))
 }
 
 // Print outputs data based on the configured format
@@ -100,42 +100,42 @@ func (o *Output) Print(data interface{}, tableFunc func()) error {
 // Success prints a success message (only in table format)
 func (o *Output) Success(message string) {
 	if !o.IsJSON() {
-		fmt.Fprintln(o.config.Writer, SuccessMessage(message))
+		_, _ = fmt.Fprintln(o.config.Writer, SuccessMessage(message))
 	}
 }
 
 // Error prints an error message (only in table format)
 func (o *Output) Error(message string) {
 	if !o.IsJSON() {
-		fmt.Fprintln(o.config.Writer, ErrorMessage(message))
+		_, _ = fmt.Fprintln(o.config.Writer, ErrorMessage(message))
 	}
 }
 
 // Info prints an info message (only in table format)
 func (o *Output) Info(message string) {
 	if !o.IsJSON() {
-		fmt.Fprintln(o.config.Writer, InfoMessage(message))
+		_, _ = fmt.Fprintln(o.config.Writer, InfoMessage(message))
 	}
 }
 
 // Warning prints a warning message (only in table format)
 func (o *Output) Warning(message string) {
 	if !o.IsJSON() {
-		fmt.Fprintln(o.config.Writer, WarningMessage(message))
+		_, _ = fmt.Fprintln(o.config.Writer, WarningMessage(message))
 	}
 }
 
 // Println prints a line (only in table format)
 func (o *Output) Println(a ...interface{}) {
 	if !o.IsJSON() {
-		fmt.Fprintln(o.config.Writer, a...)
+		_, _ = fmt.Fprintln(o.config.Writer, a...)
 	}
 }
 
 // Printf prints formatted output (only in table format)
 func (o *Output) Printf(format string, a ...interface{}) {
 	if !o.IsJSON() {
-		fmt.Fprintf(o.config.Writer, format, a...)
+		_, _ = fmt.Fprintf(o.config.Writer, format, a...)
 	}
 }
 

@@ -126,7 +126,7 @@ func newDownloadCmd() *cobra.Command {
 
 			for _, lib := range libs {
 				fmt.Printf("Downloading %s (version: %s)...\n", lib.Name, lib.Version)
-				
+
 				progressFn := func(downloaded, total int64) {
 					if total > 0 {
 						pct := float64(downloaded) / float64(total) * 100
@@ -145,7 +145,7 @@ func newDownloadCmd() *cobra.Command {
 			return nil
 		},
 	}
-	
+
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Force re-download even if cached")
 	return cmd
 }
@@ -187,7 +187,7 @@ func newInstallCmd() *cobra.Command {
 
 			for _, lib := range libs {
 				fmt.Printf("Installing %s (version: %s)...\n", lib.Name, lib.Version)
-				
+
 				// Download first
 				progressFn := func(downloaded, total int64) {
 					if total > 0 {
@@ -214,11 +214,11 @@ func newInstallCmd() *cobra.Command {
 			fmt.Println("\nAll libraries installed!")
 			fmt.Println("\nTo use the libraries, add the following to your environment:")
 			fmt.Printf("  export LD_PRELOAD=%s\n", mgr.GetLibraryPath("libcuda.so.1"))
-			
+
 			return nil
 		},
 	}
-	
+
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Force reinstall even if already installed")
 	return cmd
 }
@@ -251,7 +251,7 @@ func newUpdateCmd() *cobra.Command {
 			fmt.Println("\nInstalling updates...")
 			for _, lib := range updates {
 				fmt.Printf("Updating %s...\n", lib.Name)
-				
+
 				progressFn := func(downloaded, total int64) {
 					if total > 0 {
 						pct := float64(downloaded) / float64(total) * 100

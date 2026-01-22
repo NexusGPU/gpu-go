@@ -95,9 +95,9 @@ func (d *LibraryDownloader) DownloadURL(lib LibraryInfo) string {
 	// Format: https://cdn.tensor-fusion.ai/{version}/{os}-{arch}/lib{name}.so
 	var ext string
 	switch lib.Arch.OS {
-	case "darwin":
+	case OSDarwin:
 		ext = "dylib"
-	case "windows":
+	case OSWindows:
 		ext = "dll"
 	default:
 		ext = "so"

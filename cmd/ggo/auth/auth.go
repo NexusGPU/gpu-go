@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/NexusGPU/gpu-go/internal/platform"
@@ -269,7 +268,7 @@ func interactiveLogin(noBrowser bool) error {
 
 func readSecureInput() (string, error) {
 	// Check if stdin is a terminal
-	fd := int(syscall.Stdin)
+	fd := int(os.Stdin.Fd())
 	if term.IsTerminal(fd) {
 		// Read without echoing
 		bytePassword, err := term.ReadPassword(fd)

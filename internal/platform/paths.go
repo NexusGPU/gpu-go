@@ -6,6 +6,13 @@ import (
 	"runtime"
 )
 
+// Platform constants for runtime.GOOS comparisons
+const (
+	osWindows = "windows"
+	osDarwin  = "darwin"
+	osLinux   = "linux"
+)
+
 // Paths provides cross-platform path resolution for ggo
 type Paths struct {
 	configDir string
@@ -59,7 +66,7 @@ func (p *Paths) UserDir() string {
 // LibDir returns the directory for shared libraries
 func (p *Paths) LibDir() string {
 	switch runtime.GOOS {
-	case "windows":
+	case osWindows:
 		return filepath.Join(p.configDir, "lib")
 	default:
 		return filepath.Join(p.configDir, "lib")
@@ -69,9 +76,9 @@ func (p *Paths) LibDir() string {
 // BinDir returns the directory for binaries
 func (p *Paths) BinDir() string {
 	switch runtime.GOOS {
-	case "windows":
+	case osWindows:
 		return filepath.Join(p.configDir, "bin")
-	case "darwin":
+	case osDarwin:
 		return "/usr/local/bin"
 	default:
 		return "/usr/local/bin"
@@ -81,7 +88,7 @@ func (p *Paths) BinDir() string {
 // TempDir returns a platform-appropriate temporary directory
 func (p *Paths) TempDir() string {
 	switch runtime.GOOS {
-	case "windows":
+	case osWindows:
 		return os.TempDir()
 	default:
 		return "/tmp"
@@ -100,13 +107,13 @@ func (p *Paths) defaultConfigDir() string {
 	}
 
 	switch runtime.GOOS {
-	case "windows":
+	case osWindows:
 		// Use ProgramData for system-wide config
 		if programData := os.Getenv("ProgramData"); programData != "" {
 			return filepath.Join(programData, "gpugo")
 		}
 		return `C:\ProgramData\gpugo`
-	case "darwin":
+	case osDarwin:
 		// Check if running as root
 		if os.Geteuid() == 0 {
 			return "/Library/Application Support/gpugo"
@@ -140,12 +147,12 @@ func (p *Paths) defaultStateDir() string {
 	}
 
 	switch runtime.GOOS {
-	case "windows":
+	case osWindows:
 		if programData := os.Getenv("ProgramData"); programData != "" {
 			return filepath.Join(programData, "gpugo", "state")
 		}
 		return `C:\ProgramData\gpugo\state`
-	case "darwin":
+	case osDarwin:
 		// macOS uses /tmp for state (similar to Linux)
 		return "/tmp/tensor-fusion-state"
 	default: // linux and others
@@ -160,7 +167,7 @@ func (p *Paths) defaultCacheDir() string {
 	}
 
 	switch runtime.GOOS {
-	case "windows":
+	case osWindows:
 		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
 			return filepath.Join(localAppData, "gpugo", "cache")
 		}
@@ -168,7 +175,7 @@ func (p *Paths) defaultCacheDir() string {
 			return filepath.Join(home, "AppData", "Local", "gpugo", "cache")
 		}
 		return `C:\ProgramData\gpugo\cache`
-	case "darwin":
+	case osDarwin:
 		if home, err := os.UserHomeDir(); err == nil {
 			return filepath.Join(home, "Library", "Caches", "gpugo")
 		}
@@ -188,7 +195,7 @@ func (p *Paths) defaultUserDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		switch runtime.GOOS {
-		case "windows":
+		case osWindows:
 			return `C:\Users\Default\.gpugo`
 		default:
 			return "/tmp/.gpugo"
@@ -230,15 +237,15 @@ func (p *Paths) EnsureAllDirs() error {
 
 // IsWindows returns true if running on Windows
 func IsWindows() bool {
-	return runtime.GOOS == "windows"
+	return runtime.GOOS == osWindows
 }
 
 // IsDarwin returns true if running on macOS
 func IsDarwin() bool {
-	return runtime.GOOS == "darwin"
+	return runtime.GOOS == osDarwin
 }
 
 // IsLinux returns true if running on Linux
 func IsLinux() bool {
-	return runtime.GOOS == "linux"
+	return runtime.GOOS == osLinux
 }

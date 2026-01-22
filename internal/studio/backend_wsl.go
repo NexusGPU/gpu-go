@@ -53,7 +53,7 @@ func (b *WSLBackend) Mode() Mode {
 }
 
 func (b *WSLBackend) IsAvailable(ctx context.Context) bool {
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != OSWindows {
 		return false
 	}
 
@@ -101,7 +101,7 @@ func (b *WSLBackend) Create(ctx context.Context, opts *CreateOptions) (*Environm
 	// Check if Docker is available in WSL
 	output, err := b.runInWSL(ctx, distro, "docker", "info")
 	if err != nil {
-		return nil, fmt.Errorf("Docker not available in WSL: %s", string(output))
+		return nil, fmt.Errorf("docker not available in WSL: %s", string(output))
 	}
 
 	// Create container using Docker in WSL

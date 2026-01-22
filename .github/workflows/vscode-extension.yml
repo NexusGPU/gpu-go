@@ -169,12 +169,12 @@ jobs:
         run: pnpm run package
 
       - name: Publish to VS Marketplace
-        run: pnpm exec vsce publish -p ${{ secrets.VSCE_PAT }}
+        run: pnpm exec vsce publish  --no-dependencies -p ${{ secrets.VSCE_PAT }}
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
       - name: Publish to Open VSX (for Cursor, VSCodium, etc.)
-        run: pnpm exec ovsx publish -p ${{ secrets.OVSX_PAT }}
+        run: pnpm exec ovsx publish  --no-dependencies -p ${{ secrets.OVSX_PAT }}
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
 

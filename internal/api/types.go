@@ -44,16 +44,16 @@ type AgentRegisterResponse struct {
 
 // AgentInfo represents agent information
 type AgentInfo struct {
-	AgentID    string    `json:"agent_id"`
-	Hostname   string    `json:"hostname"`
-	Status     string    `json:"status"`
-	OS         string    `json:"os"`
-	Arch       string    `json:"arch"`
-	NetworkIPs []string  `json:"network_ips,omitempty"`
-	GPUs       []GPUInfo `json:"gpus,omitempty"`
+	AgentID    string       `json:"agent_id"`
+	Hostname   string       `json:"hostname"`
+	Status     string       `json:"status"`
+	OS         string       `json:"os"`
+	Arch       string       `json:"arch"`
+	NetworkIPs []string     `json:"network_ips,omitempty"`
+	GPUs       []GPUInfo    `json:"gpus,omitempty"`
 	Workers    []WorkerInfo `json:"workers,omitempty"`
-	LastSeenAt time.Time `json:"last_seen_at"`
-	CreatedAt  time.Time `json:"created_at"`
+	LastSeenAt time.Time    `json:"last_seen_at"`
+	CreatedAt  time.Time    `json:"created_at"`
 }
 
 // AgentListResponse represents the response from GET /api/v1/agents

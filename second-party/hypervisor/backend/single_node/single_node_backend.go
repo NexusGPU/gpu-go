@@ -294,7 +294,7 @@ func (b *SingleNodeBackend) GetDeviceChangeHandler() framework.DeviceChangeHandl
 func (b *SingleNodeBackend) ListWorkers() []*api.WorkerInfo {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	
+
 	result := make([]*api.WorkerInfo, 0, len(b.workers))
 	for _, w := range b.workers {
 		result = append(result, w)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 
@@ -418,10 +417,4 @@ func cleanAllEnv() error {
 	fmt.Println()
 
 	return nil
-}
-
-// isCommandAvailable checks if a command is available in PATH
-func isCommandAvailable(cmd string) bool {
-	_, err := exec.LookPath(cmd)
-	return err == nil
 }

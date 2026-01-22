@@ -23,11 +23,11 @@ const (
 
 // Agent manages the GPU agent lifecycle
 type Agent struct {
-	client    *api.Client
-	config    *config.Manager
-	ctx       context.Context
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
+	client *api.Client
+	config *config.Manager
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
 
 	agentID       string
 	hostname      string
@@ -41,9 +41,9 @@ type Agent struct {
 // NewAgent creates a new agent
 func NewAgent(client *api.Client, configMgr *config.Manager) *Agent {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	hostname, _ := os.Hostname()
-	
+
 	return &Agent{
 		client:   client,
 		config:   configMgr,
@@ -162,16 +162,16 @@ func (a *Agent) Start() error {
 // Stop stops the agent
 func (a *Agent) Stop() {
 	log.Info().Msg("Stopping agent...")
-	
+
 	a.cancel()
 	a.client.StopHeartbeat()
-	
+
 	if a.watcher != nil {
 		_ = a.watcher.Close()
 	}
-	
+
 	a.wg.Wait()
-	
+
 	log.Info().Msg("Agent stopped")
 }
 
@@ -256,7 +256,7 @@ func (a *Agent) handleHeartbeatResponse(resp *api.HeartbeatResponse) {
 			Int("old_version", a.configVersion).
 			Int("new_version", resp.ConfigVersion).
 			Msg("Config version changed, pulling new config")
-		
+
 		if err := a.pullConfig(); err != nil {
 			log.Error().Err(err).Msg("Failed to pull config")
 		}
@@ -383,19 +383,19 @@ func (a *Agent) reportStatus() error {
 // computeFileHash computes a hash of the relevant config files
 func (a *Agent) computeFileHash() string {
 	hash := sha256.New()
-	
+
 	// Hash workers file
 	workersPath := a.config.WorkersPath()
 	if data, err := os.ReadFile(workersPath); err == nil {
 		hash.Write(data)
 	}
-	
+
 	// Hash state directory workers file
 	stateWorkersPath := a.config.StateDir() + "/workers.json"
 	if data, err := os.ReadFile(stateWorkersPath); err == nil {
 		hash.Write(data)
 	}
-	
+
 	return hex.EncodeToString(hash.Sum(nil))
 }
 

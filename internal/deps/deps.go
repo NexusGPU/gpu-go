@@ -48,8 +48,8 @@ type Manifest struct {
 
 // LocalManifest represents locally installed dependencies
 type LocalManifest struct {
-	InstalledAt time.Time           `json:"installed_at"`
-	Libraries   map[string]Library  `json:"libraries"` // name -> library
+	InstalledAt time.Time          `json:"installed_at"`
+	Libraries   map[string]Library `json:"libraries"` // name -> library
 }
 
 // Manager manages dependency downloads and versions
@@ -95,7 +95,7 @@ func WithPaths(paths *platform.Paths) ManagerOption {
 // FetchManifest fetches the version manifest from CDN
 func (m *Manager) FetchManifest(ctx context.Context) (*Manifest, error) {
 	url := m.cdnBaseURL + ManifestPath
-	
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
