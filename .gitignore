@@ -35,9 +35,6 @@ test-result/
 
 # Node.js dependencies and build outputs
 node_modules/
-package-lock.json
-pnpm-lock.yaml
-yarn.lock
 
 # Build outputs
 out/

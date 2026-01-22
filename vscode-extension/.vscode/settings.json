@@ -9,5 +9,6 @@
   },
   "search.exclude": {
     "out": true
-  }
+  },
+  "i18n-ally.localesPaths": []
 }
