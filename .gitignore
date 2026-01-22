@@ -39,6 +39,7 @@ node_modules/
 # Build outputs
 out/
 dist/
+cmd/ggo/ggo
 *.vsix
 
 # macOS

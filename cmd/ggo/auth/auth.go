@@ -135,6 +135,8 @@ This will sign you out of the GPU Go CLI and IDE extensions.`,
 			}
 
 			if err := os.Remove(tokenPath); err != nil {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
 				log.Error().Err(err).Msg("Failed to remove token")
 				return err
 			}
@@ -158,6 +160,8 @@ func newStatusCmd() *cobra.Command {
 			out := getOutput()
 			tokenConfig, err := LoadToken()
 			if err != nil {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
 				log.Error().Err(err).Msg("Failed to load token")
 				return err
 			}

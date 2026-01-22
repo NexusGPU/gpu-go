@@ -77,7 +77,7 @@ func (a *Agent) Register(tempToken string, gpus []api.GPUInfo) error {
 		ConfigVersion: 1,
 		AgentID:       resp.AgentID,
 		AgentSecret:   resp.AgentSecret,
-		ServerURL:     "https://api.gpu.tf",
+		ServerURL:     a.client.GetBaseURL(),
 		License:       resp.License,
 	}
 
@@ -278,11 +278,16 @@ func (a *Agent) pullConfig() error {
 	// Convert and save workers
 	workers := make([]config.WorkerConfig, len(resp.Workers))
 	for i, w := range resp.Workers {
+		status := "stopped"
+		if w.Enabled {
+			status = "running"
+		}
 		workers[i] = config.WorkerConfig{
 			WorkerID:   w.WorkerID,
 			GPUIDs:     w.GPUIDs,
 			ListenPort: w.ListenPort,
 			Enabled:    w.Enabled,
+			Status:     status,
 		}
 	}
 	if err := a.config.SaveWorkers(workers); err != nil {

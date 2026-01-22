@@ -60,6 +60,8 @@ func newListCmd() *cobra.Command {
 			fmt.Println("Fetching available libraries...")
 			manifest, err := mgr.FetchManifest(ctx)
 			if err != nil {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
 				log.Error().Err(err).Msg("Failed to fetch manifest")
 				return err
 			}
@@ -100,6 +102,8 @@ func newDownloadCmd() *cobra.Command {
 
 			manifest, err := mgr.FetchManifest(ctx)
 			if err != nil {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
 				log.Error().Err(err).Msg("Failed to fetch manifest")
 				return err
 			}
@@ -135,6 +139,8 @@ func newDownloadCmd() *cobra.Command {
 				}
 
 				if err := mgr.DownloadLibrary(ctx, lib, progressFn); err != nil {
+					// Runtime error - don't show help
+					cmd.SilenceUsage = true
 					log.Error().Err(err).Str("library", lib.Name).Msg("Failed to download")
 					return err
 				}
@@ -161,6 +167,8 @@ func newInstallCmd() *cobra.Command {
 
 			manifest, err := mgr.FetchManifest(ctx)
 			if err != nil {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
 				log.Error().Err(err).Msg("Failed to fetch manifest")
 				return err
 			}
@@ -197,6 +205,8 @@ func newInstallCmd() *cobra.Command {
 				}
 
 				if err := mgr.DownloadLibrary(ctx, lib, progressFn); err != nil {
+					// Runtime error - don't show help
+					cmd.SilenceUsage = true
 					log.Error().Err(err).Str("library", lib.Name).Msg("Failed to download")
 					return err
 				}
@@ -205,6 +215,8 @@ func newInstallCmd() *cobra.Command {
 				// Then install
 				fmt.Printf("  Installing to %s...\n", mgr.GetLibraryPath(lib.Name))
 				if err := mgr.InstallLibrary(lib); err != nil {
+					// Runtime error - don't show help
+					cmd.SilenceUsage = true
 					log.Error().Err(err).Str("library", lib.Name).Msg("Failed to install")
 					return err
 				}
@@ -234,6 +246,8 @@ func newUpdateCmd() *cobra.Command {
 			fmt.Println("Checking for updates...")
 			updates, err := mgr.CheckUpdates(ctx)
 			if err != nil {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
 				log.Error().Err(err).Msg("Failed to check updates")
 				return err
 			}
@@ -288,6 +302,8 @@ func newCleanCmd() *cobra.Command {
 
 			fmt.Println("Cleaning dependency cache...")
 			if err := mgr.CleanCache(); err != nil {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
 				log.Error().Err(err).Msg("Failed to clean cache")
 				return err
 			}

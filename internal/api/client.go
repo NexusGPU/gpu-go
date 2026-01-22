@@ -94,6 +94,11 @@ func (c *Client) SetBaseURL(url string) {
 	c.baseURL = url
 }
 
+// GetBaseURL returns the base URL for the client
+func (c *Client) GetBaseURL() string {
+	return c.baseURL
+}
+
 // SetUserToken sets the user token for authentication
 func (c *Client) SetUserToken(token string) {
 	c.userToken = token

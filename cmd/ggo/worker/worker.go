@@ -80,6 +80,8 @@ func newWorkerListCmd() *cobra.Command {
 
 			resp, err := client.ListWorkers(ctx, agentID, hostname)
 			if err != nil {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
 				log.Error().Err(err).Msg("Failed to list workers")
 				return err
 			}
@@ -157,6 +159,8 @@ func newWorkerCreateCmd() *cobra.Command {
 
 			resp, err := client.CreateWorker(ctx, req)
 			if err != nil {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
 				log.Error().Err(err).Msg("Failed to create worker")
 				return err
 			}
@@ -207,6 +211,8 @@ func newWorkerGetCmd() *cobra.Command {
 
 			resp, err := client.GetWorker(ctx, workerID)
 			if err != nil {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
 				log.Error().Err(err).Msg("Failed to get worker")
 				return err
 			}
@@ -299,6 +305,8 @@ func newWorkerUpdateCmd() *cobra.Command {
 
 			resp, err := client.UpdateWorker(ctx, workerID, req)
 			if err != nil {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
 				log.Error().Err(err).Msg("Failed to update worker")
 				return err
 			}
@@ -357,6 +365,8 @@ func newWorkerDeleteCmd() *cobra.Command {
 			}
 
 			if err := client.DeleteWorker(ctx, workerID); err != nil {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
 				log.Error().Err(err).Msg("Failed to delete worker")
 				return err
 			}

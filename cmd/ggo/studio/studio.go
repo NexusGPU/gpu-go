@@ -238,6 +238,8 @@ Examples:
 
 			env, err := mgr.Create(ctx, opts)
 			if err != nil {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
 				log.Error().Err(err).Msg("Failed to create environment")
 				return err
 			}
@@ -325,6 +327,8 @@ func newListCmd() *cobra.Command {
 
 			envs, err := mgr.List(ctx)
 			if err != nil {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
 				log.Error().Err(err).Msg("Failed to list environments")
 				return err
 			}
@@ -384,6 +388,8 @@ func newStartCmd() *cobra.Command {
 			out := getOutput()
 
 			if err := mgr.Start(ctx, args[0]); err != nil {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
 				log.Error().Err(err).Msg("Failed to start environment")
 				return err
 			}
@@ -409,6 +415,8 @@ func newStopCmd() *cobra.Command {
 			out := getOutput()
 
 			if err := mgr.Stop(ctx, args[0]); err != nil {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
 				log.Error().Err(err).Msg("Failed to stop environment")
 				return err
 			}
@@ -452,6 +460,8 @@ func newRemoveCmd() *cobra.Command {
 			}
 
 			if err := mgr.Remove(ctx, name); err != nil {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
 				log.Error().Err(err).Msg("Failed to remove environment")
 				return err
 			}
@@ -486,11 +496,15 @@ func newSSHCmd() *cobra.Command {
 
 			env, err := mgr.Get(ctx, args[0])
 			if err != nil {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
 				log.Error().Err(err).Msg("Failed to get environment")
 				return err
 			}
 
 			if env.SSHPort == 0 {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
 				return fmt.Errorf("SSH not configured for this environment")
 			}
 
@@ -542,17 +556,23 @@ func newLogsCmd() *cobra.Command {
 
 			env, err := mgr.Get(ctx, args[0])
 			if err != nil {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
 				log.Error().Err(err).Msg("Failed to get environment")
 				return err
 			}
 
 			backend, err := mgr.GetBackend(env.Mode)
 			if err != nil {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
 				return err
 			}
 
 			logCh, err := backend.Logs(ctx, env.ID, follow)
 			if err != nil {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
 				return err
 			}
 

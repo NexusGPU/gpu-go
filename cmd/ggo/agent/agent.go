@@ -64,6 +64,7 @@ func newRegisterCmd() *cobra.Command {
 				if !out.IsJSON() {
 					fmt.Println(tui.ErrorMessage("Token is required. Use --token flag or GPU_GO_TOKEN environment variable"))
 				}
+				// Show help for missing required parameter
 				return fmt.Errorf("token is required")
 			}
 
@@ -72,9 +73,19 @@ func newRegisterCmd() *cobra.Command {
 
 			// Discover GPUs (placeholder - in real implementation, use nvml or similar)
 			gpus := discoverGPUs()
+			if len(gpus) == 0 {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
+				if !out.IsJSON() {
+					fmt.Println(tui.ErrorMessage("No GPUs found. Please check your GPU configuration"))
+				}
+				return fmt.Errorf("no GPUs found")
+			}
 
 			agentInstance := agent.NewAgent(client, configMgr)
 			if err := agentInstance.Register(token, gpus); err != nil {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
 				log.Error().Err(err).Msg("Failed to register agent")
 				return err
 			}
@@ -106,6 +117,8 @@ func newStartCmd() *cobra.Command {
 
 			// Check if agent is registered
 			if !configMgr.ConfigExists() {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
 				if !out.IsJSON() {
 					fmt.Println(tui.ErrorMessage("Agent is not registered. Please run 'ggo agent register' first"))
 				}
@@ -114,17 +127,21 @@ func newStartCmd() *cobra.Command {
 
 			cfg, err := configMgr.LoadConfig()
 			if err != nil {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
 				log.Error().Err(err).Msg("Failed to load config")
 				return err
 			}
 
 			client := api.NewClient(
-				api.WithBaseURL(cfg.ServerURL),
+				api.WithBaseURL(serverURL),
 				api.WithAgentSecret(cfg.AgentSecret),
 			)
 
 			agentInstance := agent.NewAgent(client, configMgr)
 			if err := agentInstance.Start(); err != nil {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
 				log.Error().Err(err).Msg("Failed to start agent")
 				return err
 			}
@@ -166,6 +183,8 @@ func newStatusCmd() *cobra.Command {
 
 			cfg, err := configMgr.LoadConfig()
 			if err != nil {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
 				log.Error().Err(err).Msg("Failed to load config")
 				return err
 			}

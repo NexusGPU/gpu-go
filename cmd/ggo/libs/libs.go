@@ -66,6 +66,8 @@ The libraries are cached locally and used by studio environments for remote GPU 
 			fmt.Println("Downloading libraries...")
 			paths, err := downloader.DownloadDefaultLibraries()
 			if err != nil {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
 				return fmt.Errorf("failed to download libraries: %w", err)
 			}
 

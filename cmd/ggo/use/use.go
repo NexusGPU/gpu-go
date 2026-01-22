@@ -47,6 +47,8 @@ Examples:
 			// Get share info
 			shareInfo, err := client.GetSharePublic(ctx, shortCode)
 			if err != nil {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
 				log.Error().Err(err).Msg("Failed to get share info")
 				return err
 			}

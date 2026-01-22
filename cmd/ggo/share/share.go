@@ -84,6 +84,8 @@ func newShareCreateCmd() *cobra.Command {
 				// Look up worker by name
 				resp, err := client.ListWorkers(ctx, "", "")
 				if err != nil {
+					// Runtime error - don't show help
+					cmd.SilenceUsage = true
 					log.Error().Err(err).Msg("Failed to list workers")
 					return err
 				}
@@ -97,12 +99,15 @@ func newShareCreateCmd() *cobra.Command {
 				}
 
 				if workerID == "" {
+					// Runtime error - don't show help
+					cmd.SilenceUsage = true
 					log.Error().Str("name", workerName).Msg("Worker not found")
 					return fmt.Errorf("worker '%s' not found", workerName)
 				}
 			}
 
 			if workerID == "" {
+				// User input error - show help
 				return fmt.Errorf("worker ID or name is required")
 			}
 
@@ -128,6 +133,8 @@ func newShareCreateCmd() *cobra.Command {
 
 			resp, err := client.CreateShare(ctx, req)
 			if err != nil {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
 				log.Error().Err(err).Msg("Failed to create share")
 				return err
 			}
@@ -188,6 +195,8 @@ func newShareListCmd() *cobra.Command {
 
 			resp, err := client.ListShares(ctx)
 			if err != nil {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
 				log.Error().Err(err).Msg("Failed to list shares")
 				return err
 			}
@@ -255,6 +264,8 @@ func newShareGetCmd() *cobra.Command {
 
 			resp, err := client.GetSharePublic(ctx, shortCode)
 			if err != nil {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
 				log.Error().Err(err).Msg("Failed to get share")
 				return err
 			}
@@ -311,6 +322,8 @@ func newShareDeleteCmd() *cobra.Command {
 			}
 
 			if err := client.DeleteShare(ctx, shareID); err != nil {
+				// Runtime error - don't show help
+				cmd.SilenceUsage = true
 				log.Error().Err(err).Msg("Failed to delete share")
 				return err
 			}
