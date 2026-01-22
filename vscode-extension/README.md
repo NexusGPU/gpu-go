@@ -1,8 +1,8 @@
 # GPU Go - Remote GPU Management for VS Code
 
-[![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/tensor-fusion.gpu-go?style=flat-square&label=VS%20Code%20Marketplace&logo=visual-studio-code)](https://marketplace.visualstudio.com/items?itemName=tensor-fusion.gpu-go)
-[![Installs](https://img.shields.io/visual-studio-marketplace/i/tensor-fusion.gpu-go?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=tensor-fusion.gpu-go)
-[![Rating](https://img.shields.io/visual-studio-marketplace/r/tensor-fusion.gpu-go?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=tensor-fusion.gpu-go)
+[![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/nexusgpu.gpu-go?style=flat-square&label=VS%20Code%20Marketplace&logo=visual-studio-code)](https://marketplace.visualstudio.com/items?itemName=nexusgpu.gpu-go)
+[![Installs](https://img.shields.io/visual-studio-marketplace/i/nexusgpu.gpu-go?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=nexusgpu.gpu-go)
+[![Rating](https://img.shields.io/visual-studio-marketplace/r/nexusgpu.gpu-go?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=nexusgpu.gpu-go)
 
 > **Use GPU Like NFS** - Seamlessly manage AI/ML development environments with remote GPU access directly from VS Code.
 
@@ -43,7 +43,7 @@ Comprehensive view of all your GPU devices:
 
 ### Step 1: Install the Extension
 
-Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=tensor-fusion.gpu-go) or search for "GPU Go" in VS Code Extensions.
+Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=nexusgpu.gpu-go) or search for "GPU Go" in VS Code Extensions.
 
 ### Step 2: Login
 

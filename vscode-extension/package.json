@@ -25,13 +25,13 @@
   },
   "badges": [
     {
-      "url": "https://img.shields.io/visual-studio-marketplace/v/tensor-fusion.gpu-go?style=flat-square&label=VS%20Code%20Marketplace",
-      "href": "https://marketplace.visualstudio.com/items?itemName=tensor-fusion.gpu-go",
+      "url": "https://img.shields.io/visual-studio-marketplace/v/nexusgpu.gpu-go?style=flat-square&label=VS%20Code%20Marketplace",
+      "href": "https://marketplace.visualstudio.com/items?itemName=nexusgpu.gpu-go",
       "description": "VS Code Marketplace Version"
     },
     {
-      "url": "https://img.shields.io/visual-studio-marketplace/i/tensor-fusion.gpu-go?style=flat-square",
-      "href": "https://marketplace.visualstudio.com/items?itemName=tensor-fusion.gpu-go",
+      "url": "https://img.shields.io/visual-studio-marketplace/i/nexusgpu.gpu-go?style=flat-square",
+      "href": "https://marketplace.visualstudio.com/items?itemName=nexusgpu.gpu-go",
       "description": "VS Code Marketplace Installs"
     }
   ],

@@ -187,12 +187,12 @@ jobs:
             ## GPU Go VS Code Extension v${{ steps.version.outputs.version }}
 
             ### Installation
-            - **VS Code Marketplace**: [gpu-go](https://marketplace.visualstudio.com/items?itemName=tensor-fusion.gpu-go)
+            - **VS Code Marketplace**: [gpu-go](https://marketplace.visualstudio.com/items?itemName=nexusgpu.gpu-go)
             - **Open VSX**: [gpu-go](https://open-vsx.org/extension/tensor-fusion/gpu-go)
 
             Or install directly in VS Code:
             ```
-            ext install tensor-fusion.gpu-go
+            ext install nexusgpu.gpu-go
             ```
           files: |
             vscode-extension/*.vsix

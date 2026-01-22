@@ -7,13 +7,13 @@ suite('Extension Test Suite', () => {
     const ACTIVATION_TIMEOUT = 10000;
 
     test('Extension should be present', () => {
-        assert.ok(vscode.extensions.getExtension('tensor-fusion.gpu-go'));
+        assert.ok(vscode.extensions.getExtension('nexusgpu.gpu-go'));
     });
 
     test('Extension should activate', async function() {
         this.timeout(ACTIVATION_TIMEOUT);
         
-        const ext = vscode.extensions.getExtension('tensor-fusion.gpu-go');
+        const ext = vscode.extensions.getExtension('nexusgpu.gpu-go');
         assert.ok(ext, 'Extension should be found');
         
         if (!ext.isActive) {
@@ -26,7 +26,7 @@ suite('Extension Test Suite', () => {
         this.timeout(ACTIVATION_TIMEOUT);
         
         // Ensure extension is activated first
-        const ext = vscode.extensions.getExtension('tensor-fusion.gpu-go');
+        const ext = vscode.extensions.getExtension('nexusgpu.gpu-go');
         if (ext && !ext.isActive) {
             await ext.activate();
         }
