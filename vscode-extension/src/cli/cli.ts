@@ -438,7 +438,7 @@ export class CLI {
         try {
             const result = await this.execCommandJSON<StudioEnvJSON>(args);
             return this.convertStudioEnv(result);
-        } catch (error) {
+        } catch {
             // Fallback to non-JSON for backward compatibility
         await this.execCommand(args);
             return null;
@@ -554,11 +554,7 @@ export class CLI {
             args.push(options.enabled ? '--enabled' : '--disabled');
         }
 
-        try {
-            return await this.execCommandJSON<ActionResponse>(args);
-        } catch (error) {
-            throw error;
-        }
+        return await this.execCommandJSON<ActionResponse>(args);
     }
 
     async workerUpdate(workerId: string, options: {
@@ -582,19 +578,11 @@ export class CLI {
             args.push(options.enabled ? '--enabled' : '--disabled');
         }
 
-        try {
-            return await this.execCommandJSON<ActionResponse>(args);
-        } catch (error) {
-            throw error;
-        }
+        return await this.execCommandJSON<ActionResponse>(args);
     }
 
     async workerDelete(workerId: string): Promise<ActionResponse> {
-        try {
-            return await this.execCommandJSON<ActionResponse>(['worker', 'delete', workerId, '--force']);
-        } catch (error) {
-            throw error;
-        }
+        return await this.execCommandJSON<ActionResponse>(['worker', 'delete', workerId, '--force']);
     }
 
     // ==================== Share commands ====================
@@ -647,11 +635,7 @@ export class CLI {
     }
 
     async shareDelete(shareId: string): Promise<ActionResponse> {
-        try {
-            return await this.execCommandJSON<ActionResponse>(['share', 'delete', shareId, '--force']);
-        } catch (error) {
-            throw error;
-        }
+        return await this.execCommandJSON<ActionResponse>(['share', 'delete', shareId, '--force']);
     }
 
     // ==================== Agent/Device commands ====================

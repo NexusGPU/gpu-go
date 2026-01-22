@@ -330,17 +330,18 @@
   "devDependencies": {
     "@types/glob": "^8.1.0",
     "@types/mocha": "^10.0.6",
-    "@types/node": "^20.10.0",
+    "@types/node": "^25.0.10",
     "@types/vscode": "^1.85.0",
-    "@typescript-eslint/eslint-plugin": "^6.13.0",
-    "@typescript-eslint/parser": "^6.13.0",
+    "@typescript-eslint/eslint-plugin": "^8.53.1",
+    "@typescript-eslint/parser": "^8.53.1",
     "@vscode/test-electron": "^2.3.8",
-    "@vscode/vsce": "^2.22.0",
-    "eslint": "^8.54.0",
-    "glob": "^10.3.10",
-    "mocha": "^10.2.0",
-    "ovsx": "^0.8.3",
-    "typescript": "^5.3.2"
-  },
-  "dependencies": {}
+    "@vscode/vsce": "^3.7.1",
+    "eslint": "^9.39.2",
+    "glob": "^13.0.0",
+    "globals": "^17.0.0",
+    "mocha": "^11.7.5",
+    "ovsx": "^0.10.8",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.53.1"
+  }
 }

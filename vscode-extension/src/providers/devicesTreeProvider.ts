@@ -95,7 +95,7 @@ export class DevicesTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
                 return this.agents.map(agent => 
                     new AgentTreeItem(agent, vscode.TreeItemCollapsibleState.Collapsed)
                 );
-            } catch (error) {
+            } catch {
                 // If no agents, show helpful message
                 return [
                     this.createEmptyItem(),
