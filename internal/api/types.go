@@ -210,3 +210,24 @@ type AgentMetricsRequest struct {
 type HeartbeatResponse struct {
 	ConfigVersion int `json:"config_version"`
 }
+
+// IsolationModeType mirrors tensor-fusion's IsolationModeType
+type IsolationModeType = string
+
+const (
+	IsolationModeShared      IsolationModeType = "shared"
+	IsolationModeSoft        IsolationModeType = "soft"
+	IsolationModePartitioned IsolationModeType = "partitioned"
+)
+
+// ToIsolationMode converts a string to IsolationModeType
+func ToIsolationMode(s string) IsolationModeType {
+	switch s {
+	case "soft":
+		return IsolationModeSoft
+	case "partitioned":
+		return IsolationModePartitioned
+	default:
+		return IsolationModeShared
+	}
+}

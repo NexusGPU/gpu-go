@@ -4,24 +4,23 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"os"
-	"path/filepath"
 	"runtime"
 	"sync"
 	"time"
 
+	tfv1 "github.com/NexusGPU/tensor-fusion/api/v1"
+
 	"github.com/NexusGPU/gpu-go/internal/api"
 	"github.com/NexusGPU/gpu-go/internal/config"
-	"github.com/NexusGPU/gpu-go/internal/log"
-	"github.com/NexusGPU/gpu-go/internal/worker"
+	"github.com/NexusGPU/gpu-go/internal/hypervisor"
 	"github.com/fsnotify/fsnotify"
+	"github.com/rs/zerolog/log"
 )
 
 const (
-	statusReportInterval    = 60 * time.Minute
-	configPollInterval      = 10 * time.Second
-	workerReconcileInterval = 5 * time.Second
+	statusReportInterval = 60 * time.Minute
+	configPollInterval   = 10 * time.Second
 )
 
 // Agent manages the GPU agent lifecycle
@@ -31,53 +30,58 @@ type Agent struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
-	log    *log.Logger
 
 	agentID       string
 	hostname      string
 	lastFileHash  string
 	configVersion int
 
+	// Hypervisor integration
+	hypervisorMgr *hypervisor.Manager
+	reconciler    *hypervisor.Reconciler
+
 	// File watcher
 	watcher *fsnotify.Watcher
-
-	// Worker management
-	workerManager *worker.Manager
-	singleNode    bool   // Enable single-node mode with local worker management
-	workerBinary  string // Path to worker binary
 }
 
 // NewAgent creates a new agent
 func NewAgent(client *api.Client, configMgr *config.Manager) *Agent {
-	return NewAgentWithOptions(client, configMgr, false, "")
-}
-
-// NewAgentWithOptions creates a new agent with additional options
-func NewAgentWithOptions(client *api.Client, configMgr *config.Manager, singleNode bool, workerBinary string) *Agent {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	hostname, _ := os.Hostname()
-	logger := log.Default.WithComponent("agent")
 
-	agent := &Agent{
-		client:       client,
-		config:       configMgr,
-		ctx:          ctx,
-		cancel:       cancel,
-		hostname:     hostname,
-		log:          logger,
-		singleNode:   singleNode,
-		workerBinary: workerBinary,
+	return &Agent{
+		client:   client,
+		config:   configMgr,
+		ctx:      ctx,
+		cancel:   cancel,
+		hostname: hostname,
 	}
+}
 
-	// Initialize worker manager for single-node mode
-	if singleNode {
-		if workerBinary == "" {
-			workerBinary = "tensor-fusion-worker"
-		}
-		agent.workerManager = worker.NewManager(configMgr.StateDir(), workerBinary)
-		logger.Info().Bool("single_node", true).Msg("single-node mode enabled, worker management active")
-	}
+// NewAgentWithHypervisor creates a new agent with hypervisor manager
+func NewAgentWithHypervisor(client *api.Client, configMgr *config.Manager, hvMgr *hypervisor.Manager) *Agent {
+	agent := NewAgent(client, configMgr)
+	agent.hypervisorMgr = hvMgr
+
+	// Create reconciler
+	agent.reconciler = hypervisor.NewReconciler(hypervisor.ReconcilerConfig{
+		Manager: hvMgr,
+		Logger:  log.Logger,
+		OnWorkerStarted: func(workerID string) {
+			log.Info().Str("worker_id", workerID).Msg("worker started via reconciler")
+		},
+		OnWorkerStopped: func(workerID string) {
+			log.Info().Str("worker_id", workerID).Msg("worker stopped via reconciler")
+		},
+		OnReconcileComplete: func(added, removed, updated int) {
+			log.Debug().
+				Int("added", added).
+				Int("removed", removed).
+				Int("updated", updated).
+				Msg("reconciliation complete")
+		},
+	})
 
 	return agent
 }
@@ -130,9 +134,10 @@ func (a *Agent) Register(tempToken string, gpus []api.GPUInfo) error {
 
 	a.agentID = resp.AgentID
 	a.client.SetAgentSecret(resp.AgentSecret)
-	a.log = a.log.WithAgentID(resp.AgentID)
 
-	a.log.Info().Str("agent_id", resp.AgentID).Msg("agent registered successfully")
+	log.Info().
+		Str("agent_id", resp.AgentID).
+		Msg("Agent registered successfully")
 
 	return nil
 }
@@ -151,7 +156,6 @@ func (a *Agent) Start() error {
 	a.agentID = cfg.AgentID
 	a.configVersion = cfg.ConfigVersion
 	a.client.SetAgentSecret(cfg.AgentSecret)
-	a.log = a.log.WithAgentID(cfg.AgentID)
 
 	// Initialize file watcher
 	watcher, err := fsnotify.NewWatcher()
@@ -162,57 +166,63 @@ func (a *Agent) Start() error {
 
 	// Watch config directory
 	if err := watcher.Add(a.config.StateDir()); err != nil {
-		a.log.Warn().Err(err).Str("dir", a.config.StateDir()).Msg("failed to watch state directory")
+		log.Warn().Err(err).Msg("Failed to watch state directory")
+	}
+
+	// Start reconciler if available
+	if a.reconciler != nil {
+		a.reconciler.Start()
 	}
 
 	// Pull initial config
 	if err := a.pullConfig(); err != nil {
-		a.log.Error().Err(err).Msg("failed to pull initial config")
+		log.Error().Err(err).Msg("Failed to pull initial config")
 	}
 
 	// Start background tasks
-	taskCount := 3
-	if a.singleNode {
-		taskCount = 4 // Add worker reconcile loop
-	}
-	a.wg.Add(taskCount)
+	a.wg.Add(3)
 	go a.statusReportLoop()
 	go a.configPollLoop()
 	go a.fileWatchLoop()
-	if a.singleNode {
-		go a.workerReconcileLoop()
-	}
 
 	// Start WebSocket heartbeat
 	if err := a.client.StartHeartbeat(a.ctx, a.agentID, a.handleHeartbeatResponse); err != nil {
-		a.log.Warn().Err(err).Msg("failed to start heartbeat, will retry")
+		log.Warn().Err(err).Msg("Failed to start heartbeat, will retry")
 	}
 
-	a.log.Info().Msg("agent started")
+	log.Info().
+		Str("agent_id", a.agentID).
+		Msg("Agent started")
 
 	return nil
 }
 
 // Stop stops the agent
 func (a *Agent) Stop() {
-	a.log.Info().Msg("stopping agent...")
+	log.Info().Msg("Stopping agent...")
 
 	a.cancel()
 	a.client.StopHeartbeat()
+
+	// Stop reconciler
+	if a.reconciler != nil {
+		a.reconciler.Stop()
+	}
+
+	// Stop hypervisor manager
+	if a.hypervisorMgr != nil {
+		if err := a.hypervisorMgr.Stop(); err != nil {
+			log.Error().Err(err).Msg("Failed to stop hypervisor manager")
+		}
+	}
 
 	if a.watcher != nil {
 		_ = a.watcher.Close()
 	}
 
-	// Stop worker manager
-	if a.workerManager != nil {
-		a.log.Info().Msg("stopping worker manager...")
-		a.workerManager.Shutdown()
-	}
-
 	a.wg.Wait()
 
-	a.log.Info().Msg("agent stopped")
+	log.Info().Msg("Agent stopped")
 }
 
 // statusReportLoop periodically reports status to the server
@@ -221,7 +231,7 @@ func (a *Agent) statusReportLoop() {
 
 	// Report immediately on start
 	if err := a.reportStatus(); err != nil {
-		a.log.Error().Err(err).Msg("failed to report initial status")
+		log.Error().Err(err).Msg("Failed to report initial status")
 	}
 
 	ticker := time.NewTicker(statusReportInterval)
@@ -233,7 +243,7 @@ func (a *Agent) statusReportLoop() {
 			return
 		case <-ticker.C:
 			if err := a.reportStatus(); err != nil {
-				a.log.Error().Err(err).Msg("failed to report status")
+				log.Error().Err(err).Msg("Failed to report status")
 			}
 		}
 	}
@@ -274,14 +284,9 @@ func (a *Agent) fileWatchLoop() {
 				newHash := a.computeFileHash()
 				if newHash != a.lastFileHash {
 					a.lastFileHash = newHash
-					a.log.Debug().Str("file", event.Name).Msg("file changed, reporting status")
+					log.Debug().Str("file", event.Name).Msg("File changed, reporting status")
 					if err := a.reportStatus(); err != nil {
-						a.log.Error().Err(err).Msg("failed to report status after file change")
-					}
-
-					// Trigger worker reconciliation if in single-node mode
-					if a.singleNode && a.workerManager != nil {
-						a.reconcileWorkers()
+						log.Error().Err(err).Msg("Failed to report status after file change")
 					}
 				}
 			}
@@ -289,118 +294,21 @@ func (a *Agent) fileWatchLoop() {
 			if !ok {
 				return
 			}
-			a.log.Error().Err(err).Msg("file watcher error")
+			log.Error().Err(err).Msg("File watcher error")
 		}
-	}
-}
-
-// workerReconcileLoop periodically reconciles worker processes with desired state
-func (a *Agent) workerReconcileLoop() {
-	defer a.wg.Done()
-
-	// Initial reconciliation
-	a.reconcileWorkers()
-
-	ticker := time.NewTicker(workerReconcileInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-a.ctx.Done():
-			return
-		case <-ticker.C:
-			a.reconcileWorkers()
-		}
-	}
-}
-
-// reconcileWorkers reconciles worker processes based on the workers.json file
-func (a *Agent) reconcileWorkers() {
-	if a.workerManager == nil {
-		return
-	}
-
-	// Load workers from state file
-	workersPath := filepath.Join(a.config.StateDir(), "workers.json")
-	data, err := os.ReadFile(workersPath)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			a.log.Error().Err(err).Msg("failed to read workers.json")
-		}
-		return
-	}
-
-	var tfWorkers []worker.TensorFusionWorkerInfo
-	if err := json.Unmarshal(data, &tfWorkers); err != nil {
-		a.log.Error().Err(err).Msg("failed to parse workers.json")
-		return
-	}
-
-	// Convert to worker configs
-	workerConfigs := make([]worker.WorkerConfig, 0, len(tfWorkers))
-	portBase := worker.DefaultWorkerPort
-	for i, tw := range tfWorkers {
-		enabled := tw.Status == "Running"
-		workerConfigs = append(workerConfigs, worker.WorkerConfig{
-			WorkerID:   tw.WorkerUID,
-			GPUIDs:     tw.AllocatedDevices,
-			ListenPort: portBase + i,
-			Mode:       worker.WorkerModeTCP,
-			Enabled:    enabled,
-		})
-	}
-
-	// Reconcile workers
-	if err := a.workerManager.Reconcile(workerConfigs); err != nil {
-		a.log.Error().Err(err).Msg("failed to reconcile workers")
-		return
-	}
-
-	// Update config file with actual worker status
-	a.updateWorkerStatus()
-}
-
-// updateWorkerStatus updates the config workers file with actual process status
-func (a *Agent) updateWorkerStatus() {
-	states := a.workerManager.List()
-	workers := make([]config.WorkerConfig, 0, len(states))
-
-	for _, state := range states {
-		status := "stopped"
-		switch state.Status {
-		case worker.WorkerStatusRunning:
-			status = "running"
-		case worker.WorkerStatusError:
-			status = "error"
-		case worker.WorkerStatusTerminated:
-			status = "terminated"
-		}
-
-		workers = append(workers, config.WorkerConfig{
-			WorkerID:   state.Config.WorkerID,
-			GPUIDs:     state.Config.GPUIDs,
-			ListenPort: state.Config.ListenPort,
-			Enabled:    state.Config.Enabled,
-			Status:     status,
-			PID:        state.PID,
-		})
-	}
-
-	if err := a.config.SaveWorkers(workers); err != nil {
-		a.log.Error().Err(err).Msg("failed to save worker status")
 	}
 }
 
 // handleHeartbeatResponse handles WebSocket heartbeat responses
 func (a *Agent) handleHeartbeatResponse(resp *api.HeartbeatResponse) {
 	if resp.ConfigVersion > a.configVersion {
-		a.log.Info().
+		log.Info().
 			Int("old_version", a.configVersion).
 			Int("new_version", resp.ConfigVersion).
-			Msg("config version changed, pulling new config")
+			Msg("Config version changed, pulling new config")
 
 		if err := a.pullConfig(); err != nil {
-			a.log.Error().Err(err).Msg("failed to pull config")
+			log.Error().Err(err).Msg("Failed to pull config")
 		}
 	}
 }
@@ -436,53 +344,50 @@ func (a *Agent) pullConfig() error {
 		return err
 	}
 
-	// Write to tensor-fusion state directory for hypervisor to pick up
-	if err := a.syncToStateDir(workers); err != nil {
-		a.log.Warn().Err(err).Msg("failed to sync workers to state directory")
+	// Reconcile workers with hypervisor if available
+	if a.reconciler != nil {
+		specs := a.convertToWorkerSpecs(resp.Workers)
+		a.reconciler.SetDesiredWorkers(specs)
 	}
 
 	a.configVersion = resp.ConfigVersion
 
-	a.log.Info().
+	log.Info().
 		Int("version", resp.ConfigVersion).
 		Int("workers", len(resp.Workers)).
-		Msg("config pulled successfully")
+		Msg("Config pulled successfully")
 
 	return nil
 }
 
-// syncToStateDir syncs worker configuration to tensor-fusion state directory
-func (a *Agent) syncToStateDir(workers []config.WorkerConfig) error {
-	// Convert to tensor-fusion format
-	tfWorkers := make([]map[string]interface{}, len(workers))
-	for i, w := range workers {
-		tfWorkers[i] = map[string]interface{}{
-			"WorkerUID":        w.WorkerID,
-			"AllocatedDevices": w.GPUIDs,
-			"Status":           "Pending",
+// convertToWorkerSpecs converts API worker configs to hypervisor worker specs
+func (a *Agent) convertToWorkerSpecs(apiWorkers []api.WorkerConfig) []hypervisor.WorkerSpec {
+	specs := make([]hypervisor.WorkerSpec, len(apiWorkers))
+	for i, w := range apiWorkers {
+		specs[i] = hypervisor.WorkerSpec{
+			WorkerID:       w.WorkerID,
+			GPUIDs:         w.GPUIDs,
+			Enabled:        w.Enabled,
+			VRAMMb:         w.VRAMMb,
+			ComputePercent: w.ComputePercent,
 		}
-		if w.Enabled {
-			tfWorkers[i]["Status"] = "Running"
+		if w.IsolationMode != "" {
+			specs[i].IsolationMode = toTFIsolationMode(w.IsolationMode)
 		}
 	}
+	return specs
+}
 
-	data, err := json.MarshalIndent(tfWorkers, "", "  ")
-	if err != nil {
-		return err
+// toTFIsolationMode converts a string to tensor-fusion IsolationModeType
+func toTFIsolationMode(s string) tfv1.IsolationModeType {
+	switch s {
+	case "soft":
+		return tfv1.IsolationModeSoft
+	case "partitioned":
+		return tfv1.IsolationModePartitioned
+	default:
+		return tfv1.IsolationModeShared
 	}
-
-	stateDir := a.config.StateDir()
-	if err := os.MkdirAll(stateDir, 0755); err != nil {
-		return err
-	}
-
-	filePath := stateDir + "/workers.json"
-	tmpPath := filePath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
-		return err
-	}
-
-	return os.Rename(tmpPath, filePath)
 }
 
 // reportStatus reports current status to the server
@@ -507,14 +412,29 @@ func (a *Agent) reportStatus() error {
 		}
 	}
 
-	workerStatuses := make([]api.WorkerStatus, len(workerConfigs))
-	for i, w := range workerConfigs {
-		workerStatuses[i] = api.WorkerStatus{
-			WorkerID:    w.WorkerID,
-			Status:      w.Status,
-			PID:         w.PID,
-			GPUIDs:      w.GPUIDs,
-			Connections: w.Connections,
+	// If hypervisor is available, get worker status from it
+	var workerStatuses []api.WorkerStatus
+	if a.hypervisorMgr != nil && a.hypervisorMgr.IsStarted() {
+		hvWorkers := a.hypervisorMgr.ListWorkers()
+		workerStatuses = make([]api.WorkerStatus, len(hvWorkers))
+		for i, w := range hvWorkers {
+			workerStatuses[i] = api.WorkerStatus{
+				WorkerID: w.WorkerUID,
+				Status:   string(w.Status),
+				GPUIDs:   w.AllocatedDevices,
+			}
+		}
+	} else {
+		// Fallback to config-based status
+		workerStatuses = make([]api.WorkerStatus, len(workerConfigs))
+		for i, w := range workerConfigs {
+			workerStatuses[i] = api.WorkerStatus{
+				WorkerID:    w.WorkerID,
+				Status:      w.Status,
+				PID:         w.PID,
+				GPUIDs:      w.GPUIDs,
+				Connections: w.Connections,
+			}
 		}
 	}
 
@@ -544,6 +464,16 @@ func (a *Agent) computeFileHash() string {
 	}
 
 	return hex.EncodeToString(hash.Sum(nil))
+}
+
+// GetHypervisorManager returns the hypervisor manager if available
+func (a *Agent) GetHypervisorManager() *hypervisor.Manager {
+	return a.hypervisorMgr
+}
+
+// GetReconciler returns the reconciler if available
+func (a *Agent) GetReconciler() *hypervisor.Reconciler {
+	return a.reconciler
 }
 
 // ErrNotRegistered indicates the agent is not registered

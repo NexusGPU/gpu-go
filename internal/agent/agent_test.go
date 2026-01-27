@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -267,38 +266,9 @@ func TestAgent_ReportStatus(t *testing.T) {
 	assert.Equal(t, 12345, receivedReq.Workers[0].PID)
 }
 
-func TestAgent_SyncToStateDir(t *testing.T) {
-	tmpDir := t.TempDir()
-	configDir := filepath.Join(tmpDir, "config")
-	stateDir := filepath.Join(tmpDir, "state")
-
-	configMgr := config.NewManager(configDir, stateDir)
-
-	agent := &Agent{
-		config: configMgr,
-	}
-
-	workers := []config.WorkerConfig{
-		{WorkerID: "worker_1", GPUIDs: []string{"GPU-0"}, ListenPort: 9001, Enabled: true},
-		{WorkerID: "worker_2", GPUIDs: []string{"GPU-1"}, ListenPort: 9002, Enabled: false},
-	}
-
-	err := agent.syncToStateDir(workers)
-	require.NoError(t, err)
-
-	// Verify state file was created
-	data, err := os.ReadFile(filepath.Join(stateDir, "workers.json"))
-	require.NoError(t, err)
-
-	var tfWorkers []map[string]interface{}
-	err = json.Unmarshal(data, &tfWorkers)
-	require.NoError(t, err)
-	assert.Len(t, tfWorkers, 2)
-	assert.Equal(t, "worker_1", tfWorkers[0]["WorkerUID"])
-	assert.Equal(t, "Running", tfWorkers[0]["Status"])
-	assert.Equal(t, "worker_2", tfWorkers[1]["WorkerUID"])
-	assert.Equal(t, "Pending", tfWorkers[1]["Status"]) // Disabled worker
-}
+// TestAgent_SyncToStateDir - removed as worker state is now managed via hypervisor reconciler
+// The agent delegates worker management to the hypervisor backend (StartWorker/StopWorker)
+// See internal/hypervisor/reconciler.go for worker reconciliation logic
 
 func TestAgent_HandleHeartbeatResponse(t *testing.T) {
 	tmpDir := t.TempDir()

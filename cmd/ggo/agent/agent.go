@@ -4,13 +4,16 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 
 	"github.com/NexusGPU/gpu-go/internal/agent"
 	"github.com/NexusGPU/gpu-go/internal/api"
 	"github.com/NexusGPU/gpu-go/internal/config"
+	"github.com/NexusGPU/gpu-go/internal/hypervisor"
 	"github.com/NexusGPU/gpu-go/internal/platform"
 	"github.com/NexusGPU/gpu-go/internal/tui"
+	tfv1 "github.com/NexusGPU/tensor-fusion/api/v1"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 )
@@ -21,8 +24,7 @@ var (
 	serverURL      string
 	outputFormat   string
 	acceleratorLib string
-	workerBinary   string
-	singleNode     bool
+	isolationMode  string
 	paths          = platform.DefaultPaths()
 )
 
@@ -39,8 +41,7 @@ func NewAgentCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVar(&serverURL, "server", api.GetDefaultBaseURL(), "Server URL (or set GPU_GO_ENDPOINT env var)")
 	cmd.PersistentFlags().StringVarP(&outputFormat, "output", "o", "table", "Output format (table, json)")
 	cmd.PersistentFlags().StringVar(&acceleratorLib, "accelerator-lib", "", "Path to accelerator library (auto-detected if not specified)")
-	cmd.PersistentFlags().StringVar(&workerBinary, "worker-binary", "tensor-fusion-worker", "Path to worker binary")
-	cmd.PersistentFlags().BoolVar(&singleNode, "single-node", false, "Enable single-node mode with local worker management")
+	cmd.PersistentFlags().StringVar(&isolationMode, "isolation-mode", "shared", "Worker isolation mode (shared, soft, partitioned)")
 
 	cmd.AddCommand(newRegisterCmd())
 	cmd.AddCommand(newStartCmd())
@@ -51,6 +52,17 @@ func NewAgentCmd() *cobra.Command {
 
 func getOutput() *tui.Output {
 	return tui.NewOutputWithFormat(tui.ParseOutputFormat(outputFormat))
+}
+
+func getIsolationMode() tfv1.IsolationModeType {
+	switch isolationMode {
+	case "soft":
+		return tfv1.IsolationModeSoft
+	case "partitioned":
+		return tfv1.IsolationModePartitioned
+	default:
+		return tfv1.IsolationModeShared
+	}
 }
 
 func newRegisterCmd() *cobra.Command {
@@ -70,27 +82,24 @@ func newRegisterCmd() *cobra.Command {
 				if !out.IsJSON() {
 					fmt.Println(tui.ErrorMessage("Token is required. Use --token flag or GPU_GO_TOKEN environment variable"))
 				}
-				// Show help for missing required parameter
 				return fmt.Errorf("token is required")
 			}
 
 			configMgr := config.NewManager(configDir, stateDir)
 			client := api.NewClient(api.WithBaseURL(serverURL))
 
-			// Discover GPUs (placeholder - in real implementation, use nvml or similar)
+			// Discover GPUs using hypervisor or mock
 			gpus := discoverGPUs()
 			if len(gpus) == 0 {
-				// Runtime error - don't show help
 				cmd.SilenceUsage = true
 				if !out.IsJSON() {
-					fmt.Println(tui.ErrorMessage("No GPUs found. Please check your GPU configuration"))
+					fmt.Println(tui.ErrorMessage("No GPUs found. Please check your GPU configuration or use GPU_GO_MOCK_GPUS for testing"))
 				}
 				return fmt.Errorf("no GPUs found")
 			}
 
 			agentInstance := agent.NewAgent(client, configMgr)
 			if err := agentInstance.Register(token, gpus); err != nil {
-				// Runtime error - don't show help
 				cmd.SilenceUsage = true
 				log.Error().Err(err).Msg("Failed to register agent")
 				return err
@@ -123,7 +132,6 @@ func newStartCmd() *cobra.Command {
 
 			// Check if agent is registered
 			if !configMgr.ConfigExists() {
-				// Runtime error - don't show help
 				cmd.SilenceUsage = true
 				if !out.IsJSON() {
 					fmt.Println(tui.ErrorMessage("Agent is not registered. Please run 'ggo agent register' first"))
@@ -133,7 +141,6 @@ func newStartCmd() *cobra.Command {
 
 			cfg, err := configMgr.LoadConfig()
 			if err != nil {
-				// Runtime error - don't show help
 				cmd.SilenceUsage = true
 				log.Error().Err(err).Msg("Failed to load config")
 				return err
@@ -144,10 +151,22 @@ func newStartCmd() *cobra.Command {
 				api.WithAgentSecret(cfg.AgentSecret),
 			)
 
-			// Create agent with single-node options
-			agentInstance := agent.NewAgentWithOptions(client, configMgr, singleNode, workerBinary)
+			// Create hypervisor manager
+			hvMgr, err := createHypervisorManager()
+			if err != nil {
+				// Log warning but continue - agent can work without hypervisor for some operations
+				log.Warn().Err(err).Msg("Failed to initialize hypervisor manager, worker management will be limited")
+			}
+
+			// Create agent with hypervisor integration
+			var agentInstance *agent.Agent
+			if hvMgr != nil {
+				agentInstance = agent.NewAgentWithHypervisor(client, configMgr, hvMgr)
+			} else {
+				agentInstance = agent.NewAgent(client, configMgr)
+			}
+
 			if err := agentInstance.Start(); err != nil {
-				// Runtime error - don't show help
 				cmd.SilenceUsage = true
 				log.Error().Err(err).Msg("Failed to start agent")
 				return err
@@ -155,14 +174,14 @@ func newStartCmd() *cobra.Command {
 
 			if !out.IsJSON() {
 				styles := tui.DefaultStyles()
-				modeStr := ""
-				if singleNode {
-					modeStr = " [single-node]"
-				}
-				fmt.Printf("%s Agent started (ID: %s)%s\n",
+				fmt.Printf("%s Agent started (ID: %s)\n",
 					styles.Success.Render("●"),
-					styles.Bold.Render(cfg.AgentID),
-					modeStr)
+					styles.Bold.Render(cfg.AgentID))
+				if hvMgr != nil {
+					fmt.Printf("%s Hypervisor integration enabled (vendor: %s)\n",
+						styles.Success.Render("●"),
+						hvMgr.GetVendor())
+				}
 				fmt.Println(tui.Muted("Press Ctrl+C to stop..."))
 			}
 
@@ -195,7 +214,6 @@ func newStatusCmd() *cobra.Command {
 
 			cfg, err := configMgr.LoadConfig()
 			if err != nil {
-				// Runtime error - don't show help
 				cmd.SilenceUsage = true
 				log.Error().Err(err).Msg("Failed to load config")
 				return err
@@ -203,7 +221,7 @@ func newStatusCmd() *cobra.Command {
 
 			if cfg == nil {
 				if out.IsJSON() {
-					return out.PrintJSON(map[string]interface{}{
+					return out.PrintJSON(map[string]any{
 						"registered": false,
 						"message":    "Agent is not registered",
 					})
@@ -217,7 +235,7 @@ func newStatusCmd() *cobra.Command {
 			workers, _ := configMgr.LoadWorkers()
 
 			if out.IsJSON() {
-				return out.PrintJSON(map[string]interface{}{
+				return out.PrintJSON(map[string]any{
 					"registered":     true,
 					"agent_id":       cfg.AgentID,
 					"config_version": cfg.ConfigVersion,
@@ -299,68 +317,91 @@ func newStatusCmd() *cobra.Command {
 	return cmd
 }
 
-// discoverGPUs discovers GPUs on the system using the Hypervisor's AcceleratorInterface
+// discoverGPUs discovers GPUs using hypervisor or returns mock GPUs
 func discoverGPUs() []api.GPUInfo {
-	// Check for mock mode first (for testing without real GPUs)
-	mockEnv := os.Getenv("GPU_GO_MOCK_GPUS")
-	if mockEnv != "" {
-		return getMockGPUs(mockEnv)
+	// Check for mock GPUs environment variable
+	if mockCount := os.Getenv("GPU_GO_MOCK_GPUS"); mockCount != "" {
+		count, err := strconv.Atoi(mockCount)
+		if err != nil || count <= 0 {
+			count = 1
+		}
+		log.Info().Int("count", count).Msg("Using mock GPUs for testing")
+		return agent.CreateMockGPUs(count)
 	}
 
-	// Try to use the accelerator library for real GPU discovery
+	// Try to discover GPUs using hypervisor
 	libPath := acceleratorLib
 	if libPath == "" {
-		libPath = os.Getenv("TENSOR_FUSION_ACCELERATOR_LIB")
-	}
-
-	// If no library specified and no path found, use mock GPUs or return empty
-	if libPath == "" {
-		libPath = agent.GetExampleLibraryPath()
+		libPath = agent.FindAcceleratorLibrary()
 	}
 
 	if libPath == "" {
-		log.Debug().Msg("no accelerator library found, use --accelerator-lib or set GPU_GO_MOCK_GPUS env var")
+		log.Warn().Msg("No accelerator library found, set TENSOR_FUSION_LIB_PATH or use --accelerator-lib")
 		return nil
 	}
 
-	// Try to initialize device discovery
-	discovery, err := agent.NewDeviceDiscovery(libPath)
+	// Create temporary hypervisor manager for GPU discovery
+	hvMgr, err := hypervisor.NewManager(hypervisor.Config{
+		LibPath:       libPath,
+		Vendor:        agent.DetectVendorFromLibPath(libPath),
+		IsolationMode: getIsolationMode(),
+		Logger:        log.Logger,
+		StateDir:      stateDir,
+	})
 	if err != nil {
-		log.Debug().Err(err).Str("lib_path", libPath).Msg("failed to initialize device discovery")
+		log.Error().Err(err).Msg("Failed to create hypervisor manager")
 		return nil
 	}
-	defer discovery.Close()
 
-	gpus, err := discovery.DiscoverGPUs()
+	// Start manager to discover devices
+	if err := hvMgr.Start(); err != nil {
+		log.Error().Err(err).Msg("Failed to start hypervisor manager")
+		return nil
+	}
+	defer hvMgr.Stop()
+
+	// Get devices from hypervisor
+	devices, err := hvMgr.ListDevices()
 	if err != nil {
-		log.Error().Err(err).Msg("failed to discover GPUs")
+		log.Error().Err(err).Msg("Failed to list devices")
 		return nil
 	}
 
-	return gpus
+	return agent.ConvertDevicesToGPUInfo(devices)
 }
 
-// getMockGPUs returns mock GPU information based on the mock env value
-// Value can be a number (e.g., "2" for 2 GPUs) or "1" for a single default GPU
-func getMockGPUs(mockEnv string) []api.GPUInfo {
-	count := 1
-	var n int
-	if _, err := fmt.Sscanf(mockEnv, "%d", &n); err == nil && n > 0 {
-		count = n
+// createHypervisorManager creates a hypervisor manager for the agent
+func createHypervisorManager() (*hypervisor.Manager, error) {
+	// Check for mock mode
+	if os.Getenv("GPU_GO_MOCK_GPUS") != "" {
+		return nil, fmt.Errorf("mock mode enabled, hypervisor not available")
 	}
 
-	gpus := make([]api.GPUInfo, count)
-	for i := 0; i < count; i++ {
-		gpus[i] = api.GPUInfo{
-			GPUID:         fmt.Sprintf("GPU-%d", i),
-			Vendor:        "nvidia",
-			Model:         "RTX 4090",
-			VRAMMb:        24576,
-			DriverVersion: "535.104.05",
-			CUDAVersion:   "12.2",
-		}
+	libPath := acceleratorLib
+	if libPath == "" {
+		libPath = agent.FindAcceleratorLibrary()
 	}
-	return gpus
+
+	if libPath == "" {
+		return nil, fmt.Errorf("accelerator library not found")
+	}
+
+	hvMgr, err := hypervisor.NewManager(hypervisor.Config{
+		LibPath:       libPath,
+		Vendor:        agent.DetectVendorFromLibPath(libPath),
+		IsolationMode: getIsolationMode(),
+		Logger:        log.Logger,
+		StateDir:      stateDir,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if err := hvMgr.Start(); err != nil {
+		return nil, err
+	}
+
+	return hvMgr, nil
 }
 
 func boolToYesNo(b bool) string {
