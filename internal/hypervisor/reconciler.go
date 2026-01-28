@@ -13,12 +13,12 @@ import (
 
 // WorkerSpec represents the desired worker specification from cloud backend
 type WorkerSpec struct {
-	WorkerID         string
-	GPUIDs           []string
-	Enabled          bool
-	IsolationMode    tfv1.IsolationModeType
-	VRAMMb           int64
-	ComputePercent   int
+	WorkerID          string
+	GPUIDs            []string
+	Enabled           bool
+	IsolationMode     tfv1.IsolationModeType
+	VRAMMb            int64
+	ComputePercent    int
 	PartitionTemplate string
 }
 
@@ -34,8 +34,8 @@ type Reconciler struct {
 	desiredWorkers  map[string]*WorkerSpec
 
 	// Callbacks for status updates
-	onWorkerStarted func(workerID string)
-	onWorkerStopped func(workerID string)
+	onWorkerStarted     func(workerID string)
+	onWorkerStopped     func(workerID string)
 	onReconcileComplete func(added, removed, updated int)
 }
 

@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	defaultBaseURL = "https://api.gpu.tf"
+	defaultBaseURL = "https://tensor-fusion.ai"
 	defaultTimeout = 30 * time.Second
 )
 
@@ -111,7 +111,7 @@ func WithHeartbeatMode(mode HeartbeatMode) ClientOption {
 }
 
 // NewClient creates a new API client
-// The base URL defaults to GPU_GO_ENDPOINT env var if set, otherwise https://api.gpu.tf
+// The base URL defaults to GPU_GO_ENDPOINT env var if set, otherwise https://tensor-fusion.ai
 // Heartbeat mode defaults to GPU_GO_HEARTBEAT_MODE env var if set, otherwise websocket
 func NewClient(opts ...ClientOption) *Client {
 	c := &Client{
@@ -527,6 +527,38 @@ func (c *Client) DeleteShare(ctx context.Context, shareID string) error {
 	}
 
 	return nil
+}
+
+// --- Ecosystem/Releases APIs ---
+
+// GetReleases fetches middleware releases from the ecosystem API
+// vendor: optional vendor slug (e.g., "nvidia")
+// size: optional number of results (default: 10, max: 500)
+func (c *Client) GetReleases(ctx context.Context, vendor string, size int) (*ReleasesResponse, error) {
+	var resp ReleasesResponse
+
+	req := c.httpClient.R().
+		SetContext(ctx).
+		SetResult(&resp)
+
+	if vendor != "" {
+		req.SetQueryParam("vendor", vendor)
+	}
+	if size > 0 {
+		req.SetQueryParam("size", fmt.Sprintf("%d", size))
+	}
+
+	httpResp, err := req.Get(c.baseURL + "/api/ecosystem/releases")
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get releases: %w", err)
+	}
+
+	if httpResp.StatusCode() != http.StatusOK {
+		return nil, fmt.Errorf("failed to get releases: status %d, body: %s", httpResp.StatusCode(), httpResp.String())
+	}
+
+	return &resp, nil
 }
 
 // --- WebSocket APIs ---

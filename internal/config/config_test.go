@@ -21,7 +21,7 @@ func TestManager_SaveAndLoadConfig(t *testing.T) {
 		ConfigVersion: 3,
 		AgentID:       "agent_xxxxxxxxxxxx",
 		AgentSecret:   "gpugo_xxxxxxxxxxxx",
-		ServerURL:     "https://api.gpu.tf",
+		ServerURL:     "https://tensor-fusion.ai",
 		License: api.License{
 			Plain:     "plyF5Usp2FKiVhWYBlxR0xQ8jkbsMtZw|pro|1768379729916",
 			Encrypted: "base64_ed25519_signature_xxxx",
@@ -124,7 +124,7 @@ func TestManager_UpdateConfigVersion(t *testing.T) {
 		ConfigVersion: 1,
 		AgentID:       "agent_xxxxxxxxxxxx",
 		AgentSecret:   "gpugo_xxxxxxxxxxxx",
-		ServerURL:     "https://api.gpu.tf",
+		ServerURL:     "https://tensor-fusion.ai",
 	}
 	err := mgr.SaveConfig(cfg)
 	require.NoError(t, err)

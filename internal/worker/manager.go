@@ -202,7 +202,9 @@ func (m *Manager) Stop(workerID string) error {
 	case <-time.After(10 * time.Second):
 		// Force kill if graceful shutdown fails
 		if cmd.Process != nil {
-			cmd.Process.Kill()
+			if err := cmd.Process.Kill(); err != nil {
+				l.Warn().Err(err).Msg("failed to kill worker process")
+			}
 		}
 		l.Warn().Msg("worker force killed after timeout")
 	}
@@ -317,11 +319,14 @@ func (m *Manager) SaveStateFile() error {
 
 	tfWorkers := make([]TensorFusionWorkerInfo, 0, len(m.workers))
 	for _, state := range m.workers {
-		status := "Pending"
-		if state.Status == WorkerStatusRunning {
+		var status string
+		switch state.Status {
+		case WorkerStatusRunning:
 			status = "Running"
-		} else if state.Status == WorkerStatusTerminated || state.Status == WorkerStatusError {
+		case WorkerStatusTerminated, WorkerStatusError:
 			status = "Terminated"
+		default:
+			status = "Pending"
 		}
 
 		tfWorkers = append(tfWorkers, TensorFusionWorkerInfo{

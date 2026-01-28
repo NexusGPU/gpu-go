@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/NexusGPU/gpu-go/internal/api"
 	"github.com/NexusGPU/gpu-go/internal/platform"
 )
 
@@ -26,6 +27,9 @@ const (
 
 	// ManifestPath is the path to the version manifest on CDN
 	ManifestPath = "/vgpu/manifest.json"
+
+	// CachedManifestFile is the filename for the cached releases manifest
+	CachedManifestFile = "releases-manifest.json"
 )
 
 // Library represents a downloadable library
@@ -55,6 +59,8 @@ type LocalManifest struct {
 // Manager manages dependency downloads and versions
 type Manager struct {
 	cdnBaseURL string
+	apiBaseURL string
+	apiClient  *api.Client
 	paths      *platform.Paths
 	httpClient *http.Client
 	mu         sync.RWMutex
@@ -64,6 +70,7 @@ type Manager struct {
 func NewManager(opts ...ManagerOption) *Manager {
 	m := &Manager{
 		cdnBaseURL: DefaultCDNBaseURL,
+		apiBaseURL: api.GetDefaultBaseURL(),
 		paths:      platform.DefaultPaths(),
 		httpClient: &http.Client{
 			Timeout: 5 * time.Minute,
@@ -71,6 +78,10 @@ func NewManager(opts ...ManagerOption) *Manager {
 	}
 	for _, opt := range opts {
 		opt(m)
+	}
+	// Initialize API client if not set
+	if m.apiClient == nil {
+		m.apiClient = api.NewClient(api.WithBaseURL(m.apiBaseURL))
 	}
 	return m
 }
@@ -92,31 +103,190 @@ func WithPaths(paths *platform.Paths) ManagerOption {
 	}
 }
 
-// FetchManifest fetches the version manifest from CDN
-func (m *Manager) FetchManifest(ctx context.Context) (*Manifest, error) {
-	url := m.cdnBaseURL + ManifestPath
+// WithAPIBaseURL sets a custom API base URL
+func WithAPIBaseURL(url string) ManagerOption {
+	return func(m *Manager) {
+		m.apiBaseURL = strings.TrimSuffix(url, "/")
+		if m.apiClient != nil {
+			m.apiClient.SetBaseURL(m.apiBaseURL)
+		} else {
+			m.apiClient = api.NewClient(api.WithBaseURL(m.apiBaseURL))
+		}
+	}
+}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+// WithAPIClient sets a custom API client
+func WithAPIClient(client *api.Client) ManagerOption {
+	return func(m *Manager) {
+		m.apiClient = client
+		if client != nil {
+			m.apiBaseURL = client.GetBaseURL()
+		}
+	}
+}
+
+// SyncReleases fetches releases from the API and caches them locally
+func (m *Manager) SyncReleases(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Fetch all releases (max 500)
+	releasesResp, err := m.apiClient.GetReleases(ctx, "", 500)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return fmt.Errorf("failed to fetch releases from API: %w", err)
 	}
 
-	resp, err := m.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch manifest: %w", err)
+	// Convert API releases to internal manifest format
+	manifest := &Manifest{
+		Version:   fmt.Sprintf("api-%d", time.Now().Unix()),
+		UpdatedAt: time.Now(),
+		Libraries: []Library{},
 	}
-	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch manifest: status %d", resp.StatusCode)
+	// Map releases to libraries based on current platform
+	currentOS := runtime.GOOS
+	currentArch := runtime.GOARCH
+
+	for _, release := range releasesResp.Releases {
+		// Find matching artifact for current platform
+		for _, artifact := range release.Artifacts {
+			// Map OS names: linux, darwin, windows
+			artifactOS := strings.ToLower(artifact.OS)
+			if artifactOS == "macos" {
+				artifactOS = "darwin"
+			}
+
+			// Map arch names: amd64, arm64
+			artifactArch := strings.ToLower(artifact.CPUArch)
+			if artifactArch == "x86_64" || artifactArch == "x64" {
+				artifactArch = "amd64"
+			}
+
+			if artifactOS == currentOS && artifactArch == currentArch {
+				// Extract library name from URL or use vendor/version
+				libName := m.extractLibraryName(release.Vendor.Slug, artifact.URL)
+
+				// Get size from metadata if available, otherwise 0
+				size := int64(0)
+				if sizeStr, ok := artifact.Metadata["size"]; ok {
+					fmt.Sscanf(sizeStr, "%d", &size)
+				}
+
+				lib := Library{
+					Name:     libName,
+					Version:  release.Version,
+					Platform: artifactOS,
+					Arch:     artifactArch,
+					URL:      artifact.URL,
+					SHA256:   artifact.SHA256,
+					Size:     size,
+				}
+				manifest.Libraries = append(manifest.Libraries, lib)
+			}
+		}
+	}
+
+	// Save to cache
+	return m.saveCachedManifest(manifest)
+}
+
+// extractLibraryName extracts library name from vendor slug and URL
+func (m *Manager) extractLibraryName(vendorSlug, url string) string {
+	// Try to extract from URL filename
+	parts := strings.Split(url, "/")
+	if len(parts) > 0 {
+		filename := parts[len(parts)-1]
+		// Remove query params if any
+		if idx := strings.Index(filename, "?"); idx >= 0 {
+			filename = filename[:idx]
+		}
+		// Remove fragment if any
+		if idx := strings.Index(filename, "#"); idx >= 0 {
+			filename = filename[:idx]
+		}
+		// Use filename as library name if it looks like a library file
+		if filename != "" && (strings.Contains(filename, ".so") || strings.Contains(filename, ".dll") || strings.Contains(filename, ".dylib")) {
+			return filename
+		}
+		// If filename doesn't look like a library, try to find one in the path
+		for i := len(parts) - 1; i >= 0; i-- {
+			part := parts[i]
+			if strings.Contains(part, ".so") || strings.Contains(part, ".dll") || strings.Contains(part, ".dylib") {
+				return part
+			}
+		}
+	}
+	// Fallback to vendor-based name
+	return fmt.Sprintf("lib%s.so", vendorSlug)
+}
+
+// LoadCachedManifest loads the cached manifest from local storage
+func (m *Manager) LoadCachedManifest() (*Manifest, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	manifestPath := filepath.Join(m.paths.ConfigDir(), CachedManifestFile)
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil // No cached manifest
+		}
+		return nil, fmt.Errorf("failed to read cached manifest: %w", err)
 	}
 
 	var manifest Manifest
-	if err := json.NewDecoder(resp.Body).Decode(&manifest); err != nil {
-		return nil, fmt.Errorf("failed to decode manifest: %w", err)
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return nil, fmt.Errorf("failed to decode cached manifest: %w", err)
 	}
 
 	return &manifest, nil
+}
+
+// saveCachedManifest saves the manifest to local cache
+func (m *Manager) saveCachedManifest(manifest *Manifest) error {
+	manifestPath := filepath.Join(m.paths.ConfigDir(), CachedManifestFile)
+
+	data, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to encode manifest: %w", err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(manifestPath), 0755); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+
+	tmpPath := manifestPath + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write manifest: %w", err)
+	}
+
+	return os.Rename(tmpPath, manifestPath)
+}
+
+// FetchManifest loads the cached manifest, or syncs from API if not available
+func (m *Manager) FetchManifest(ctx context.Context) (*Manifest, error) {
+	// Try to load from cache first
+	manifest, err := m.LoadCachedManifest()
+	if err != nil {
+		return nil, err
+	}
+
+	// If no cached manifest, sync from API
+	if manifest == nil {
+		if err := m.SyncReleases(ctx); err != nil {
+			return nil, fmt.Errorf("failed to sync releases: %w", err)
+		}
+		// Load again after sync
+		manifest, err = m.LoadCachedManifest()
+		if err != nil {
+			return nil, err
+		}
+		if manifest == nil {
+			return nil, fmt.Errorf("failed to load manifest after sync")
+		}
+	}
+
+	return manifest, nil
 }
 
 // GetLibrariesForPlatform returns libraries matching the current platform

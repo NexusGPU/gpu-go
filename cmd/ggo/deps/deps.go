@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/NexusGPU/gpu-go/internal/api"
 	"github.com/NexusGPU/gpu-go/internal/deps"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
@@ -12,6 +13,7 @@ import (
 
 var (
 	cdnURL string
+	apiURL string
 	force  bool
 )
 
@@ -24,7 +26,9 @@ func NewDepsCmd() *cobra.Command {
 	}
 
 	cmd.PersistentFlags().StringVar(&cdnURL, "cdn", deps.DefaultCDNBaseURL, "CDN base URL")
+	cmd.PersistentFlags().StringVar(&apiURL, "api", api.GetDefaultBaseURL(), "API base URL (or set GPU_GO_ENDPOINT env var)")
 
+	cmd.AddCommand(newSyncCmd())
 	cmd.AddCommand(newListCmd())
 	cmd.AddCommand(newDownloadCmd())
 	cmd.AddCommand(newInstallCmd())
@@ -34,12 +38,50 @@ func NewDepsCmd() *cobra.Command {
 	return cmd
 }
 
+func getManager() *deps.Manager {
+	return deps.NewManager(
+		deps.WithCDNBaseURL(cdnURL),
+		deps.WithAPIBaseURL(apiURL),
+	)
+}
+
+func newSyncCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "sync",
+		Short: "Sync releases metadata from API",
+		Long:  `Fetch vendor releases from the API and cache them locally as version metadata.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			mgr := getManager()
+			ctx := context.Background()
+
+			fmt.Println("Syncing releases from API...")
+			if err := mgr.SyncReleases(ctx); err != nil {
+				cmd.SilenceUsage = true
+				log.Error().Err(err).Msg("Failed to sync releases")
+				return err
+			}
+
+			// Load and display synced manifest
+			manifest, err := mgr.LoadCachedManifest()
+			if err != nil {
+				log.Warn().Err(err).Msg("Failed to load cached manifest")
+			} else if manifest != nil {
+				fmt.Printf("Synced %d libraries (manifest version: %s)\n", len(manifest.Libraries), manifest.Version)
+			}
+
+			fmt.Println("Sync complete!")
+			return nil
+		},
+	}
+	return cmd
+}
+
 func newListCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List available and installed dependencies",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			mgr := deps.NewManager(deps.WithCDNBaseURL(cdnURL))
+			mgr := getManager()
 			ctx := context.Background()
 
 			// Get installed libraries
@@ -56,7 +98,7 @@ func newListCmd() *cobra.Command {
 				fmt.Println()
 			}
 
-			// Fetch available libraries
+			// Fetch available libraries (from cached manifest or sync)
 			fmt.Println("Fetching available libraries...")
 			manifest, err := mgr.FetchManifest(ctx)
 			if err != nil {
@@ -97,7 +139,7 @@ func newDownloadCmd() *cobra.Command {
 		Short: "Download dependencies to cache",
 		Long:  `Download vGPU library dependencies to the local cache without installing.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			mgr := deps.NewManager(deps.WithCDNBaseURL(cdnURL))
+			mgr := getManager()
 			ctx := context.Background()
 
 			manifest, err := mgr.FetchManifest(ctx)
@@ -162,7 +204,7 @@ func newInstallCmd() *cobra.Command {
 		Short: "Download and install dependencies",
 		Long:  `Download and install vGPU library dependencies to the system.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			mgr := deps.NewManager(deps.WithCDNBaseURL(cdnURL))
+			mgr := getManager()
 			ctx := context.Background()
 
 			manifest, err := mgr.FetchManifest(ctx)
@@ -240,7 +282,7 @@ func newUpdateCmd() *cobra.Command {
 		Use:   "update",
 		Short: "Check for and install updates",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			mgr := deps.NewManager(deps.WithCDNBaseURL(cdnURL))
+			mgr := getManager()
 			ctx := context.Background()
 
 			fmt.Println("Checking for updates...")
@@ -298,7 +340,7 @@ func newCleanCmd() *cobra.Command {
 		Use:   "clean",
 		Short: "Clean the dependency cache",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			mgr := deps.NewManager(deps.WithCDNBaseURL(cdnURL))
+			mgr := getManager()
 
 			fmt.Println("Cleaning dependency cache...")
 			if err := mgr.CleanCache(); err != nil {

@@ -81,11 +81,16 @@ func getHypervisorManager() (*hypervisor.Manager, error) {
 
 		libPath := acceleratorLib
 		if libPath == "" {
-			libPath = agent.FindAcceleratorLibrary()
-		}
-		if libPath == "" {
-			hypervisorErr = fmt.Errorf("accelerator library not found")
-			return
+			var err error
+			libPath, err = agent.DownloadOrFindAccelerator()
+			if err != nil {
+				hypervisorErr = fmt.Errorf("failed to find or download accelerator library: %w", err)
+				return
+			}
+			if libPath == "" {
+				hypervisorErr = fmt.Errorf("accelerator library not found")
+				return
+			}
 		}
 
 		hypervisorManager, hypervisorErr = hypervisor.NewManager(hypervisor.Config{

@@ -58,7 +58,7 @@ On your GPU server, install and start the ggo agent:
 
 ```bash
 # Install ggo CLI
-curl -fsSL https://get.gpu.tf/install.sh | sh
+curl -fsSL https://cdn.tensor-fusion.ai/gpugo/install.sh | sh
 
 # Login to your account
 ggo login
@@ -99,7 +99,7 @@ Use the **"Create Studio"** button in the extension to create a new development 
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `gpugo.serverUrl` | `https://api.gpu.tf` | GPU Go API server URL |
+| `gpugo.serverUrl` | `https://tensor-fusion.ai` | GPU Go API server URL |
 | `gpugo.dashboardUrl` | `https://go.tensor-fusion.ai` | GPU Go dashboard URL |
 | `gpugo.cliPath` | *(auto-detected)* | Path to ggo CLI binary |
 | `gpugo.autoRefreshInterval` | `30` | Auto-refresh interval in seconds (0 to disable) |

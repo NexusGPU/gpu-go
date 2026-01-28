@@ -93,7 +93,9 @@ func NewManager(cfg Config) (*Manager, error) {
 	}
 
 	// Set state dir env var for hypervisor components
-	os.Setenv("TENSOR_FUSION_STATE_DIR", cfg.StateDir)
+	if err := os.Setenv("TENSOR_FUSION_STATE_DIR", cfg.StateDir); err != nil {
+		return nil, fmt.Errorf("failed to set TENSOR_FUSION_STATE_DIR: %w", err)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -155,14 +157,20 @@ func (m *Manager) Start() error {
 
 	// 7. Start backend
 	if err := m.backend.Start(); err != nil {
-		m.deviceController.Stop()
+		if stopErr := m.deviceController.Stop(); stopErr != nil {
+			m.log.Warn().Err(stopErr).Msg("failed to stop device controller during cleanup")
+		}
 		return fmt.Errorf("failed to start backend: %w", err)
 	}
 
 	// 8. Start worker controller
 	if err := m.workerController.Start(); err != nil {
-		m.backend.Stop()
-		m.deviceController.Stop()
+		if stopErr := m.backend.Stop(); stopErr != nil {
+			m.log.Warn().Err(stopErr).Msg("failed to stop backend during cleanup")
+		}
+		if stopErr := m.deviceController.Stop(); stopErr != nil {
+			m.log.Warn().Err(stopErr).Msg("failed to stop device controller during cleanup")
+		}
 		return fmt.Errorf("failed to start worker controller: %w", err)
 	}
 
@@ -264,7 +272,9 @@ func (m *Manager) StartWorker(workerInfo *api.WorkerInfo) error {
 
 	// Start the worker in the backend
 	if err := m.backend.StartWorker(workerInfo); err != nil {
-		m.allocationController.DeallocateWorker(workerInfo.WorkerUID)
+		if deallocErr := m.allocationController.DeallocateWorker(workerInfo.WorkerUID); deallocErr != nil {
+			m.log.Warn().Err(deallocErr).Str("worker_uid", workerInfo.WorkerUID).Msg("failed to deallocate worker during cleanup")
+		}
 		return fmt.Errorf("start worker: %w", err)
 	}
 

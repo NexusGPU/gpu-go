@@ -3,7 +3,6 @@ package hypervisor
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
@@ -16,17 +15,10 @@ import (
 )
 
 func getExampleLibPath() string {
-	// Known issue: example library causes bus error on macOS ARM64
-	// See docs/HYPERVISOR-SINGLE-NODE.md for details
-	if runtime.GOOS == "darwin" {
-		return "" // Skip on macOS
-	}
-
 	suffix := ".so"
 
 	// Try multiple paths for the example accelerator library
 	paths := []string{
-		"/Users/joeyyang/Code/tensor-fusion/tensor-fusion-operator/provider/build/libaccelerator_example" + suffix,
 		os.Getenv("TENSOR_FUSION_OPERATOR_PATH") + "/provider/build/libaccelerator_example" + suffix,
 	}
 

@@ -736,7 +736,7 @@ export class CLI {
             return envEndpoint;
         }
         const config = vscode.workspace.getConfiguration('gpugo');
-        return config.get<string>('serverUrl', 'https://api.gpu.tf');
+        return config.get<string>('serverUrl', 'https://tensor-fusion.ai');
     }
 
     getDashboardUrl(): string {

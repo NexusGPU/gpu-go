@@ -231,3 +231,42 @@ func ToIsolationMode(s string) IsolationModeType {
 		return IsolationModeShared
 	}
 }
+
+// ReleaseArtifact represents a downloadable artifact for a release
+type ReleaseArtifact struct {
+	CPUArch  string            `json:"cpuArch"`
+	OS       string            `json:"os"`
+	URL      string            `json:"url"`
+	SHA256   string            `json:"sha256"`
+	Metadata map[string]string `json:"metadata,omitempty"`
+}
+
+// ReleaseRequirements represents version requirements for a release
+type ReleaseRequirements struct {
+	MinTensorFusionVersion string `json:"minTensorFusionVersion,omitempty"`
+	MinDriverVersion       string `json:"minDriverVersion,omitempty"`
+}
+
+// VendorInfo represents vendor information in a release
+type VendorInfo struct {
+	Slug string `json:"slug"`
+	Name string `json:"name"`
+}
+
+// ReleaseInfo represents a middleware release from the API
+type ReleaseInfo struct {
+	ID           string              `json:"id"`
+	Vendor       VendorInfo          `json:"vendor"`
+	Version      string              `json:"version"`
+	ReleaseType  string              `json:"releaseType"`
+	ReleaseDate  time.Time           `json:"releaseDate"`
+	Artifacts    []ReleaseArtifact   `json:"artifacts"`
+	Requirements ReleaseRequirements `json:"requirements"`
+	IsLatest     bool                `json:"isLatest"`
+}
+
+// ReleasesResponse represents the response from GET /api/ecosystem/releases
+type ReleasesResponse struct {
+	Releases []ReleaseInfo `json:"releases"`
+	Count    int           `json:"count"`
+}

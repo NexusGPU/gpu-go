@@ -6,7 +6,23 @@
     "configurations": [
     
         {
-            "name": "Debug GPU Go",
+            "name": "Debug GPU Go Register",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "console": "integratedTerminal",
+            "env": {
+                "GPU_GO_HEARTBEAT_MODE": "long-polling",
+                "GPU_GO_ENDPOINT": "http://127.0.0.1:8787"
+            },
+            "args": [
+                "agent", "register", "--token", "tmp_kpteq4k08krolid2",
+                "--accelerator-lib", "/Users/joeyyang/Code/tensor-fusion/tensor-fusion-operator/provider/build/libaccelerator_example.so"
+            ],
+            "program": "${workspaceFolder}/cmd/ggo/main.go",
+        },
+        {
+            "name": "Debug GPU Go Start",
             "type": "go",
             "request": "launch",
             "mode": "auto",
