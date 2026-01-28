@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"sync"
 	"syscall"
 
 	"github.com/NexusGPU/gpu-go/internal/agent"
@@ -26,6 +27,11 @@ var (
 	acceleratorLib string
 	isolationMode  string
 	paths          = platform.DefaultPaths()
+
+	// Hypervisor singleton
+	hypervisorOnce    sync.Once
+	hypervisorManager *hypervisor.Manager
+	hypervisorErr     error
 )
 
 // NewAgentCmd creates the agent command
@@ -62,6 +68,45 @@ func getIsolationMode() tfv1.IsolationModeType {
 		return tfv1.IsolationModePartitioned
 	default:
 		return tfv1.IsolationModeShared
+	}
+}
+
+// getHypervisorManager returns the singleton hypervisor manager, initializing it if needed
+func getHypervisorManager() (*hypervisor.Manager, error) {
+	hypervisorOnce.Do(func() {
+		if os.Getenv("GPU_GO_MOCK_GPUS") != "" {
+			hypervisorErr = fmt.Errorf("mock mode enabled, hypervisor not available")
+			return
+		}
+
+		libPath := acceleratorLib
+		if libPath == "" {
+			libPath = agent.FindAcceleratorLibrary()
+		}
+		if libPath == "" {
+			hypervisorErr = fmt.Errorf("accelerator library not found")
+			return
+		}
+
+		hypervisorManager, hypervisorErr = hypervisor.NewManager(hypervisor.Config{
+			LibPath:       libPath,
+			Vendor:        agent.DetectVendorFromLibPath(libPath),
+			IsolationMode: getIsolationMode(),
+			Logger:        log.Logger,
+			StateDir:      stateDir,
+		})
+		if hypervisorErr != nil {
+			return
+		}
+		hypervisorErr = hypervisorManager.Start()
+	})
+	return hypervisorManager, hypervisorErr
+}
+
+// stopHypervisorManager stops the singleton hypervisor manager if running
+func stopHypervisorManager() {
+	if hypervisorManager != nil {
+		hypervisorManager.Stop()
 	}
 }
 
@@ -151,8 +196,8 @@ func newStartCmd() *cobra.Command {
 				api.WithAgentSecret(cfg.AgentSecret),
 			)
 
-			// Create hypervisor manager
-			hvMgr, err := createHypervisorManager()
+			// Get singleton hypervisor manager
+			hvMgr, err := getHypervisorManager()
 			if err != nil {
 				// Log warning but continue - agent can work without hypervisor for some operations
 				log.Warn().Err(err).Msg("Failed to initialize hypervisor manager, worker management will be limited")
@@ -196,6 +241,7 @@ func newStartCmd() *cobra.Command {
 			}
 
 			agentInstance.Stop()
+			stopHypervisorManager()
 			return nil
 		},
 	}
@@ -329,38 +375,13 @@ func discoverGPUs() []api.GPUInfo {
 		return agent.CreateMockGPUs(count)
 	}
 
-	// Try to discover GPUs using hypervisor
-	libPath := acceleratorLib
-	if libPath == "" {
-		libPath = agent.FindAcceleratorLibrary()
-	}
-
-	if libPath == "" {
-		log.Warn().Msg("No accelerator library found, set TENSOR_FUSION_LIB_PATH or use --accelerator-lib")
-		return nil
-	}
-
-	// Create temporary hypervisor manager for GPU discovery
-	hvMgr, err := hypervisor.NewManager(hypervisor.Config{
-		LibPath:       libPath,
-		Vendor:        agent.DetectVendorFromLibPath(libPath),
-		IsolationMode: getIsolationMode(),
-		Logger:        log.Logger,
-		StateDir:      stateDir,
-	})
+	// Use singleton hypervisor manager
+	hvMgr, err := getHypervisorManager()
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to create hypervisor manager")
+		log.Warn().Err(err).Msg("Failed to get hypervisor manager")
 		return nil
 	}
 
-	// Start manager to discover devices
-	if err := hvMgr.Start(); err != nil {
-		log.Error().Err(err).Msg("Failed to start hypervisor manager")
-		return nil
-	}
-	defer hvMgr.Stop()
-
-	// Get devices from hypervisor
 	devices, err := hvMgr.ListDevices()
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to list devices")
@@ -368,40 +389,6 @@ func discoverGPUs() []api.GPUInfo {
 	}
 
 	return agent.ConvertDevicesToGPUInfo(devices)
-}
-
-// createHypervisorManager creates a hypervisor manager for the agent
-func createHypervisorManager() (*hypervisor.Manager, error) {
-	// Check for mock mode
-	if os.Getenv("GPU_GO_MOCK_GPUS") != "" {
-		return nil, fmt.Errorf("mock mode enabled, hypervisor not available")
-	}
-
-	libPath := acceleratorLib
-	if libPath == "" {
-		libPath = agent.FindAcceleratorLibrary()
-	}
-
-	if libPath == "" {
-		return nil, fmt.Errorf("accelerator library not found")
-	}
-
-	hvMgr, err := hypervisor.NewManager(hypervisor.Config{
-		LibPath:       libPath,
-		Vendor:        agent.DetectVendorFromLibPath(libPath),
-		IsolationMode: getIsolationMode(),
-		Logger:        log.Logger,
-		StateDir:      stateDir,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	if err := hvMgr.Start(); err != nil {
-		return nil, err
-	}
-
-	return hvMgr, nil
 }
 
 func boolToYesNo(b bool) string {

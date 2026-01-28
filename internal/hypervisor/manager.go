@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -72,14 +73,23 @@ func NewManager(cfg Config) (*Manager, error) {
 	}
 
 	if cfg.IsolationMode == "" {
-		cfg.IsolationMode = tfv1.IsolationModeShared
+		cfg.IsolationMode = tfv1.IsolationModeSoft
 	}
 
 	if cfg.StateDir == "" {
 		cfg.StateDir = os.Getenv("TENSOR_FUSION_STATE_DIR")
 		if cfg.StateDir == "" {
-			cfg.StateDir = "/tmp/tensor-fusion-state"
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return nil, fmt.Errorf("failed to get user home directory: %w", err)
+			}
+			cfg.StateDir = filepath.Join(homeDir, ".gpugo", "state")
 		}
+	}
+
+	// Ensure state directory exists
+	if err := os.MkdirAll(cfg.StateDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create state directory %s: %w", cfg.StateDir, err)
 	}
 
 	// Set state dir env var for hypervisor components

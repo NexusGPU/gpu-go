@@ -6,15 +6,17 @@
     "configurations": [
     
         {
-            "name": "Debug Local Env Operator",
+            "name": "Debug GPU Go",
             "type": "go",
             "request": "launch",
             "mode": "auto",
             "console": "integratedTerminal",
             "env": {
+                "GPU_GO_HEARTBEAT_MODE": "long-polling",
+                "GPU_GO_ENDPOINT": "http://127.0.0.1:8787"
             },
             "args": [
-                "agent", "start", "--server", "http://192.168.2.37:8787"
+                "agent", "start"
             ],
             "program": "${workspaceFolder}/cmd/ggo/main.go",
         }

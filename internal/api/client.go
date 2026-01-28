@@ -19,6 +19,27 @@ const (
 	defaultTimeout = 30 * time.Second
 )
 
+// HeartbeatMode defines the connection mode for heartbeat
+type HeartbeatMode string
+
+const (
+	HeartbeatModeWebSocket   HeartbeatMode = "websocket"
+	HeartbeatModeLongPolling HeartbeatMode = "long-polling"
+)
+
+// GetDefaultHeartbeatMode returns the default heartbeat mode from env var or websocket
+func GetDefaultHeartbeatMode() HeartbeatMode {
+	if mode := os.Getenv("GPU_GO_HEARTBEAT_MODE"); mode != "" {
+		switch mode {
+		case "long-polling", "long_polling":
+			return HeartbeatModeLongPolling
+		case "websocket", "ws":
+			return HeartbeatModeWebSocket
+		}
+	}
+	return HeartbeatModeWebSocket
+}
+
 // GetDefaultBaseURL returns the default base URL, checking GPU_GO_ENDPOINT env var first
 func GetDefaultBaseURL() string {
 	if endpoint := os.Getenv("GPU_GO_ENDPOINT"); endpoint != "" {
@@ -34,12 +55,21 @@ type Client struct {
 	userToken   string
 	agentSecret string
 
+	// Heartbeat configuration
+	heartbeatMode HeartbeatMode
+
 	// WebSocket connection
 	wsConn      *websocket.Conn
 	wsMu        sync.Mutex
 	wsStopCh    chan struct{}
 	wsAgentID   string
 	wsReconnect bool
+
+	// Long polling state
+	lpMu        sync.Mutex
+	lpStopCh    chan struct{}
+	lpAgentID   string
+	lpReconnect bool
 }
 
 // ClientOption is a function that configures the client
@@ -73,13 +103,23 @@ func WithHTTPClient(httpClient *resty.Client) ClientOption {
 	}
 }
 
+// WithHeartbeatMode sets the heartbeat connection mode (websocket or longpolling)
+func WithHeartbeatMode(mode HeartbeatMode) ClientOption {
+	return func(c *Client) {
+		c.heartbeatMode = mode
+	}
+}
+
 // NewClient creates a new API client
 // The base URL defaults to GPU_GO_ENDPOINT env var if set, otherwise https://api.gpu.tf
+// Heartbeat mode defaults to GPU_GO_HEARTBEAT_MODE env var if set, otherwise websocket
 func NewClient(opts ...ClientOption) *Client {
 	c := &Client{
-		baseURL:    GetDefaultBaseURL(),
-		httpClient: resty.New().SetTimeout(defaultTimeout),
-		wsStopCh:   make(chan struct{}),
+		baseURL:       GetDefaultBaseURL(),
+		httpClient:    resty.New().SetTimeout(defaultTimeout),
+		heartbeatMode: GetDefaultHeartbeatMode(),
+		wsStopCh:      make(chan struct{}),
+		lpStopCh:      make(chan struct{}),
 	}
 
 	for _, opt := range opts {
@@ -501,11 +541,37 @@ const (
 	wsMaxConsecutiveFailures = 3
 )
 
+// Long polling constants
+const (
+	lpInitialBackoff         = 1 * time.Minute
+	lpMaxBackoff             = 60 * time.Minute
+	lpPollTimeout            = 90 * time.Second // Server-side timeout, client should reconnect before this
+	lpMaxConsecutiveFailures = 3
+)
+
 // HeartbeatHandler is a callback function for heartbeat responses
 type HeartbeatHandler func(resp *HeartbeatResponse)
 
-// StartHeartbeat starts the WebSocket heartbeat loop with automatic reconnection
+// StartHeartbeat starts the heartbeat loop with automatic reconnection
+// Uses WebSocket or Long Polling based on client configuration
 func (c *Client) StartHeartbeat(ctx context.Context, agentID string, handler HeartbeatHandler) error {
+	mode := c.heartbeatMode
+	if mode == "" {
+		mode = GetDefaultHeartbeatMode()
+	}
+
+	switch mode {
+	case HeartbeatModeLongPolling:
+		return c.startLongPolling(ctx, agentID, handler)
+	case HeartbeatModeWebSocket:
+		fallthrough
+	default:
+		return c.startWebSocket(ctx, agentID, handler)
+	}
+}
+
+// startWebSocket starts the WebSocket heartbeat loop
+func (c *Client) startWebSocket(ctx context.Context, agentID string, handler HeartbeatHandler) error {
 	c.wsMu.Lock()
 	c.wsAgentID = agentID
 	c.wsReconnect = true
@@ -705,30 +771,170 @@ func (c *Client) heartbeatLoop(ctx context.Context, handler HeartbeatHandler) {
 	}
 }
 
-// StopHeartbeat stops the WebSocket heartbeat and closes the connection
+// StopHeartbeat stops the heartbeat and closes the connection (WebSocket or Long Polling)
 func (c *Client) StopHeartbeat() {
+	// Stop WebSocket if active
 	c.wsMu.Lock()
 	c.wsReconnect = false
+	shouldCloseWS := c.wsConn != nil
+	wsStopCh := c.wsStopCh
 	c.wsMu.Unlock()
 
-	// Signal stop - use select to avoid panic if already closed
-	select {
-	case <-c.wsStopCh:
-		// Already closed
-	default:
-		close(c.wsStopCh)
+	if shouldCloseWS {
+		// Signal stop - use select to avoid panic if already closed
+		select {
+		case <-wsStopCh:
+			// Already closed
+		default:
+			close(wsStopCh)
+		}
+
+		c.wsMu.Lock()
+		if c.wsConn != nil {
+			// Send close message before closing
+			_ = c.wsConn.WriteMessage(
+				websocket.CloseMessage,
+				websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
+			)
+			_ = c.wsConn.Close()
+			c.wsConn = nil
+		}
+		c.wsMu.Unlock()
 	}
 
-	c.wsMu.Lock()
-	defer c.wsMu.Unlock()
+	// Stop Long Polling if active
+	c.lpMu.Lock()
+	c.lpReconnect = false
+	shouldCloseLP := c.lpAgentID != ""
+	lpStopCh := c.lpStopCh
+	c.lpMu.Unlock()
 
-	if c.wsConn != nil {
-		// Send close message before closing
-		_ = c.wsConn.WriteMessage(
-			websocket.CloseMessage,
-			websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
-		)
-		_ = c.wsConn.Close()
-		c.wsConn = nil
+	if shouldCloseLP {
+		// Signal stop - use select to avoid panic if already closed
+		select {
+		case <-lpStopCh:
+			// Already closed
+		default:
+			close(lpStopCh)
+		}
 	}
+}
+
+// startLongPolling starts the long polling heartbeat loop
+func (c *Client) startLongPolling(ctx context.Context, agentID string, handler HeartbeatHandler) error {
+	c.lpMu.Lock()
+	c.lpAgentID = agentID
+	c.lpReconnect = true
+	// Reinitialize stop channel in case client is reused
+	c.lpStopCh = make(chan struct{})
+	c.lpMu.Unlock()
+
+	// Start long polling loop with reconnection support
+	go c.longPollingLoop(ctx, handler)
+
+	return nil
+}
+
+// longPollingLoop continuously polls the server for heartbeat responses
+func (c *Client) longPollingLoop(ctx context.Context, handler HeartbeatHandler) {
+	backoff := lpInitialBackoff
+	consecutiveFailures := 0
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-c.lpStopCh:
+			return
+		default:
+		}
+
+		c.lpMu.Lock()
+		agentID := c.lpAgentID
+		shouldReconnect := c.lpReconnect
+		c.lpMu.Unlock()
+
+		if !shouldReconnect {
+			return
+		}
+
+		// Perform long polling request
+		resp, err := c.pollHeartbeat(ctx, agentID)
+		if err != nil {
+			log.Error().Err(err).Msg("Long polling heartbeat failed")
+			consecutiveFailures++
+
+			if consecutiveFailures >= lpMaxConsecutiveFailures {
+				log.Warn().
+					Int("failures", consecutiveFailures).
+					Dur("backoff", backoff).
+					Msg("Too many consecutive failures, backing off")
+
+				// Wait before retrying
+				select {
+				case <-ctx.Done():
+					return
+				case <-c.lpStopCh:
+					return
+				case <-time.After(backoff):
+				}
+
+				// Increase backoff for next attempt
+				backoff = min(backoff*2, lpMaxBackoff)
+				consecutiveFailures = 0
+			} else {
+				// Short delay before retry
+				select {
+				case <-ctx.Done():
+					return
+				case <-c.lpStopCh:
+					return
+				case <-time.After(5 * time.Second):
+				}
+			}
+			continue
+		}
+
+		// Success - reset failure tracking and backoff
+		consecutiveFailures = 0
+		backoff = lpInitialBackoff
+
+		if handler != nil && resp != nil {
+			handler(resp)
+		}
+
+		// Immediately start next poll (no delay for long polling)
+	}
+}
+
+// pollHeartbeat performs a single long polling HTTP request
+func (c *Client) pollHeartbeat(ctx context.Context, agentID string) (*HeartbeatResponse, error) {
+	url := c.baseURL + "/api/v1/ws-poll/" + agentID
+
+	// Create a context with timeout for the long poll
+	pollCtx, cancel := context.WithTimeout(ctx, lpPollTimeout)
+	defer cancel()
+
+	var resp HeartbeatResponse
+	httpResp, err := c.httpClient.R().
+		SetContext(pollCtx).
+		SetHeader("Authorization", c.agentAuthHeader()).
+		SetResult(&resp).
+		Get(url)
+
+	if err != nil {
+		// Check if it's a context timeout (expected for long polling)
+		if pollCtx.Err() == context.DeadlineExceeded {
+			// Server didn't respond within timeout, this is normal for long polling
+			// Return nil response but no error to continue polling
+			return nil, nil
+		}
+		return nil, fmt.Errorf("long polling request failed: %w", err)
+	}
+
+	if httpResp.StatusCode() != http.StatusOK {
+		return nil, fmt.Errorf("long polling heartbeat failed: status %d, body: %s", httpResp.StatusCode(), httpResp.String())
+	}
+
+	return &resp, nil
 }
