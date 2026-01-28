@@ -22,35 +22,31 @@ type Paths struct {
 }
 
 // DefaultPaths returns the default paths for the current platform
+// All paths are stored in the user directory (~/.gpugo)
 func DefaultPaths() *Paths {
 	p := &Paths{}
+	// Initialize userDir first as other paths depend on it
+	p.userDir = p.defaultUserDir()
 	p.configDir = p.defaultConfigDir()
 	p.stateDir = p.defaultStateDir()
 	p.cacheDir = p.defaultCacheDir()
-	p.userDir = p.defaultUserDir()
 	return p
 }
 
 // ConfigDir returns the configuration directory
-// - Linux: /etc/gpugo (system) or ~/.config/gpugo (user)
-// - macOS: /Library/Application Support/gpugo (system) or ~/Library/Application Support/gpugo (user)
-// - Windows: %ProgramData%\gpugo (system) or %APPDATA%\gpugo (user)
+// All platforms: ~/.gpugo/config (or UserDir/config)
 func (p *Paths) ConfigDir() string {
 	return p.configDir
 }
 
 // StateDir returns the state directory for runtime data
-// - Linux: /var/lib/gpugo or /tmp/tensor-fusion-state
-// - macOS: /var/lib/gpugo or /tmp/tensor-fusion-state
-// - Windows: %ProgramData%\gpugo\state
+// All platforms: ~/.gpugo/state (or UserDir/state)
 func (p *Paths) StateDir() string {
 	return p.stateDir
 }
 
 // CacheDir returns the cache directory for downloaded files
-// - Linux: /var/cache/gpugo or ~/.cache/gpugo
-// - macOS: ~/Library/Caches/gpugo
-// - Windows: %LOCALAPPDATA%\gpugo\cache
+// All platforms: ~/.gpugo/cache (or UserDir/cache)
 func (p *Paths) CacheDir() string {
 	return p.cacheDir
 }
@@ -64,25 +60,15 @@ func (p *Paths) UserDir() string {
 }
 
 // LibDir returns the directory for shared libraries
+// All platforms: ~/.gpugo/lib (or UserDir/lib)
 func (p *Paths) LibDir() string {
-	switch runtime.GOOS {
-	case osWindows:
-		return filepath.Join(p.configDir, "lib")
-	default:
-		return filepath.Join(p.configDir, "lib")
-	}
+	return filepath.Join(p.userDir, "lib")
 }
 
 // BinDir returns the directory for binaries
+// All platforms: ~/.gpugo/bin (or UserDir/bin)
 func (p *Paths) BinDir() string {
-	switch runtime.GOOS {
-	case osWindows:
-		return filepath.Join(p.configDir, "bin")
-	case osDarwin:
-		return "/usr/local/bin"
-	default:
-		return "/usr/local/bin"
-	}
+	return filepath.Join(p.userDir, "bin")
 }
 
 // TempDir returns a platform-appropriate temporary directory
@@ -106,35 +92,8 @@ func (p *Paths) defaultConfigDir() string {
 		return dir
 	}
 
-	switch runtime.GOOS {
-	case osWindows:
-		// Use ProgramData for system-wide config
-		if programData := os.Getenv("ProgramData"); programData != "" {
-			return filepath.Join(programData, "gpugo")
-		}
-		return `C:\ProgramData\gpugo`
-	case osDarwin:
-		// Check if running as root
-		if os.Geteuid() == 0 {
-			return "/Library/Application Support/gpugo"
-		}
-		if home, err := os.UserHomeDir(); err == nil {
-			return filepath.Join(home, "Library", "Application Support", "gpugo")
-		}
-		return "/Library/Application Support/gpugo"
-	default: // linux and others
-		// Check if running as root
-		if os.Geteuid() == 0 {
-			return "/etc/gpugo"
-		}
-		if configHome := os.Getenv("XDG_CONFIG_HOME"); configHome != "" {
-			return filepath.Join(configHome, "gpugo")
-		}
-		if home, err := os.UserHomeDir(); err == nil {
-			return filepath.Join(home, ".config", "gpugo")
-		}
-		return "/etc/gpugo"
-	}
+	// All paths stored in user directory
+	return filepath.Join(p.userDir, "config")
 }
 
 func (p *Paths) defaultStateDir() string {
@@ -146,18 +105,8 @@ func (p *Paths) defaultStateDir() string {
 		return dir
 	}
 
-	switch runtime.GOOS {
-	case osWindows:
-		if programData := os.Getenv("ProgramData"); programData != "" {
-			return filepath.Join(programData, "gpugo", "state")
-		}
-		return `C:\ProgramData\gpugo\state`
-	case osDarwin:
-		// macOS uses /tmp for state (similar to Linux)
-		return "/tmp/tensor-fusion-state"
-	default: // linux and others
-		return "/tmp/tensor-fusion-state"
-	}
+	// All paths stored in user directory
+	return filepath.Join(p.userDir, "state")
 }
 
 func (p *Paths) defaultCacheDir() string {
@@ -166,29 +115,8 @@ func (p *Paths) defaultCacheDir() string {
 		return dir
 	}
 
-	switch runtime.GOOS {
-	case osWindows:
-		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
-			return filepath.Join(localAppData, "gpugo", "cache")
-		}
-		if home, err := os.UserHomeDir(); err == nil {
-			return filepath.Join(home, "AppData", "Local", "gpugo", "cache")
-		}
-		return `C:\ProgramData\gpugo\cache`
-	case osDarwin:
-		if home, err := os.UserHomeDir(); err == nil {
-			return filepath.Join(home, "Library", "Caches", "gpugo")
-		}
-		return "/tmp/gpugo-cache"
-	default: // linux and others
-		if cacheHome := os.Getenv("XDG_CACHE_HOME"); cacheHome != "" {
-			return filepath.Join(cacheHome, "gpugo")
-		}
-		if home, err := os.UserHomeDir(); err == nil {
-			return filepath.Join(home, ".cache", "gpugo")
-		}
-		return "/var/cache/gpugo"
-	}
+	// All paths stored in user directory
+	return filepath.Join(p.userDir, "cache")
 }
 
 func (p *Paths) defaultUserDir() string {

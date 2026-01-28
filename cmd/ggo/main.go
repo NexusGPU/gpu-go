@@ -10,6 +10,7 @@ import (
 	"github.com/NexusGPU/gpu-go/cmd/ggo/share"
 	"github.com/NexusGPU/gpu-go/cmd/ggo/studio"
 	"github.com/NexusGPU/gpu-go/cmd/ggo/use"
+	"github.com/NexusGPU/gpu-go/cmd/ggo/version"
 	"github.com/NexusGPU/gpu-go/cmd/ggo/worker"
 	"github.com/NexusGPU/gpu-go/internal/log"
 	"github.com/spf13/cobra"
@@ -52,6 +53,9 @@ func init() {
 	rootCmd.AddCommand(auth.NewLoginCmd())
 	rootCmd.AddCommand(auth.NewLogoutCmd())
 	rootCmd.AddCommand(auth.NewAuthCmd())
+
+	// Version command
+	rootCmd.AddCommand(version.NewVersionCmd())
 }
 
 func main() {

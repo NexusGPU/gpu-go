@@ -68,13 +68,20 @@ func TestGetLibrariesForPlatform(t *testing.T) {
 	}
 
 	mgr := NewManager()
-	libs := mgr.GetLibrariesForPlatform(manifest)
+	libs := mgr.GetLibrariesForPlatform(manifest, "", "")
 
 	// Should only return libraries matching current platform
 	for _, lib := range libs {
 		assert.Equal(t, runtime.GOOS, lib.Platform)
 		assert.Equal(t, runtime.GOARCH, lib.Arch)
 	}
+
+	// Test with specific platform
+	linuxLibs := mgr.GetLibrariesForPlatform(manifest, "linux", "amd64")
+	assert.Len(t, linuxLibs, 1)
+	assert.Equal(t, "libcuda.so.1", linuxLibs[0].Name)
+	assert.Equal(t, "linux", linuxLibs[0].Platform)
+	assert.Equal(t, "amd64", linuxLibs[0].Arch)
 }
 
 func TestLocalManifest(t *testing.T) {

@@ -24,14 +24,14 @@ type HeartbeatMode string
 
 const (
 	HeartbeatModeWebSocket   HeartbeatMode = "websocket"
-	HeartbeatModeLongPolling HeartbeatMode = "long-polling"
+	HeartbeatModeLongPolling HeartbeatMode = "polling"
 )
 
 // GetDefaultHeartbeatMode returns the default heartbeat mode from env var or websocket
 func GetDefaultHeartbeatMode() HeartbeatMode {
 	if mode := os.Getenv("GPU_GO_HEARTBEAT_MODE"); mode != "" {
 		switch mode {
-		case "long-polling", "long_polling":
+		case "polling", "long_polling":
 			return HeartbeatModeLongPolling
 		case "websocket", "ws":
 			return HeartbeatModeWebSocket
@@ -594,7 +594,7 @@ func (c *Client) StartHeartbeat(ctx context.Context, agentID string, handler Hea
 
 	switch mode {
 	case HeartbeatModeLongPolling:
-		return c.startLongPolling(ctx, agentID, handler)
+		return c.startPolling(ctx, agentID, handler)
 	case HeartbeatModeWebSocket:
 		fallthrough
 	default:
@@ -611,12 +611,8 @@ func (c *Client) startWebSocket(ctx context.Context, agentID string, handler Hea
 	c.wsStopCh = make(chan struct{})
 	c.wsMu.Unlock()
 
-	// Initial connection
-	if err := c.connectWebSocket(ctx); err != nil {
-		return fmt.Errorf("failed to establish initial websocket connection: %w", err)
-	}
-
-	// Start heartbeat loop with reconnection support
+	// Start heartbeat loop with reconnection support (including initial connection)
+	// The loop will handle initial connection and retries
 	go c.heartbeatLoop(ctx, handler)
 
 	return nil
@@ -720,6 +716,19 @@ func (c *Client) heartbeatLoop(ctx context.Context, handler HeartbeatHandler) {
 
 	backoff := wsInitialBackoff
 	consecutiveFailures := 0
+
+	// Attempt initial connection before starting ticker
+	c.wsMu.Lock()
+	conn := c.wsConn
+	c.wsMu.Unlock()
+
+	if conn == nil {
+		// No initial connection, attempt reconnect
+		if !c.reconnectWithBackoff(ctx, &backoff) {
+			return
+		}
+		consecutiveFailures = 0
+	}
 
 	for {
 		select {
@@ -852,8 +861,8 @@ func (c *Client) StopHeartbeat() {
 	}
 }
 
-// startLongPolling starts the long polling heartbeat loop
-func (c *Client) startLongPolling(ctx context.Context, agentID string, handler HeartbeatHandler) error {
+// startPolling starts the long polling heartbeat loop
+func (c *Client) startPolling(ctx context.Context, agentID string, handler HeartbeatHandler) error {
 	c.lpMu.Lock()
 	c.lpAgentID = agentID
 	c.lpReconnect = true
@@ -862,32 +871,29 @@ func (c *Client) startLongPolling(ctx context.Context, agentID string, handler H
 	c.lpMu.Unlock()
 
 	// Start long polling loop with reconnection support
-	go c.longPollingLoop(ctx, handler)
+	go c.pollingLoop(ctx, handler)
 
 	return nil
 }
 
-// longPollingLoop continuously polls the server for heartbeat responses
-func (c *Client) longPollingLoop(ctx context.Context, handler HeartbeatHandler) {
+// pollingLoop continuously polls the server for heartbeat responses
+func (c *Client) pollingLoop(ctx context.Context, handler HeartbeatHandler) {
 	backoff := lpInitialBackoff
 	consecutiveFailures := 0
 
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-c.lpStopCh:
-			return
-		default:
-		}
+	// Create a 60-second ticker for regular polling when healthy
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
 
+	// Perform a single poll attempt
+	doPoll := func() (shouldRetry bool, retryDelay time.Duration) {
 		c.lpMu.Lock()
 		agentID := c.lpAgentID
 		shouldReconnect := c.lpReconnect
 		c.lpMu.Unlock()
 
 		if !shouldReconnect {
-			return
+			return false, 0
 		}
 
 		// Perform long polling request
@@ -902,29 +908,15 @@ func (c *Client) longPollingLoop(ctx context.Context, handler HeartbeatHandler) 
 					Dur("backoff", backoff).
 					Msg("Too many consecutive failures, backing off")
 
-				// Wait before retrying
-				select {
-				case <-ctx.Done():
-					return
-				case <-c.lpStopCh:
-					return
-				case <-time.After(backoff):
-				}
-
 				// Increase backoff for next attempt
+				currentBackoff := backoff
 				backoff = min(backoff*2, lpMaxBackoff)
 				consecutiveFailures = 0
-			} else {
-				// Short delay before retry
-				select {
-				case <-ctx.Done():
-					return
-				case <-c.lpStopCh:
-					return
-				case <-time.After(5 * time.Second):
-				}
+				// Return true to retry after backoff
+				return true, currentBackoff
 			}
-			continue
+			// For failures below threshold, retry after a short delay (5 seconds)
+			return true, 5 * time.Second
 		}
 
 		// Success - reset failure tracking and backoff
@@ -934,8 +926,48 @@ func (c *Client) longPollingLoop(ctx context.Context, handler HeartbeatHandler) 
 		if handler != nil && resp != nil {
 			handler(resp)
 		}
+		return false, 0
+	}
 
-		// Immediately start next poll (no delay for long polling)
+	// Initial poll with retry loop
+	for {
+		shouldRetry, delay := doPoll()
+		if !shouldRetry {
+			break
+		}
+		// Wait before retrying
+		select {
+		case <-ctx.Done():
+			return
+		case <-c.lpStopCh:
+			return
+		case <-time.After(delay):
+		}
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-c.lpStopCh:
+			return
+		case <-ticker.C:
+			// Regular polling interval - poll and handle retries
+			for {
+				shouldRetry, delay := doPoll()
+				if !shouldRetry {
+					break
+				}
+				// Wait before retrying
+				select {
+				case <-ctx.Done():
+					return
+				case <-c.lpStopCh:
+					return
+				case <-time.After(delay):
+				}
+			}
+		}
 	}
 }
 

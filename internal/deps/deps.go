@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/NexusGPU/gpu-go/internal/api"
+	"github.com/NexusGPU/gpu-go/internal/log"
 	"github.com/NexusGPU/gpu-go/internal/platform"
 )
 
@@ -126,14 +127,16 @@ func WithAPIClient(client *api.Client) ManagerOption {
 }
 
 // SyncReleases fetches releases from the API and caches them locally
-func (m *Manager) SyncReleases(ctx context.Context) error {
+// If os and arch are empty strings, uses the current platform
+// Returns the synced manifest for verbose output
+func (m *Manager) SyncReleases(ctx context.Context, os, arch string) (*Manifest, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	// Fetch all releases (max 500)
 	releasesResp, err := m.apiClient.GetReleases(ctx, "", 500)
 	if err != nil {
-		return fmt.Errorf("failed to fetch releases from API: %w", err)
+		return nil, fmt.Errorf("failed to fetch releases from API: %w", err)
 	}
 
 	// Convert API releases to internal manifest format
@@ -143,12 +146,18 @@ func (m *Manager) SyncReleases(ctx context.Context) error {
 		Libraries: []Library{},
 	}
 
-	// Map releases to libraries based on current platform
-	currentOS := runtime.GOOS
-	currentArch := runtime.GOARCH
+	// Determine target platform
+	targetOS := os
+	targetArch := arch
+	if targetOS == "" {
+		targetOS = runtime.GOOS
+	}
+	if targetArch == "" {
+		targetArch = runtime.GOARCH
+	}
 
 	for _, release := range releasesResp.Releases {
-		// Find matching artifact for current platform
+		// Find matching artifact for target platform
 		for _, artifact := range release.Artifacts {
 			// Map OS names: linux, darwin, windows
 			artifactOS := strings.ToLower(artifact.OS)
@@ -162,9 +171,13 @@ func (m *Manager) SyncReleases(ctx context.Context) error {
 				artifactArch = "amd64"
 			}
 
-			if artifactOS == currentOS && artifactArch == currentArch {
-				// Extract library name from URL or use vendor/version
+			if artifactOS == targetOS && artifactArch == targetArch {
+				// Extract library name from URL
 				libName := m.extractLibraryName(release.Vendor.Slug, artifact.URL)
+				// Skip if no valid library name extracted
+				if libName == "" {
+					continue
+				}
 
 				// Get size from metadata if available, otherwise 0
 				size := int64(0)
@@ -187,37 +200,51 @@ func (m *Manager) SyncReleases(ctx context.Context) error {
 	}
 
 	// Save to cache
-	return m.saveCachedManifest(manifest)
+	if err := m.saveCachedManifest(manifest); err != nil {
+		return nil, err
+	}
+
+	return manifest, nil
 }
 
-// extractLibraryName extracts library name from vendor slug and URL
+// extractLibraryName extracts library name from URL
 func (m *Manager) extractLibraryName(vendorSlug, url string) string {
-	// Try to extract from URL filename
-	parts := strings.Split(url, "/")
-	if len(parts) > 0 {
-		filename := parts[len(parts)-1]
-		// Remove query params if any
-		if idx := strings.Index(filename, "?"); idx >= 0 {
-			filename = filename[:idx]
-		}
-		// Remove fragment if any
-		if idx := strings.Index(filename, "#"); idx >= 0 {
-			filename = filename[:idx]
-		}
-		// Use filename as library name if it looks like a library file
-		if filename != "" && (strings.Contains(filename, ".so") || strings.Contains(filename, ".dll") || strings.Contains(filename, ".dylib")) {
-			return filename
-		}
-		// If filename doesn't look like a library, try to find one in the path
-		for i := len(parts) - 1; i >= 0; i-- {
-			part := parts[i]
-			if strings.Contains(part, ".so") || strings.Contains(part, ".dll") || strings.Contains(part, ".dylib") {
-				return part
-			}
-		}
+	if url == "" {
+		log.Default.Warn().
+			Str("vendor", vendorSlug).
+			Msg("empty URL, cannot extract library name")
+		return ""
 	}
-	// Fallback to vendor-based name
-	return fmt.Sprintf("lib%s.so", vendorSlug)
+
+	// Extract the last part of URL
+	parts := strings.Split(url, "/")
+	if len(parts) == 0 {
+		log.Default.Warn().
+			Str("vendor", vendorSlug).
+			Str("url", url).
+			Msg("invalid URL, cannot extract library name")
+		return ""
+	}
+
+	filename := parts[len(parts)-1]
+	// Remove query params if any
+	if idx := strings.Index(filename, "?"); idx >= 0 {
+		filename = filename[:idx]
+	}
+	// Remove fragment if any
+	if idx := strings.Index(filename, "#"); idx >= 0 {
+		filename = filename[:idx]
+	}
+
+	if filename == "" {
+		log.Default.Warn().
+			Str("vendor", vendorSlug).
+			Str("url", url).
+			Msg("empty filename extracted from URL")
+		return ""
+	}
+
+	return filename
 }
 
 // LoadCachedManifest loads the cached manifest from local storage
@@ -273,7 +300,8 @@ func (m *Manager) FetchManifest(ctx context.Context) (*Manifest, error) {
 
 	// If no cached manifest, sync from API
 	if manifest == nil {
-		if err := m.SyncReleases(ctx); err != nil {
+		_, err := m.SyncReleases(ctx, "", "")
+		if err != nil {
 			return nil, fmt.Errorf("failed to sync releases: %w", err)
 		}
 		// Load again after sync
@@ -289,15 +317,34 @@ func (m *Manager) FetchManifest(ctx context.Context) (*Manifest, error) {
 	return manifest, nil
 }
 
-// GetLibrariesForPlatform returns libraries matching the current platform
-func (m *Manager) GetLibrariesForPlatform(manifest *Manifest) []Library {
+// GetLibrariesForPlatform returns libraries matching the specified platform
+// If both os and arch are empty strings, uses the current platform
+// If only os is provided, matches any arch for that os
+// If only arch is provided, matches any os for that arch
+func (m *Manager) GetLibrariesForPlatform(manifest *Manifest, os, arch string) []Library {
 	var result []Library
+	targetOS := os
+	targetArch := arch
+
+	// If both are empty, use current platform
+	if targetOS == "" && targetArch == "" {
+		targetOS = runtime.GOOS
+		targetArch = runtime.GOARCH
+	}
+
 	for _, lib := range manifest.Libraries {
-		if lib.Platform == runtime.GOOS && lib.Arch == runtime.GOARCH {
+		osMatch := targetOS == "" || lib.Platform == targetOS
+		archMatch := targetArch == "" || lib.Arch == targetArch
+		if osMatch && archMatch {
 			result = append(result, lib)
 		}
 	}
 	return result
+}
+
+// GetAllLibraries returns all libraries from the manifest, grouped by platform/arch
+func (m *Manager) GetAllLibraries(manifest *Manifest) []Library {
+	return manifest.Libraries
 }
 
 // DownloadLibrary downloads a library to the cache directory
@@ -315,8 +362,8 @@ func (m *Manager) DownloadLibrary(ctx context.Context, lib Library, progressFn f
 	destPath := filepath.Join(cacheDir, lib.Name)
 	tmpPath := destPath + ".tmp"
 
-	// Check if already downloaded with correct hash
-	if m.verifyLibrary(destPath, lib.SHA256) {
+	// Check if already downloaded with correct hash (skip if SHA256 is empty)
+	if lib.SHA256 != "" && m.verifyLibrary(destPath, lib.SHA256) {
 		return nil // Already downloaded
 	}
 
@@ -371,10 +418,12 @@ func (m *Manager) DownloadLibrary(ctx context.Context, lib Library, progressFn f
 	}
 	_ = tmpFile.Close()
 
-	// Verify hash
-	actualHash := hex.EncodeToString(hash.Sum(nil))
-	if actualHash != lib.SHA256 {
-		return fmt.Errorf("hash mismatch: expected %s, got %s", lib.SHA256, actualHash)
+	// Verify hash (skip if SHA256 is empty)
+	if lib.SHA256 != "" {
+		actualHash := hex.EncodeToString(hash.Sum(nil))
+		if actualHash != lib.SHA256 {
+			return fmt.Errorf("hash mismatch: expected %s, got %s", lib.SHA256, actualHash)
+		}
 	}
 
 	// Move to final destination
@@ -452,7 +501,7 @@ func (m *Manager) CheckUpdates(ctx context.Context) ([]Library, error) {
 	}
 
 	var updates []Library
-	for _, lib := range m.GetLibrariesForPlatform(manifest) {
+	for _, lib := range m.GetLibrariesForPlatform(manifest, "", "") {
 		installedLib, exists := installed.Libraries[lib.Name]
 		if !exists || installedLib.Version != lib.Version {
 			updates = append(updates, lib)
@@ -491,7 +540,15 @@ func (m *Manager) CleanCache() error {
 }
 
 // verifyLibrary checks if a file exists and has the expected hash
+// Returns true if expectedHash is empty (verification skipped)
 func (m *Manager) verifyLibrary(path, expectedHash string) bool {
+	// Skip verification if hash is empty
+	if expectedHash == "" {
+		// Just check if file exists
+		_, err := os.Stat(path)
+		return err == nil
+	}
+
 	file, err := os.Open(path)
 	if err != nil {
 		return false

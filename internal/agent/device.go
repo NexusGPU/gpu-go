@@ -59,7 +59,7 @@ func DownloadOrFindAccelerator() (string, error) {
 	// Step 1: Detect vendor (config has highest priority)
 	vendor, version := detectVendor()
 	if vendor == "" {
-		vendor = "stub" // Fallback to stub if detection fails
+		vendor = "example" // Fallback to stub if detection fails
 	}
 
 	// Step 2: Try to find library locally
@@ -92,7 +92,7 @@ func DownloadOrFindAccelerator() (string, error) {
 	// Find library in manifest matching platform and vendor
 	var targetLib *deps.Library
 	var candidateLibs []deps.Library
-	platformLibs := depsMgr.GetLibrariesForPlatform(manifest)
+	platformLibs := depsMgr.GetLibrariesForPlatform(manifest, "", "")
 
 	// Match library name pattern: contains "accelerator_{vendor}"
 	vendorPattern := "accelerator_" + vendor
@@ -293,7 +293,8 @@ func CreateMockGPUs(count int) []api.GPUInfo {
 func getLibSuffix() string {
 	switch runtime.GOOS {
 	case "darwin":
-		return ".dylib"
+		// In provider build, we only build .so libraries, even for MacOS
+		return ".so"
 	case "windows":
 		return ".dll"
 	default:

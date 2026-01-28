@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 
 	"github.com/NexusGPU/gpu-go/internal/api"
 	"github.com/NexusGPU/gpu-go/internal/deps"
@@ -12,9 +13,18 @@ import (
 )
 
 var (
-	cdnURL string
-	apiURL string
-	force  bool
+	cdnURL          string
+	apiURL          string
+	force           bool
+	verbose         bool
+	syncOS          string
+	syncArch        string
+	listOS          string
+	listArch        string
+	downloadName    string
+	downloadVersion string
+	downloadOS      string
+	downloadArch    string
 )
 
 // NewDepsCmd creates the deps command
@@ -54,25 +64,46 @@ func newSyncCmd() *cobra.Command {
 			mgr := getManager()
 			ctx := context.Background()
 
-			fmt.Println("Syncing releases from API...")
-			if err := mgr.SyncReleases(ctx); err != nil {
+			targetOS := syncOS
+			targetArch := syncArch
+			if targetOS != "" || targetArch != "" {
+				fmt.Printf("Syncing releases from API for platform %s/%s...\n", targetOS, targetArch)
+			} else {
+				fmt.Println("Syncing releases from API...")
+			}
+
+			manifest, err := mgr.SyncReleases(ctx, targetOS, targetArch)
+			if err != nil {
 				cmd.SilenceUsage = true
 				log.Error().Err(err).Msg("Failed to sync releases")
 				return err
 			}
 
-			// Load and display synced manifest
-			manifest, err := mgr.LoadCachedManifest()
-			if err != nil {
-				log.Warn().Err(err).Msg("Failed to load cached manifest")
-			} else if manifest != nil {
+			if manifest != nil {
 				fmt.Printf("Synced %d libraries (manifest version: %s)\n", len(manifest.Libraries), manifest.Version)
+
+				if verbose {
+					fmt.Println("\nSynced libraries:")
+					for _, lib := range manifest.Libraries {
+						fmt.Printf("  Name: %s\n", lib.Name)
+						fmt.Printf("    Version: %s\n", lib.Version)
+						fmt.Printf("    Platform: %s/%s\n", lib.Platform, lib.Arch)
+						fmt.Printf("    Size: %d bytes\n", lib.Size)
+						fmt.Printf("    SHA256: %s\n", lib.SHA256)
+						fmt.Printf("    URL: %s\n", lib.URL)
+						fmt.Println()
+					}
+				}
 			}
 
 			fmt.Println("Sync complete!")
 			return nil
 		},
 	}
+
+	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Print verbose synced data")
+	cmd.Flags().StringVar(&syncOS, "os", "", "Target OS (linux, darwin, windows). Defaults to current OS")
+	cmd.Flags().StringVar(&syncArch, "arch", "", "Target architecture (amd64, arm64). Defaults to current architecture")
 	return cmd
 }
 
@@ -93,7 +124,7 @@ func newListCmd() *cobra.Command {
 			if len(installed.Libraries) > 0 {
 				fmt.Println("Installed libraries:")
 				for name, lib := range installed.Libraries {
-					fmt.Printf("  %s (version: %s)\n", name, lib.Version)
+					fmt.Printf("  %s (version: %s, platform: %s/%s)\n", name, lib.Version, lib.Platform, lib.Arch)
 				}
 				fmt.Println()
 			}
@@ -108,28 +139,80 @@ func newListCmd() *cobra.Command {
 				return err
 			}
 
-			libs := mgr.GetLibrariesForPlatform(manifest)
+			// Determine if we should list all architectures or filter
+			var libs []deps.Library
+			var filterDesc string
+			if listOS == "" && listArch == "" {
+				// List all architectures
+				libs = mgr.GetAllLibraries(manifest)
+				filterDesc = "all platforms"
+			} else {
+				// Filter by specified OS/Arch (empty string means current platform)
+				libs = mgr.GetLibrariesForPlatform(manifest, listOS, listArch)
+				if listOS != "" && listArch != "" {
+					filterDesc = fmt.Sprintf("%s/%s", listOS, listArch)
+				} else if listOS != "" {
+					filterDesc = fmt.Sprintf("%s/*", listOS)
+				} else {
+					filterDesc = fmt.Sprintf("*/%s", listArch)
+				}
+			}
+
 			if len(libs) == 0 {
-				fmt.Println("No libraries available for this platform")
+				if filterDesc != "all platforms" {
+					fmt.Printf("No libraries available for platform %s\n", filterDesc)
+				} else {
+					fmt.Println("No libraries available")
+				}
 				return nil
 			}
 
-			fmt.Printf("\nAvailable libraries (manifest version: %s):\n", manifest.Version)
-			for _, lib := range libs {
-				status := ""
-				if installedLib, exists := installed.Libraries[lib.Name]; exists {
-					if installedLib.Version == lib.Version {
-						status = " [installed]"
-					} else {
-						status = fmt.Sprintf(" [update available: %s -> %s]", installedLib.Version, lib.Version)
+			// Group by platform/arch if listing all or filtering by OS only
+			shouldGroup := (listOS == "" && listArch == "") || (listOS != "" && listArch == "")
+			if shouldGroup {
+				// Group libraries by platform/arch
+				grouped := make(map[string][]deps.Library)
+				for _, lib := range libs {
+					key := fmt.Sprintf("%s/%s", lib.Platform, lib.Arch)
+					grouped[key] = append(grouped[key], lib)
+				}
+
+				fmt.Printf("\nAvailable libraries for %s (manifest version: %s):\n", filterDesc, manifest.Version)
+				for platformArch, platformLibs := range grouped {
+					fmt.Printf("\n  Platform: %s\n", platformArch)
+					for _, lib := range platformLibs {
+						status := ""
+						if installedLib, exists := installed.Libraries[lib.Name]; exists {
+							if installedLib.Version == lib.Version && installedLib.Platform == lib.Platform && installedLib.Arch == lib.Arch {
+								status = " [installed]"
+							} else if installedLib.Version != lib.Version {
+								status = fmt.Sprintf(" [update available: %s -> %s]", installedLib.Version, lib.Version)
+							}
+						}
+						fmt.Printf("    %s (version: %s, size: %d bytes)%s\n", lib.Name, lib.Version, lib.Size, status)
 					}
 				}
-				fmt.Printf("  %s (version: %s, size: %d bytes)%s\n", lib.Name, lib.Version, lib.Size, status)
+			} else {
+				fmt.Printf("\nAvailable libraries for %s (manifest version: %s):\n", filterDesc, manifest.Version)
+				for _, lib := range libs {
+					status := ""
+					if installedLib, exists := installed.Libraries[lib.Name]; exists {
+						if installedLib.Version == lib.Version && installedLib.Platform == lib.Platform && installedLib.Arch == lib.Arch {
+							status = " [installed]"
+						} else if installedLib.Version != lib.Version {
+							status = fmt.Sprintf(" [update available: %s -> %s]", installedLib.Version, lib.Version)
+						}
+					}
+					fmt.Printf("  %s (version: %s, size: %d bytes)%s\n", lib.Name, lib.Version, lib.Size, status)
+				}
 			}
 
 			return nil
 		},
 	}
+
+	cmd.Flags().StringVar(&listOS, "os", "", "Filter by OS (linux, darwin, windows). Omit to list all architectures")
+	cmd.Flags().StringVar(&listArch, "arch", "", "Filter by architecture (amd64, arm64). Omit to list all architectures")
 	return cmd
 }
 
@@ -150,28 +233,54 @@ func newDownloadCmd() *cobra.Command {
 				return err
 			}
 
-			libs := mgr.GetLibrariesForPlatform(manifest)
+			// Determine target platform from flags or use current platform
+			targetOS := downloadOS
+			targetArch := downloadArch
+
+			// Get libraries for the target platform
+			libs := mgr.GetLibrariesForPlatform(manifest, targetOS, targetArch)
 			if len(libs) == 0 {
-				fmt.Println("No libraries available for this platform")
+				platformDesc := "this platform"
+				if targetOS != "" || targetArch != "" {
+					platformDesc = fmt.Sprintf("%s/%s", targetOS, targetArch)
+				}
+				fmt.Printf("No libraries available for %s\n", platformDesc)
 				return nil
 			}
 
-			// Filter by args if provided
-			if len(args) > 0 {
-				filtered := []deps.Library{}
-				for _, lib := range libs {
-					for _, name := range args {
-						if lib.Name == name {
-							filtered = append(filtered, lib)
-							break
-						}
+			// Apply filters
+			filtered := []deps.Library{}
+			for _, lib := range libs {
+				// Filter by name: --name flag takes precedence, otherwise use args
+				if downloadName != "" {
+					if lib.Name != downloadName {
+						continue
+					}
+				} else if len(args) > 0 {
+					// Match any of the provided names in args
+					matched := slices.Contains(args, lib.Name)
+					if !matched {
+						continue
 					}
 				}
-				libs = filtered
+
+				// Filter by version
+				if downloadVersion != "" && lib.Version != downloadVersion {
+					continue
+				}
+
+				filtered = append(filtered, lib)
 			}
 
+			if len(filtered) == 0 {
+				fmt.Println("No libraries match the specified criteria")
+				return nil
+			}
+
+			libs = filtered
+
 			for _, lib := range libs {
-				fmt.Printf("Downloading %s (version: %s)...\n", lib.Name, lib.Version)
+				fmt.Printf("Downloading %s (version: %s, platform: %s/%s)...\n", lib.Name, lib.Version, lib.Platform, lib.Arch)
 
 				progressFn := func(downloaded, total int64) {
 					if total > 0 {
@@ -195,6 +304,10 @@ func newDownloadCmd() *cobra.Command {
 	}
 
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Force re-download even if cached")
+	cmd.Flags().StringVar(&downloadName, "name", "", "Library name to download (e.g., libcuda.so.1)")
+	cmd.Flags().StringVar(&downloadVersion, "version", "", "Library version to download")
+	cmd.Flags().StringVar(&downloadOS, "os", "", "Target OS (linux, darwin, windows). Defaults to current OS")
+	cmd.Flags().StringVar(&downloadArch, "cpuArch", "", "Target CPU architecture (amd64, arm64). Defaults to current architecture")
 	return cmd
 }
 
@@ -215,7 +328,7 @@ func newInstallCmd() *cobra.Command {
 				return err
 			}
 
-			libs := mgr.GetLibrariesForPlatform(manifest)
+			libs := mgr.GetLibrariesForPlatform(manifest, "", "")
 			if len(libs) == 0 {
 				fmt.Println("No libraries available for this platform")
 				return nil

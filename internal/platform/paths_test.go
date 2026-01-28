@@ -23,6 +23,20 @@ func TestDefaultPaths(t *testing.T) {
 	assert.NotEmpty(t, p.StateDir())
 	assert.NotEmpty(t, p.CacheDir())
 	assert.NotEmpty(t, p.UserDir())
+
+	// Verify all paths are under user directory (unless overridden by env)
+	userDir := p.UserDir()
+	if os.Getenv("GGO_CONFIG_DIR") == "" {
+		assert.Contains(t, p.ConfigDir(), userDir)
+	}
+	if os.Getenv("GGO_STATE_DIR") == "" && os.Getenv("TENSOR_FUSION_STATE_DIR") == "" {
+		assert.Contains(t, p.StateDir(), userDir)
+	}
+	if os.Getenv("GGO_CACHE_DIR") == "" {
+		assert.Contains(t, p.CacheDir(), userDir)
+	}
+	assert.Contains(t, p.LibDir(), userDir)
+	assert.Contains(t, p.BinDir(), userDir)
 }
 
 func TestPathsWithEnvOverride(t *testing.T) {
@@ -111,6 +125,14 @@ func TestLibDir(t *testing.T) {
 	p := DefaultPaths()
 	libDir := p.LibDir()
 	assert.Contains(t, libDir, "lib")
+	assert.Contains(t, libDir, p.UserDir())
+}
+
+func TestBinDir(t *testing.T) {
+	p := DefaultPaths()
+	binDir := p.BinDir()
+	assert.Contains(t, binDir, "bin")
+	assert.Contains(t, binDir, p.UserDir())
 }
 
 func TestTempDir(t *testing.T) {

@@ -7,8 +7,16 @@ BUILD_DIR=./bin
 COVERAGE_DIR=./coverage
 GO_VERSION=1.25.0
 
+# Version info (can be overridden via environment variables)
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+
 # Build flags
-LDFLAGS=-s -w
+LDFLAGS=-s -w \
+	-X 'github.com/NexusGPU/gpu-go/cmd/ggo/version.Version=$(VERSION)' \
+	-X 'github.com/NexusGPU/gpu-go/cmd/ggo/version.Commit=$(COMMIT)' \
+	-X 'github.com/NexusGPU/gpu-go/cmd/ggo/version.BuildDate=$(BUILD_DATE)'
 BUILD_FLAGS=-trimpath
 
 # Default target
