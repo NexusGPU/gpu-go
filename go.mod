@@ -5,7 +5,6 @@ go 1.25.0
 require (
 	github.com/NexusGPU/tensor-fusion v1.57.1
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/ebitengine/purego v0.9.1
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-resty/resty/v2 v2.17.1
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
@@ -15,7 +14,7 @@ require (
 )
 
 // replace with the target commit id and run go mod tidy to get pseudo version
-replace github.com/NexusGPU/tensor-fusion => github.com/NexusGPU/tensor-fusion v1.54.7-0.20260127094748-7cd727982f5a
+replace github.com/NexusGPU/tensor-fusion => github.com/NexusGPU/tensor-fusion v1.54.7-0.20260129064726-64da6b017335
 
 require (
 	cel.dev/expr v0.24.0 // indirect
@@ -28,6 +27,7 @@ require (
 	github.com/bytedance/sonic/loader v0.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
+	github.com/ebitengine/purego v0.9.1 // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
 	github.com/evanphx/json-patch/v5 v5.9.11 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
