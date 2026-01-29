@@ -59,48 +59,33 @@ func DownloadOrFindAccelerator() (string, error) {
 	// Step 1: Detect vendor (config has highest priority)
 	vendor, version := detectVendor()
 	if vendor == "" {
-		vendor = "STUB" // Fallback to stub if detection fails
+		vendor = "stub" // Fallback to stub if detection fails (use lowercase for slug matching)
 	}
+	// Normalize vendor to lowercase for slug matching
+	vendorSlug := strings.ToLower(vendor)
 
-	// Step 2: Try to find library locally
-	suffix := getLibSuffix()
-	libName := fmt.Sprintf("libaccelerator_%s%s", vendor, suffix)
-
-	searchPaths := buildSearchPaths()
-	for _, dir := range searchPaths {
-		if path := filepath.Join(dir, libName); fileExists(path) {
-			return path, nil
-		}
-	}
-
-	// Step 3: Library not found locally, try to download from CDN
+	// Step 2: Initialize deps manager and fetch manifest
+	// This will auto-sync on first use if manifest doesn't exist
 	paths := platform.DefaultPaths()
-
-	// Check config for accelerator library version (version already detected from env/config in detectVendor)
-	// TODO: Add AcceleratorVersion field to config.Config struct for persistent config
-
-	// Use deps manager to download
 	depsMgr := deps.NewManager(deps.WithPaths(paths))
 	ctx := context.Background()
 
-	// Fetch manifest to get latest version or use configured version
+	// Fetch manifest (auto-syncs if not cached)
 	manifest, err := depsMgr.FetchManifest(ctx)
 	if err != nil {
-		return "", fmt.Errorf("failed to fetch manifest from CDN: %w", err)
+		return "", fmt.Errorf("failed to fetch manifest: %w", err)
 	}
 
-	// Find library in manifest matching platform and vendor
+	// Step 3: Find library in manifest matching platform and vendor slug
 	var targetLib *deps.Library
 	var candidateLibs []deps.Library
 	platformLibs := depsMgr.GetLibrariesForPlatform(manifest, "", "")
 
-	// Match library name pattern: contains "accelerator_{vendor}"
-	vendorPattern := "accelerator_" + vendor
+	// Match by vendor slug from manifest
 	for i := range platformLibs {
 		lib := platformLibs[i]
 		libNameLower := strings.ToLower(lib.Name)
-		// Match if library name contains the vendor pattern
-		if strings.Contains(libNameLower, vendorPattern) {
+		if strings.Contains(libNameLower, "accelerator") && lib.VendorSlug == vendorSlug {
 			candidateLibs = append(candidateLibs, lib)
 		}
 	}
@@ -121,13 +106,47 @@ func DownloadOrFindAccelerator() (string, error) {
 	}
 
 	if targetLib == nil {
-		// Library not in manifest, return error (could fallback to stub)
+		// Library not in manifest, return error with available libraries
 		availableNames := getLibraryNames(platformLibs)
-		return "", fmt.Errorf("accelerator library for vendor %s (name: %s) not found in CDN manifest. Available libraries: %v",
-			vendor, libName, availableNames)
+		return "", fmt.Errorf("accelerator library for vendor %s (slug: %s) not found in CDN manifest. Available libraries: %v",
+			vendor, vendorSlug, availableNames)
 	}
 
-	// Download the library
+	// Step 4: Check if library is already downloaded in cache directory
+	// Search cache directory based on manifest entries
+	cacheDir := paths.CacheDir()
+	cachedPath := filepath.Join(cacheDir, targetLib.Name)
+	if fileExists(cachedPath) {
+		// Verify the cached file matches the expected hash
+		if targetLib.SHA256 != "" {
+			// Use deps manager's VerifyLibrary method
+			if depsMgr.VerifyLibrary(cachedPath, targetLib.SHA256) {
+				// Library found in cache, check if installed
+				installedPath := depsMgr.GetLibraryPath(targetLib.Name)
+				if fileExists(installedPath) {
+					return installedPath, nil
+				}
+				// Install from cache
+				if err := depsMgr.InstallLibrary(*targetLib); err != nil {
+					return "", fmt.Errorf("failed to install library from cache: %w", err)
+				}
+				return installedPath, nil
+			}
+		} else {
+			// No hash to verify, assume cached file is valid
+			installedPath := depsMgr.GetLibraryPath(targetLib.Name)
+			if fileExists(installedPath) {
+				return installedPath, nil
+			}
+			// Install from cache
+			if err := depsMgr.InstallLibrary(*targetLib); err != nil {
+				return "", fmt.Errorf("failed to install library from cache: %w", err)
+			}
+			return installedPath, nil
+		}
+	}
+
+	// Step 5: Library not found locally, download from CDN
 	progressFn := func(downloaded, total int64) {
 		// Silent progress for library download
 	}
@@ -288,50 +307,6 @@ func CreateMockGPUs(count int) []api.GPUInfo {
 		}
 	}
 	return gpus
-}
-
-func getLibSuffix() string {
-	switch runtime.GOOS {
-	case "darwin":
-		// In provider build, we only build .so libraries, even for MacOS
-		return ".so"
-	case "windows":
-		return ".dll"
-	default:
-		return ".so"
-	}
-}
-
-func buildSearchPaths() []string {
-	paths := []string{
-		"/usr/lib/tensor-fusion",
-		"/usr/local/lib/tensor-fusion",
-		"/opt/tensor-fusion/lib",
-	}
-
-	// Add platform lib directory (where deps manager installs libraries)
-	platformPaths := platform.DefaultPaths()
-	paths = append(paths, platformPaths.LibDir())
-
-	// Environment variable takes priority
-	if tfLibPath := os.Getenv("TENSOR_FUSION_LIB_PATH"); tfLibPath != "" {
-		paths = append([]string{tfLibPath}, paths...)
-	}
-
-	// Add home directory paths
-	if home, err := os.UserHomeDir(); err == nil {
-		paths = append(paths,
-			filepath.Join(home, ".tensor-fusion", "libs"),
-			filepath.Join(home, ".local", "lib", "tensor-fusion"),
-		)
-	}
-
-	// Add cwd for development
-	if cwd, err := os.Getwd(); err == nil {
-		paths = append(paths, cwd)
-	}
-
-	return paths
 }
 
 func fileExists(path string) bool {

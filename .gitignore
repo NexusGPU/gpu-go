@@ -54,3 +54,4 @@ cmd/ggo/ggo
 # .vscode/
 .vscode-test/
 *.log
+bin/

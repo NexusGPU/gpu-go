@@ -42,6 +42,9 @@ type Library struct {
 	URL      string `json:"url"`
 	SHA256   string `json:"sha256"`
 	Size     int64  `json:"size"`
+	// Vendor information from release
+	VendorSlug string `json:"vendorSlug,omitempty"` // e.g., "stub", "nvidia", "amd"
+	VendorName string `json:"vendorName,omitempty"` // e.g., "STUB", "NVIDIA", "AMD"
 }
 
 // Manifest represents the version manifest from CDN
@@ -186,13 +189,15 @@ func (m *Manager) SyncReleases(ctx context.Context, os, arch string) (*Manifest,
 				}
 
 				lib := Library{
-					Name:     libName,
-					Version:  release.Version,
-					Platform: artifactOS,
-					Arch:     artifactArch,
-					URL:      artifact.URL,
-					SHA256:   artifact.SHA256,
-					Size:     size,
+					Name:       libName,
+					Version:    release.Version,
+					Platform:   artifactOS,
+					Arch:       artifactArch,
+					URL:        artifact.URL,
+					SHA256:     artifact.SHA256,
+					Size:       size,
+					VendorSlug: strings.ToLower(release.Vendor.Slug),
+					VendorName: release.Vendor.Name,
 				}
 				manifest.Libraries = append(manifest.Libraries, lib)
 			}
@@ -363,7 +368,7 @@ func (m *Manager) DownloadLibrary(ctx context.Context, lib Library, progressFn f
 	tmpPath := destPath + ".tmp"
 
 	// Check if already downloaded with correct hash (skip if SHA256 is empty)
-	if lib.SHA256 != "" && m.verifyLibrary(destPath, lib.SHA256) {
+	if lib.SHA256 != "" && m.VerifyLibrary(destPath, lib.SHA256) {
 		return nil // Already downloaded
 	}
 
@@ -539,9 +544,9 @@ func (m *Manager) CleanCache() error {
 	return nil
 }
 
-// verifyLibrary checks if a file exists and has the expected hash
+// VerifyLibrary checks if a file exists and has the expected hash
 // Returns true if expectedHash is empty (verification skipped)
-func (m *Manager) verifyLibrary(path, expectedHash string) bool {
+func (m *Manager) VerifyLibrary(path, expectedHash string) bool {
 	// Skip verification if hash is empty
 	if expectedHash == "" {
 		// Just check if file exists

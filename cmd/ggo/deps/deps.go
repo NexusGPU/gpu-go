@@ -82,16 +82,23 @@ func newSyncCmd() *cobra.Command {
 			if manifest != nil {
 				fmt.Printf("Synced %d libraries (manifest version: %s)\n", len(manifest.Libraries), manifest.Version)
 
-				if verbose {
-					fmt.Println("\nSynced libraries:")
-					for _, lib := range manifest.Libraries {
-						fmt.Printf("  Name: %s\n", lib.Name)
-						fmt.Printf("    Version: %s\n", lib.Version)
-						fmt.Printf("    Platform: %s/%s\n", lib.Platform, lib.Arch)
-						fmt.Printf("    Size: %d bytes\n", lib.Size)
-						fmt.Printf("    SHA256: %s\n", lib.SHA256)
-						fmt.Printf("    URL: %s\n", lib.URL)
-						fmt.Println()
+				if len(manifest.Libraries) > 0 {
+					if verbose {
+						fmt.Println("\nSynced libraries:")
+						for _, lib := range manifest.Libraries {
+							fmt.Printf("  Name: %s\n", lib.Name)
+							fmt.Printf("    Version: %s\n", lib.Version)
+							fmt.Printf("    Platform: %s/%s\n", lib.Platform, lib.Arch)
+							fmt.Printf("    Size: %d bytes\n", lib.Size)
+							fmt.Printf("    SHA256: %s\n", lib.SHA256)
+							fmt.Printf("    URL: %s\n", lib.URL)
+							fmt.Println()
+						}
+					} else {
+						fmt.Println("\nSynced libraries:")
+						for _, lib := range manifest.Libraries {
+							fmt.Printf("  %s (version: %s, platform: %s/%s)\n", lib.Name, lib.Version, lib.Platform, lib.Arch)
+						}
 					}
 				}
 			}
