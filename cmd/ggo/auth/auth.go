@@ -363,19 +363,6 @@ func GetToken() (string, error) {
 	return tokenConfig.Token, nil
 }
 
-// IsLoggedIn returns true if user is logged in
-func IsLoggedIn() bool {
-	tokenConfig, err := LoadToken()
-	if err != nil || tokenConfig == nil {
-		return false
-	}
-	// Check if expired
-	if !tokenConfig.ExpiresAt.IsZero() && time.Now().After(tokenConfig.ExpiresAt) {
-		return false
-	}
-	return true
-}
-
 func getTokenPath() string {
 	paths := platform.DefaultPaths()
 	return filepath.Join(paths.UserDir(), tokenFileName)

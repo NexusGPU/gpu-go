@@ -353,15 +353,3 @@ func TestAgent_ComputeFileHash(t *testing.T) {
 	hash3 := agent.computeFileHash()
 	assert.Equal(t, hash2, hash3)
 }
-
-func TestGetNetworkIPs(t *testing.T) {
-	ips := getNetworkIPs()
-	// Should return at least localhost or some IP
-	// This test just ensures the function doesn't panic
-	t.Logf("Found network IPs: %v", ips)
-}
-
-func TestNotRegisteredError(t *testing.T) {
-	err := &NotRegisteredError{}
-	assert.Contains(t, err.Error(), "not registered")
-}

@@ -59,7 +59,7 @@ func DownloadOrFindAccelerator() (string, error) {
 	// Step 1: Detect vendor (config has highest priority)
 	vendor, version := detectVendor()
 	if vendor == "" {
-		vendor = "example" // Fallback to stub if detection fails
+		vendor = "STUB" // Fallback to stub if detection fails
 	}
 
 	// Step 2: Try to find library locally

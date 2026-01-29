@@ -157,201 +157,214 @@ func (c *Client) agentAuthHeader() string {
 	return "Bearer " + c.agentSecret
 }
 
+// authType constants for request helpers
+type authType int
+
+const (
+	authNone authType = iota
+	authUser
+	authAgent
+	authCustom
+)
+
+// doGet performs a GET request with the specified auth type
+func doGet[T any](c *Client, ctx context.Context, path string, auth authType, customAuth string) (*T, error) {
+	var resp T
+	req := c.httpClient.R().
+		SetContext(ctx).
+		SetResult(&resp)
+
+	switch auth {
+	case authUser:
+		req.SetHeader("Authorization", c.userAuthHeader())
+	case authAgent:
+		req.SetHeader("Authorization", c.agentAuthHeader())
+	case authCustom:
+		req.SetHeader("Authorization", customAuth)
+	}
+
+	httpResp, err := req.Get(c.baseURL + path)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+
+	if httpResp.StatusCode() != http.StatusOK {
+		return nil, fmt.Errorf("request failed: status %d, body: %s", httpResp.StatusCode(), httpResp.String())
+	}
+
+	return &resp, nil
+}
+
+// doPost performs a POST request with the specified auth type and body
+func doPost[T any](c *Client, ctx context.Context, path string, body any, auth authType, customAuth string, acceptedCodes ...int) (*T, error) {
+	var resp T
+	req := c.httpClient.R().
+		SetContext(ctx).
+		SetHeader("Content-Type", "application/json").
+		SetBody(body).
+		SetResult(&resp)
+
+	switch auth {
+	case authUser:
+		req.SetHeader("Authorization", c.userAuthHeader())
+	case authAgent:
+		req.SetHeader("Authorization", c.agentAuthHeader())
+	case authCustom:
+		req.SetHeader("Authorization", customAuth)
+	}
+
+	httpResp, err := req.Post(c.baseURL + path)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+
+	// Default accepted codes
+	if len(acceptedCodes) == 0 {
+		acceptedCodes = []int{http.StatusOK, http.StatusCreated}
+	}
+
+	statusOk := false
+	for _, code := range acceptedCodes {
+		if httpResp.StatusCode() == code {
+			statusOk = true
+			break
+		}
+	}
+	if !statusOk {
+		return nil, fmt.Errorf("request failed: status %d, body: %s", httpResp.StatusCode(), httpResp.String())
+	}
+
+	return &resp, nil
+}
+
+// doPostNoResponse performs a POST request that doesn't return a body
+func doPostNoResponse(c *Client, ctx context.Context, path string, body any, auth authType) error {
+	req := c.httpClient.R().
+		SetContext(ctx).
+		SetHeader("Content-Type", "application/json").
+		SetBody(body)
+
+	switch auth {
+	case authUser:
+		req.SetHeader("Authorization", c.userAuthHeader())
+	case authAgent:
+		req.SetHeader("Authorization", c.agentAuthHeader())
+	}
+
+	httpResp, err := req.Post(c.baseURL + path)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+
+	if httpResp.StatusCode() != http.StatusOK {
+		return fmt.Errorf("request failed: status %d, body: %s", httpResp.StatusCode(), httpResp.String())
+	}
+
+	return nil
+}
+
+// doPatch performs a PATCH request
+func doPatch[T any](c *Client, ctx context.Context, path string, body any, auth authType) (*T, error) {
+	var resp T
+	req := c.httpClient.R().
+		SetContext(ctx).
+		SetHeader("Content-Type", "application/json").
+		SetBody(body).
+		SetResult(&resp)
+
+	switch auth {
+	case authUser:
+		req.SetHeader("Authorization", c.userAuthHeader())
+	case authAgent:
+		req.SetHeader("Authorization", c.agentAuthHeader())
+	}
+
+	httpResp, err := req.Patch(c.baseURL + path)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+
+	if httpResp.StatusCode() != http.StatusOK {
+		return nil, fmt.Errorf("request failed: status %d, body: %s", httpResp.StatusCode(), httpResp.String())
+	}
+
+	return &resp, nil
+}
+
+// doDelete performs a DELETE request
+func doDelete(c *Client, ctx context.Context, path string, auth authType) error {
+	req := c.httpClient.R().
+		SetContext(ctx)
+
+	switch auth {
+	case authUser:
+		req.SetHeader("Authorization", c.userAuthHeader())
+	case authAgent:
+		req.SetHeader("Authorization", c.agentAuthHeader())
+	}
+
+	httpResp, err := req.Delete(c.baseURL + path)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+
+	if httpResp.StatusCode() != http.StatusOK && httpResp.StatusCode() != http.StatusNoContent {
+		return fmt.Errorf("request failed: status %d, body: %s", httpResp.StatusCode(), httpResp.String())
+	}
+
+	return nil
+}
+
 // --- Token APIs ---
 
 // GenerateToken generates a temporary installation token
 func (c *Client) GenerateToken(ctx context.Context, tokenType string) (*TokenResponse, error) {
-	var resp TokenResponse
 	req := map[string]string{"type": tokenType}
-
-	httpResp, err := c.httpClient.R().
-		SetContext(ctx).
-		SetHeader("Authorization", c.userAuthHeader()).
-		SetHeader("Content-Type", "application/json").
-		SetBody(req).
-		SetResult(&resp).
-		Post(c.baseURL + "/api/v1/tokens/generate")
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate token: %w", err)
-	}
-
-	if httpResp.StatusCode() != http.StatusOK {
-		return nil, fmt.Errorf("failed to generate token: status %d, body: %s", httpResp.StatusCode(), httpResp.String())
-	}
-
-	return &resp, nil
+	return doPost[TokenResponse](c, ctx, "/api/v1/tokens/generate", req, authUser, "", http.StatusOK)
 }
 
 // --- Agent APIs ---
 
 // RegisterAgent registers an agent with the server
 func (c *Client) RegisterAgent(ctx context.Context, tempToken string, req *AgentRegisterRequest) (*AgentRegisterResponse, error) {
-	var resp AgentRegisterResponse
-
-	httpResp, err := c.httpClient.R().
-		SetContext(ctx).
-		SetHeader("Authorization", "Bearer "+tempToken).
-		SetHeader("Content-Type", "application/json").
-		SetBody(req).
-		SetResult(&resp).
-		Post(c.baseURL + "/api/v1/agents/register")
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to register agent: %w", err)
-	}
-
-	if httpResp.StatusCode() != http.StatusOK && httpResp.StatusCode() != http.StatusCreated {
-		return nil, fmt.Errorf("failed to register agent: status %d, body: %s", httpResp.StatusCode(), httpResp.String())
-	}
-
-	return &resp, nil
+	return doPost[AgentRegisterResponse](c, ctx, "/api/v1/agents/register", req, authCustom, "Bearer "+tempToken)
 }
 
 // ListAgents lists all agents for the current user
 func (c *Client) ListAgents(ctx context.Context) (*AgentListResponse, error) {
-	var resp AgentListResponse
-
-	httpResp, err := c.httpClient.R().
-		SetContext(ctx).
-		SetHeader("Authorization", c.userAuthHeader()).
-		SetResult(&resp).
-		Get(c.baseURL + "/api/v1/agents")
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to list agents: %w", err)
-	}
-
-	if httpResp.StatusCode() != http.StatusOK {
-		return nil, fmt.Errorf("failed to list agents: status %d, body: %s", httpResp.StatusCode(), httpResp.String())
-	}
-
-	return &resp, nil
+	return doGet[AgentListResponse](c, ctx, "/api/v1/agents", authUser, "")
 }
 
 // GetAgent gets a single agent by ID
 func (c *Client) GetAgent(ctx context.Context, agentID string) (*AgentInfo, error) {
-	var resp AgentInfo
-
-	httpResp, err := c.httpClient.R().
-		SetContext(ctx).
-		SetHeader("Authorization", c.userAuthHeader()).
-		SetResult(&resp).
-		Get(c.baseURL + "/api/v1/agents/" + agentID)
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to get agent: %w", err)
-	}
-
-	if httpResp.StatusCode() != http.StatusOK {
-		return nil, fmt.Errorf("failed to get agent: status %d, body: %s", httpResp.StatusCode(), httpResp.String())
-	}
-
-	return &resp, nil
+	return doGet[AgentInfo](c, ctx, "/api/v1/agents/"+agentID, authUser, "")
 }
 
 // DeleteAgent deletes an agent
 func (c *Client) DeleteAgent(ctx context.Context, agentID string) error {
-	httpResp, err := c.httpClient.R().
-		SetContext(ctx).
-		SetHeader("Authorization", c.userAuthHeader()).
-		Delete(c.baseURL + "/api/v1/agents/" + agentID)
-
-	if err != nil {
-		return fmt.Errorf("failed to delete agent: %w", err)
-	}
-
-	if httpResp.StatusCode() != http.StatusOK && httpResp.StatusCode() != http.StatusNoContent {
-		return fmt.Errorf("failed to delete agent: status %d, body: %s", httpResp.StatusCode(), httpResp.String())
-	}
-
-	return nil
+	return doDelete(c, ctx, "/api/v1/agents/"+agentID, authUser)
 }
 
 // GetAgentConfig gets the agent configuration
 func (c *Client) GetAgentConfig(ctx context.Context, agentID string) (*AgentConfigResponse, error) {
-	var resp AgentConfigResponse
-
-	httpResp, err := c.httpClient.R().
-		SetContext(ctx).
-		SetHeader("Authorization", c.agentAuthHeader()).
-		SetResult(&resp).
-		Get(c.baseURL + "/api/v1/agents/" + agentID + "/config")
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to get agent config: %w", err)
-	}
-
-	if httpResp.StatusCode() != http.StatusOK {
-		return nil, fmt.Errorf("failed to get agent config: status %d, body: %s", httpResp.StatusCode(), httpResp.String())
-	}
-
-	return &resp, nil
+	return doGet[AgentConfigResponse](c, ctx, "/api/v1/agents/"+agentID+"/config", authAgent, "")
 }
 
 // ReportAgentStatus reports the agent status to the server
 func (c *Client) ReportAgentStatus(ctx context.Context, agentID string, req *AgentStatusRequest) error {
-	httpResp, err := c.httpClient.R().
-		SetContext(ctx).
-		SetHeader("Authorization", c.agentAuthHeader()).
-		SetHeader("Content-Type", "application/json").
-		SetBody(req).
-		Post(c.baseURL + "/api/v1/agents/" + agentID + "/status")
-
-	if err != nil {
-		return fmt.Errorf("failed to report status: %w", err)
-	}
-
-	if httpResp.StatusCode() != http.StatusOK {
-		return fmt.Errorf("failed to report status: status %d, body: %s", httpResp.StatusCode(), httpResp.String())
-	}
-
-	return nil
+	return doPostNoResponse(c, ctx, "/api/v1/agents/"+agentID+"/status", req, authAgent)
 }
 
 // ReportAgentMetrics reports the agent metrics to the server
 func (c *Client) ReportAgentMetrics(ctx context.Context, agentID string, req *AgentMetricsRequest) error {
-	httpResp, err := c.httpClient.R().
-		SetContext(ctx).
-		SetHeader("Authorization", c.agentAuthHeader()).
-		SetHeader("Content-Type", "application/json").
-		SetBody(req).
-		Post(c.baseURL + "/api/v1/agents/" + agentID + "/metrics")
-
-	if err != nil {
-		return fmt.Errorf("failed to report metrics: %w", err)
-	}
-
-	if httpResp.StatusCode() != http.StatusOK {
-		return fmt.Errorf("failed to report metrics: status %d, body: %s", httpResp.StatusCode(), httpResp.String())
-	}
-
-	return nil
+	return doPostNoResponse(c, ctx, "/api/v1/agents/"+agentID+"/metrics", req, authAgent)
 }
 
 // --- Worker APIs ---
 
 // CreateWorker creates a new worker
 func (c *Client) CreateWorker(ctx context.Context, req *WorkerCreateRequest) (*WorkerInfo, error) {
-	var resp WorkerInfo
-
-	httpResp, err := c.httpClient.R().
-		SetContext(ctx).
-		SetHeader("Authorization", c.userAuthHeader()).
-		SetHeader("Content-Type", "application/json").
-		SetBody(req).
-		SetResult(&resp).
-		Post(c.baseURL + "/api/v1/workers")
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to create worker: %w", err)
-	}
-
-	if httpResp.StatusCode() != http.StatusOK && httpResp.StatusCode() != http.StatusCreated {
-		return nil, fmt.Errorf("failed to create worker: status %d, body: %s", httpResp.StatusCode(), httpResp.String())
-	}
-
-	return &resp, nil
+	return doPost[WorkerInfo](c, ctx, "/api/v1/workers", req, authUser, "")
 }
 
 // ListWorkers lists all workers for the current user
@@ -371,13 +384,12 @@ func (c *Client) ListWorkers(ctx context.Context, agentID, hostname string) (*Wo
 	}
 
 	httpResp, err := req.Get(c.baseURL + "/api/v1/workers")
-
 	if err != nil {
-		return nil, fmt.Errorf("failed to list workers: %w", err)
+		return nil, fmt.Errorf("request failed: %w", err)
 	}
 
 	if httpResp.StatusCode() != http.StatusOK {
-		return nil, fmt.Errorf("failed to list workers: status %d, body: %s", httpResp.StatusCode(), httpResp.String())
+		return nil, fmt.Errorf("request failed: status %d, body: %s", httpResp.StatusCode(), httpResp.String())
 	}
 
 	return &resp, nil
@@ -385,148 +397,39 @@ func (c *Client) ListWorkers(ctx context.Context, agentID, hostname string) (*Wo
 
 // GetWorker gets a single worker by ID
 func (c *Client) GetWorker(ctx context.Context, workerID string) (*WorkerInfo, error) {
-	var resp WorkerInfo
-
-	httpResp, err := c.httpClient.R().
-		SetContext(ctx).
-		SetHeader("Authorization", c.userAuthHeader()).
-		SetResult(&resp).
-		Get(c.baseURL + "/api/v1/workers/" + workerID)
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to get worker: %w", err)
-	}
-
-	if httpResp.StatusCode() != http.StatusOK {
-		return nil, fmt.Errorf("failed to get worker: status %d, body: %s", httpResp.StatusCode(), httpResp.String())
-	}
-
-	return &resp, nil
+	return doGet[WorkerInfo](c, ctx, "/api/v1/workers/"+workerID, authUser, "")
 }
 
 // UpdateWorker updates a worker
 func (c *Client) UpdateWorker(ctx context.Context, workerID string, req *WorkerUpdateRequest) (*WorkerInfo, error) {
-	var resp WorkerInfo
-
-	httpResp, err := c.httpClient.R().
-		SetContext(ctx).
-		SetHeader("Authorization", c.userAuthHeader()).
-		SetHeader("Content-Type", "application/json").
-		SetBody(req).
-		SetResult(&resp).
-		Patch(c.baseURL + "/api/v1/workers/" + workerID)
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to update worker: %w", err)
-	}
-
-	if httpResp.StatusCode() != http.StatusOK {
-		return nil, fmt.Errorf("failed to update worker: status %d, body: %s", httpResp.StatusCode(), httpResp.String())
-	}
-
-	return &resp, nil
+	return doPatch[WorkerInfo](c, ctx, "/api/v1/workers/"+workerID, req, authUser)
 }
 
 // DeleteWorker deletes a worker
 func (c *Client) DeleteWorker(ctx context.Context, workerID string) error {
-	httpResp, err := c.httpClient.R().
-		SetContext(ctx).
-		SetHeader("Authorization", c.userAuthHeader()).
-		Delete(c.baseURL + "/api/v1/workers/" + workerID)
-
-	if err != nil {
-		return fmt.Errorf("failed to delete worker: %w", err)
-	}
-
-	if httpResp.StatusCode() != http.StatusOK && httpResp.StatusCode() != http.StatusNoContent {
-		return fmt.Errorf("failed to delete worker: status %d, body: %s", httpResp.StatusCode(), httpResp.String())
-	}
-
-	return nil
+	return doDelete(c, ctx, "/api/v1/workers/"+workerID, authUser)
 }
 
 // --- Share APIs ---
 
 // CreateShare creates a new share link
 func (c *Client) CreateShare(ctx context.Context, req *ShareCreateRequest) (*ShareInfo, error) {
-	var resp ShareInfo
-
-	httpResp, err := c.httpClient.R().
-		SetContext(ctx).
-		SetHeader("Authorization", c.userAuthHeader()).
-		SetHeader("Content-Type", "application/json").
-		SetBody(req).
-		SetResult(&resp).
-		Post(c.baseURL + "/api/v1/shares")
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to create share: %w", err)
-	}
-
-	if httpResp.StatusCode() != http.StatusOK && httpResp.StatusCode() != http.StatusCreated {
-		return nil, fmt.Errorf("failed to create share: status %d, body: %s", httpResp.StatusCode(), httpResp.String())
-	}
-
-	return &resp, nil
+	return doPost[ShareInfo](c, ctx, "/api/v1/shares", req, authUser, "")
 }
 
 // ListShares lists all shares for the current user
 func (c *Client) ListShares(ctx context.Context) (*ShareListResponse, error) {
-	var resp ShareListResponse
-
-	httpResp, err := c.httpClient.R().
-		SetContext(ctx).
-		SetHeader("Authorization", c.userAuthHeader()).
-		SetResult(&resp).
-		Get(c.baseURL + "/api/v1/shares")
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to list shares: %w", err)
-	}
-
-	if httpResp.StatusCode() != http.StatusOK {
-		return nil, fmt.Errorf("failed to list shares: status %d, body: %s", httpResp.StatusCode(), httpResp.String())
-	}
-
-	return &resp, nil
+	return doGet[ShareListResponse](c, ctx, "/api/v1/shares", authUser, "")
 }
 
 // GetSharePublic gets public share information by short code
 func (c *Client) GetSharePublic(ctx context.Context, shortCode string) (*SharePublicInfo, error) {
-	var resp SharePublicInfo
-
-	httpResp, err := c.httpClient.R().
-		SetContext(ctx).
-		SetResult(&resp).
-		Get(c.baseURL + "/s/" + shortCode)
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to get share: %w", err)
-	}
-
-	if httpResp.StatusCode() != http.StatusOK {
-		return nil, fmt.Errorf("failed to get share: status %d, body: %s", httpResp.StatusCode(), httpResp.String())
-	}
-
-	return &resp, nil
+	return doGet[SharePublicInfo](c, ctx, "/s/"+shortCode, authNone, "")
 }
 
 // DeleteShare deletes a share
 func (c *Client) DeleteShare(ctx context.Context, shareID string) error {
-	httpResp, err := c.httpClient.R().
-		SetContext(ctx).
-		SetHeader("Authorization", c.userAuthHeader()).
-		Delete(c.baseURL + "/api/v1/shares/" + shareID)
-
-	if err != nil {
-		return fmt.Errorf("failed to delete share: %w", err)
-	}
-
-	if httpResp.StatusCode() != http.StatusOK && httpResp.StatusCode() != http.StatusNoContent {
-		return fmt.Errorf("failed to delete share: status %d, body: %s", httpResp.StatusCode(), httpResp.String())
-	}
-
-	return nil
+	return doDelete(c, ctx, "/api/v1/shares/"+shareID, authUser)
 }
 
 // --- Ecosystem/Releases APIs ---
@@ -549,13 +452,12 @@ func (c *Client) GetReleases(ctx context.Context, vendor string, size int) (*Rel
 	}
 
 	httpResp, err := req.Get(c.baseURL + "/api/ecosystem/releases")
-
 	if err != nil {
-		return nil, fmt.Errorf("failed to get releases: %w", err)
+		return nil, fmt.Errorf("request failed: %w", err)
 	}
 
 	if httpResp.StatusCode() != http.StatusOK {
-		return nil, fmt.Errorf("failed to get releases: status %d, body: %s", httpResp.StatusCode(), httpResp.String())
+		return nil, fmt.Errorf("request failed: status %d, body: %s", httpResp.StatusCode(), httpResp.String())
 	}
 
 	return &resp, nil

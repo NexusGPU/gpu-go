@@ -1,13 +1,13 @@
 package config
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"sync"
 
 	"github.com/NexusGPU/gpu-go/internal/api"
 	"github.com/NexusGPU/gpu-go/internal/platform"
+	"github.com/NexusGPU/gpu-go/internal/utils"
 )
 
 const (
@@ -112,21 +112,7 @@ func (m *Manager) StateDir() string {
 func (m *Manager) LoadConfig() (*Config, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-
-	data, err := os.ReadFile(m.ConfigPath())
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	var cfg Config
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, err
-	}
-
-	return &cfg, nil
+	return utils.LoadJSON[Config](m.ConfigPath())
 }
 
 // SaveConfig saves the agent configuration
@@ -137,39 +123,14 @@ func (m *Manager) SaveConfig(cfg *Config) error {
 	if err := m.EnsureDirs(); err != nil {
 		return err
 	}
-
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	tmpPath := m.ConfigPath() + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
-		return err
-	}
-
-	return os.Rename(tmpPath, m.ConfigPath())
+	return utils.SaveJSON(m.ConfigPath(), cfg, 0600)
 }
 
 // LoadGPUs loads GPU configurations
 func (m *Manager) LoadGPUs() ([]GPUConfig, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-
-	data, err := os.ReadFile(m.GPUsPath())
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	var gpus []GPUConfig
-	if err := json.Unmarshal(data, &gpus); err != nil {
-		return nil, err
-	}
-
-	return gpus, nil
+	return utils.LoadJSONSlice[GPUConfig](m.GPUsPath())
 }
 
 // SaveGPUs saves GPU configurations
@@ -180,39 +141,14 @@ func (m *Manager) SaveGPUs(gpus []GPUConfig) error {
 	if err := m.EnsureDirs(); err != nil {
 		return err
 	}
-
-	data, err := json.MarshalIndent(gpus, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	tmpPath := m.GPUsPath() + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
-		return err
-	}
-
-	return os.Rename(tmpPath, m.GPUsPath())
+	return utils.SaveJSONSlice(m.GPUsPath(), gpus, 0644)
 }
 
 // LoadWorkers loads worker configurations
 func (m *Manager) LoadWorkers() ([]WorkerConfig, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-
-	data, err := os.ReadFile(m.WorkersPath())
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	var workers []WorkerConfig
-	if err := json.Unmarshal(data, &workers); err != nil {
-		return nil, err
-	}
-
-	return workers, nil
+	return utils.LoadJSONSlice[WorkerConfig](m.WorkersPath())
 }
 
 // SaveWorkers saves worker configurations
@@ -223,18 +159,7 @@ func (m *Manager) SaveWorkers(workers []WorkerConfig) error {
 	if err := m.EnsureDirs(); err != nil {
 		return err
 	}
-
-	data, err := json.MarshalIndent(workers, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	tmpPath := m.WorkersPath() + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
-		return err
-	}
-
-	return os.Rename(tmpPath, m.WorkersPath())
+	return utils.SaveJSONSlice(m.WorkersPath(), workers, 0644)
 }
 
 // UpdateConfigVersion updates the config version and license

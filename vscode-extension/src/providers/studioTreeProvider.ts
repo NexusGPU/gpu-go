@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { CLI, StudioEnv } from '../cli/cli';
 import { AuthManager } from '../auth/authManager';
+import { PropertyItem, createLoginItem, createEmptyItem, createErrorItem, getStatusIcon, getStatusContext } from './treeUtils';
 
 export class StudioTreeItem extends vscode.TreeItem {
     constructor(
@@ -18,34 +19,21 @@ export class StudioTreeItem extends vscode.TreeItem {
         this.tooltip = new vscode.MarkdownString(tooltip);
         
         // Show status with helpful hints
+        this.iconPath = getStatusIcon(env.status, 'studio');
+        this.contextValue = getStatusContext(env.status, 'studio');
+        
         if (env.status === 'running') {
             this.description = `● Running`;
-            this.iconPath = new vscode.ThemeIcon('vm-running', new vscode.ThemeColor('charts.green'));
-            this.contextValue = 'studio-running';
         } else if (env.status === 'stopped' || env.status === 'exited') {
             this.description = `○ Stopped`;
-            this.iconPath = new vscode.ThemeIcon('vm-outline');
-            this.contextValue = 'studio-stopped';
         } else {
             this.description = `◔ ${env.status}`;
-            this.iconPath = new vscode.ThemeIcon('loading~spin');
-            this.contextValue = 'studio-pending';
         }
     }
 }
 
-export class StudioPropertyItem extends vscode.TreeItem {
-    constructor(label: string, value: string, options?: { icon?: string; command?: vscode.Command }) {
-        super(`${label}: ${value}`, vscode.TreeItemCollapsibleState.None);
-        this.description = '';
-        if (options?.icon) {
-            this.iconPath = new vscode.ThemeIcon(options.icon);
-        }
-        if (options?.command) {
-            this.command = options.command;
-        }
-    }
-}
+// Re-export PropertyItem for backwards compatibility
+export { PropertyItem as StudioPropertyItem };
 
 export class StudioWebUrlItem extends vscode.TreeItem {
     constructor(name: string, url: string) {
@@ -62,8 +50,8 @@ export class StudioWebUrlItem extends vscode.TreeItem {
 }
 
 export class StudioTreeProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
-    private _onDidChangeTreeData: vscode.EventEmitter<vscode.TreeItem | undefined | null | void> = new vscode.EventEmitter<vscode.TreeItem | undefined | null | void>();
-    readonly onDidChangeTreeData: vscode.Event<vscode.TreeItem | undefined | null | void> = this._onDidChangeTreeData.event;
+    private _onDidChangeTreeData = new vscode.EventEmitter<vscode.TreeItem | undefined | null | void>();
+    readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
     private studios: StudioEnv[] = [];
     private cli: CLI;
@@ -84,7 +72,7 @@ export class StudioTreeProvider implements vscode.TreeDataProvider<vscode.TreeIt
 
     async getChildren(element?: vscode.TreeItem): Promise<vscode.TreeItem[]> {
         if (!this.authManager.isLoggedIn) {
-            return [this.createLoginItem()];
+            return [createLoginItem()];
         }
 
         if (!element) {
@@ -93,14 +81,14 @@ export class StudioTreeProvider implements vscode.TreeDataProvider<vscode.TreeIt
                 this.studios = await this.cli.studioList();
                 
                 if (this.studios.length === 0) {
-                    return [this.createEmptyItem()];
+                    return [createEmptyItem('No studio environments', 'Click + to create one')];
                 }
 
                 return this.studios.map(env => 
                     new StudioTreeItem(env.name, env, vscode.TreeItemCollapsibleState.Collapsed)
                 );
             } catch (error) {
-                return [this.createErrorItem(error)];
+                return [createErrorItem('Error loading studios', error)];
             }
         }
 
@@ -128,51 +116,26 @@ export class StudioTreeProvider implements vscode.TreeDataProvider<vscode.TreeIt
                 
                 // Add SSH quick connect
                 if (env.sshHost && env.sshPort) {
-                    const sshItem = new StudioPropertyItem('SSH', `ggo-${env.name}`, {
+                    items.push(new PropertyItem('SSH', `ggo-${env.name}`, {
                         icon: 'terminal',
                         command: {
                             command: 'gpugo.connectStudio',
                             title: 'Connect via SSH',
                             arguments: [element]
                         }
-                    });
-                    items.push(sshItem);
+                    }));
                 }
             }
 
             // Show basic info
-            items.push(new StudioPropertyItem('ID', env.id, { icon: 'key' }));
-            items.push(new StudioPropertyItem('Mode', env.mode, { icon: 'server' }));
-            items.push(new StudioPropertyItem('Image', env.image, { icon: 'package' }));
-            items.push(new StudioPropertyItem('Status', env.status, { icon: 'pulse' }));
+            items.push(new PropertyItem('ID', env.id, { icon: 'key' }));
+            items.push(new PropertyItem('Mode', env.mode, { icon: 'server' }));
+            items.push(new PropertyItem('Image', env.image, { icon: 'package' }));
+            items.push(new PropertyItem('Status', env.status, { icon: 'pulse' }));
 
             return items;
         }
 
         return [];
-    }
-
-    private createLoginItem(): vscode.TreeItem {
-        const item = new vscode.TreeItem('Login to GPU Go', vscode.TreeItemCollapsibleState.None);
-        item.iconPath = new vscode.ThemeIcon('account');
-        item.command = {
-            command: 'gpugo.login',
-            title: 'Login'
-        };
-        return item;
-    }
-
-    private createEmptyItem(): vscode.TreeItem {
-        const item = new vscode.TreeItem('No studio environments', vscode.TreeItemCollapsibleState.None);
-        item.iconPath = new vscode.ThemeIcon('info');
-        item.description = 'Click + to create one';
-        return item;
-    }
-
-    private createErrorItem(error: unknown): vscode.TreeItem {
-        const item = new vscode.TreeItem('Error loading studios', vscode.TreeItemCollapsibleState.None);
-        item.iconPath = new vscode.ThemeIcon('error');
-        item.tooltip = String(error);
-        return item;
     }
 }

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { CLI, Agent, GPU } from '../cli/cli';
 import { AuthManager } from '../auth/authManager';
+import { PropertyItem, createLoginItem, createEmptyItem, createActionItem, getStatusIcon, getStatusContext } from './treeUtils';
 
 export class AgentTreeItem extends vscode.TreeItem {
     constructor(
@@ -12,14 +13,9 @@ export class AgentTreeItem extends vscode.TreeItem {
         this.tooltip = `Host: ${agent.hostname}\nStatus: ${agent.status}\nOS: ${agent.os}/${agent.arch}`;
         this.description = `${agent.status} - ${agent.os}`;
         
-        // Set icon based on status
-        if (agent.status === 'online') {
-            this.iconPath = new vscode.ThemeIcon('server', new vscode.ThemeColor('charts.green'));
-            this.contextValue = 'agent-online';
-        } else {
-            this.iconPath = new vscode.ThemeIcon('server', new vscode.ThemeColor('charts.red'));
-            this.contextValue = 'agent-offline';
-        }
+        // Set icon and context based on status
+        this.iconPath = getStatusIcon(agent.status, 'agent');
+        this.contextValue = getStatusContext(agent.status, 'agent');
     }
 }
 
@@ -44,18 +40,12 @@ export class GPUTreeItem extends vscode.TreeItem {
     }
 }
 
-export class DevicePropertyItem extends vscode.TreeItem {
-    constructor(label: string, value: string, icon?: vscode.ThemeIcon) {
-        super(`${label}: ${value}`, vscode.TreeItemCollapsibleState.None);
-        if (icon) {
-            this.iconPath = icon;
-        }
-    }
-}
+// Re-export PropertyItem for backwards compatibility
+export { PropertyItem as DevicePropertyItem };
 
 export class DevicesTreeProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
-    private _onDidChangeTreeData: vscode.EventEmitter<vscode.TreeItem | undefined | null | void> = new vscode.EventEmitter<vscode.TreeItem | undefined | null | void>();
-    readonly onDidChangeTreeData: vscode.Event<vscode.TreeItem | undefined | null | void> = this._onDidChangeTreeData.event;
+    private _onDidChangeTreeData = new vscode.EventEmitter<vscode.TreeItem | undefined | null | void>();
+    readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
     private agents: Agent[] = [];
     private cli: CLI;
@@ -76,7 +66,7 @@ export class DevicesTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
 
     async getChildren(element?: vscode.TreeItem): Promise<vscode.TreeItem[]> {
         if (!this.authManager.isLoggedIn) {
-            return [this.createLoginItem()];
+            return [createLoginItem()];
         }
 
         if (!element) {
@@ -87,8 +77,8 @@ export class DevicesTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
                 if (this.agents.length === 0) {
                     // Show placeholder with instructions
                     return [
-                        this.createEmptyItem(),
-                        this.createAddDeviceItem()
+                        createEmptyItem('No GPU devices found', 'Add GPU servers to get started'),
+                        createActionItem('Add GPU Server', 'gpugo.createWorker', 'add', 'Click to learn how to add GPU servers')
                     ];
                 }
 
@@ -98,8 +88,8 @@ export class DevicesTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
             } catch {
                 // If no agents, show helpful message
                 return [
-                    this.createEmptyItem(),
-                    this.createAddDeviceItem()
+                    createEmptyItem('No GPU devices found', 'Add GPU servers to get started'),
+                    createActionItem('Add GPU Server', 'gpugo.createWorker', 'add', 'Click to learn how to add GPU servers')
                 ];
             }
         }
@@ -110,11 +100,11 @@ export class DevicesTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
             const items: vscode.TreeItem[] = [];
 
             // Agent info
-            items.push(new DevicePropertyItem('Agent ID', agent.agentId.substring(0, 8) + '...'));
-            items.push(new DevicePropertyItem('OS', `${agent.os}/${agent.arch}`));
+            items.push(new PropertyItem('Agent ID', agent.agentId.substring(0, 8) + '...'));
+            items.push(new PropertyItem('OS', `${agent.os}/${agent.arch}`));
             
             if (agent.networkIps && agent.networkIps.length > 0) {
-                items.push(new DevicePropertyItem('IP', agent.networkIps[0]));
+                items.push(new PropertyItem('IP', agent.networkIps[0]));
             }
 
             // GPUs
@@ -130,40 +120,12 @@ export class DevicesTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
 
             // Workers
             if (agent.workers && agent.workers.length > 0) {
-                items.push(new DevicePropertyItem('Workers', String(agent.workers.length)));
+                items.push(new PropertyItem('Workers', String(agent.workers.length)));
             }
 
             return items;
         }
 
         return [];
-    }
-
-    private createLoginItem(): vscode.TreeItem {
-        const item = new vscode.TreeItem('Login to GPU Go', vscode.TreeItemCollapsibleState.None);
-        item.iconPath = new vscode.ThemeIcon('account');
-        item.command = {
-            command: 'gpugo.login',
-            title: 'Login'
-        };
-        return item;
-    }
-
-    private createEmptyItem(): vscode.TreeItem {
-        const item = new vscode.TreeItem('No GPU devices found', vscode.TreeItemCollapsibleState.None);
-        item.iconPath = new vscode.ThemeIcon('info');
-        item.description = 'Add GPU servers to get started';
-        return item;
-    }
-
-    private createAddDeviceItem(): vscode.TreeItem {
-        const item = new vscode.TreeItem('Add GPU Server', vscode.TreeItemCollapsibleState.None);
-        item.iconPath = new vscode.ThemeIcon('add');
-        item.command = {
-            command: 'gpugo.createWorker',
-            title: 'Add GPU Server'
-        };
-        item.tooltip = 'Click to learn how to add GPU servers';
-        return item;
     }
 }

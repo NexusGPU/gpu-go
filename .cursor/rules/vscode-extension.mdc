@@ -9,3 +9,4 @@ alwaysApply: false
 - Avoid writing logic in typescript if you can use ggo command line, read and index available gpu-go golang codes, be lightweight in vscode extension
 - Record important logs/events using vscode-extension style output
 - Extract needed config to vscode config and assign default value, but don't make config too complex
+- Don't repeat yourself, think abstraction for similar or duplicated codes

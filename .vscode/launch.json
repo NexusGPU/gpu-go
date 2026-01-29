@@ -32,7 +32,7 @@
                 "GPU_GO_ENDPOINT": "http://127.0.0.1:8787"
             },
             "args": [
-                "deps", "sync"
+                "agent", "start"
             ],
             "program": "${workspaceFolder}/cmd/ggo/main.go",
         }

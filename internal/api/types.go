@@ -214,6 +214,7 @@ type HeartbeatResponse struct {
 // IsolationModeType mirrors tensor-fusion's IsolationModeType
 type IsolationModeType = string
 
+// Isolation mode constants - use utils.IsolationMode* for canonical values
 const (
 	IsolationModeShared      IsolationModeType = "shared"
 	IsolationModeSoft        IsolationModeType = "soft"
@@ -221,6 +222,7 @@ const (
 )
 
 // ToIsolationMode converts a string to IsolationModeType
+// Deprecated: Use utils.ToTFIsolationMode for tensor-fusion types
 func ToIsolationMode(s string) IsolationModeType {
 	switch s {
 	case "soft":

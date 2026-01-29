@@ -311,26 +311,6 @@ func (r *testReconciler) isInSyncWithMock(actual []*api.WorkerInfo) bool {
 	return enabledCount == len(actual)
 }
 
-func TestWorkerSpec_Fields(t *testing.T) {
-	spec := WorkerSpec{
-		WorkerID:          "worker-1",
-		GPUIDs:            []string{"gpu-0", "gpu-1"},
-		VRAMMb:            8192,
-		ComputePercent:    50,
-		IsolationMode:     "soft",
-		PartitionTemplate: "mig-1g.5gb",
-		Enabled:           true,
-	}
-
-	assert.Equal(t, "worker-1", spec.WorkerID)
-	assert.Equal(t, []string{"gpu-0", "gpu-1"}, spec.GPUIDs)
-	assert.Equal(t, int64(8192), spec.VRAMMb)
-	assert.Equal(t, 50, spec.ComputePercent)
-	assert.Equal(t, "soft", string(spec.IsolationMode))
-	assert.Equal(t, "mig-1g.5gb", spec.PartitionTemplate)
-	assert.True(t, spec.Enabled)
-}
-
 func TestReconciler_TriggerReconcile(t *testing.T) {
 	r := newTestReconciler()
 

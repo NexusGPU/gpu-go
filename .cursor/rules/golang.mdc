@@ -16,10 +16,11 @@ alwaysApply: false
 - Never write large task at once, break to smaller ones.
 - Only write necessary comments, e.g for some complex algorithm and background info, never write stupid comment.
 - Refer k8s reconcile loop design, after agent start, non critical issues can be auto-healed. add necessary logs for every important feature
-- Always test-driven, write ginkgo based test cases, continue to run go/ginkgo test commands, review codes and refactor until test works, if test not work or perform, continue.
+- Always test-driven, write ginkgo based test cases, continue to run go/ginkgo test commands, review codes and refactor until test works, if test not work or perform, continue. BUT NEVER WRITE TRIVIAL TESTS that have low value
 - Don't write too simple test, hit key path and important logic, think consolidate tests for a full feature
 - Prioritize elegant and typed error handling, define centralized error definition
 - Rely on github.com/NexusGPU/tensor-fusion to manage workers and GPUs, this repo should be JUST WRAPPER in terms of worker/GPU Mgmt.
+- Don't repeat yourself, think abstraction for similar or duplicated codes
 
 # Reference
 

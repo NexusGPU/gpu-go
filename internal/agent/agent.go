@@ -9,11 +9,10 @@ import (
 	"sync"
 	"time"
 
-	tfv1 "github.com/NexusGPU/tensor-fusion/api/v1"
-
 	"github.com/NexusGPU/gpu-go/internal/api"
 	"github.com/NexusGPU/gpu-go/internal/config"
 	"github.com/NexusGPU/gpu-go/internal/hypervisor"
+	"github.com/NexusGPU/gpu-go/internal/utils"
 	"github.com/fsnotify/fsnotify"
 	"github.com/rs/zerolog/log"
 )
@@ -372,22 +371,10 @@ func (a *Agent) convertToWorkerSpecs(apiWorkers []api.WorkerConfig) []hypervisor
 			ComputePercent: w.ComputePercent,
 		}
 		if w.IsolationMode != "" {
-			specs[i].IsolationMode = toTFIsolationMode(w.IsolationMode)
+			specs[i].IsolationMode = utils.ToTFIsolationMode(w.IsolationMode)
 		}
 	}
 	return specs
-}
-
-// toTFIsolationMode converts a string to tensor-fusion IsolationModeType
-func toTFIsolationMode(s string) tfv1.IsolationModeType {
-	switch s {
-	case "soft":
-		return tfv1.IsolationModeSoft
-	case "partitioned":
-		return tfv1.IsolationModePartitioned
-	default:
-		return tfv1.IsolationModeShared
-	}
 }
 
 // reportStatus reports current status to the server
