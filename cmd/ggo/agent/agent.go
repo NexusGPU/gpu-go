@@ -218,10 +218,14 @@ func newStartCmd() *cobra.Command {
 				)
 				workerBinaryPath, err = depsMgr.GetRemoteGPUWorkerPath(context.Background())
 				if err != nil {
-					klog.Warningf("Failed to get remote-gpu-worker path, workers may not start: error=%v", err)
-				} else {
-					klog.V(4).Infof("Using remote-gpu-worker binary: path=%s", workerBinaryPath)
+					cmd.SilenceUsage = true
+					if !out.IsJSON() {
+						fmt.Println(tui.ErrorMessage(fmt.Sprintf("Fatal: Failed to get remote-gpu-worker binary: %v", err)))
+						fmt.Println(tui.Muted("The agent requires remote-gpu-worker to manage workers. Please ensure the binary is available for your platform."))
+					}
+					klog.Fatalf("Fatal: Failed to get remote-gpu-worker path: error=%v", err)
 				}
+				klog.V(4).Infof("Using remote-gpu-worker binary: path=%s", workerBinaryPath)
 			}
 
 			// Create agent with hypervisor integration

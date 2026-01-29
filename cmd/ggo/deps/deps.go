@@ -8,8 +8,8 @@ import (
 
 	"github.com/NexusGPU/gpu-go/internal/api"
 	"github.com/NexusGPU/gpu-go/internal/deps"
-	"k8s.io/klog/v2"
 	"github.com/spf13/cobra"
+	"k8s.io/klog/v2"
 )
 
 var (

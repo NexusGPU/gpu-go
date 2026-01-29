@@ -193,7 +193,7 @@ func (m *Manager) SyncReleases(ctx context.Context, os, arch string) (*Manifest,
 				// Get size from metadata if available, otherwise 0
 				size := int64(0)
 				if sizeStr, ok := artifact.Metadata["size"]; ok {
-					fmt.Sscanf(sizeStr, "%d", &size)
+					_, _ = fmt.Sscanf(sizeStr, "%d", &size)
 				}
 
 				// Get type from metadata if available

@@ -22,10 +22,15 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.25'
           cache: true
 
+      - name: Configure Go Toolchain
+        run: go env -w GOTOOLCHAIN=go1.25.0+auto
+
       - name: Run tests
+        env:
+          GOTOOLCHAIN: go1.25.0+auto
         run: go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
 
       - name: Upload coverage
@@ -44,8 +49,11 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.25'
           cache: true
+
+      - name: Configure Go Toolchain
+        run: go env -w GOTOOLCHAIN=go1.25.0+auto
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
@@ -87,14 +95,18 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.25'
           cache: true
+
+      - name: Configure Go Toolchain
+        run: go env -w GOTOOLCHAIN=go1.25.0+auto
 
       - name: Build
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
+          GOTOOLCHAIN: go1.25.0+auto
         run: |
           go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o ggo-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.suffix }} ./cmd/ggo
 
@@ -103,6 +115,36 @@ jobs:
         with:
           name: ggo-${{ matrix.goos }}-${{ matrix.goarch }}
           path: ggo-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.suffix }}
+
+      - name: Prepare files for Cloudflare R2 upload
+        if: matrix.goos == 'linux'
+        run: |
+          mkdir -p temp-upload
+          cp ggo-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.suffix }} temp-upload/gpugo-${{ matrix.goarch }}
+
+      - name: Upload Latest Files to Cloudflare R2
+        if: matrix.goos == 'linux'
+        uses: ryand56/r2-upload-action@latest
+        with:
+          r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+          r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          r2-bucket: "cuda-fusion-libs"
+          source-dir: temp-upload
+          destination-dir: ./archive/gpugo/latest/
+          keep-file-fresh: true
+
+      - name: Upload Tag Files to Cloudflare R2
+        if: matrix.goos == 'linux' && startsWith(github.ref, 'refs/tags/v')
+        uses: ryand56/r2-upload-action@latest
+        with:
+          r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+          r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          r2-bucket: "cuda-fusion-libs"
+          source-dir: temp-upload
+          destination-dir: ./archive/gpugo/${{ github.ref_name }}/
+          keep-file-fresh: true
 
   release:
     name: Release

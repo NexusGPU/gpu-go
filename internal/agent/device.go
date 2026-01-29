@@ -10,10 +10,14 @@ import (
 	"strings"
 
 	"github.com/NexusGPU/gpu-go/internal/api"
-	"github.com/NexusGPU/gpu-go/internal/config"
 	"github.com/NexusGPU/gpu-go/internal/deps"
 	"github.com/NexusGPU/gpu-go/internal/platform"
 	hvapi "github.com/NexusGPU/tensor-fusion/pkg/hypervisor/api"
+)
+
+const (
+	vendorNVIDIA = "nvidia"
+	vendorAMD    = "amd"
 )
 
 // ConvertDevicesToGPUInfo converts hypervisor DeviceInfo to API GPUInfo
@@ -177,19 +181,7 @@ func detectVendor() (string, string) {
 		return strings.ToLower(vendor), version
 	}
 
-	// Priority 2: Check config file
-	// Note: Config struct doesn't currently have accelerator_vendor/version fields
-	// Environment variables ACCELERATOR_VENDOR and ACCELERATOR_VERSION are used for now
-	// TODO: Add AcceleratorVendor and AcceleratorVersion fields to config.Config struct
-	paths := platform.DefaultPaths()
-	cfgMgr := config.NewManagerWithPaths(paths)
-	_, err := cfgMgr.LoadConfig()
-	if err == nil {
-		// Config loaded successfully, but vendor/version fields not yet in Config struct
-		// For now, rely on environment variables set above
-	}
-
-	// Priority 3: System detection
+	// Priority 2: System detection
 	vendor := detectVendorFromSystem()
 	if vendor != "" {
 		return vendor, ""
@@ -207,20 +199,20 @@ func detectVendorFromSystem() string {
 		cmd := exec.Command("nvidia-smi", "--query-gpu=vendor", "--format=csv,noheader")
 		if output, err := cmd.Output(); err == nil {
 			vendor := strings.TrimSpace(strings.ToLower(string(output)))
-			if strings.Contains(vendor, "nvidia") {
-				return "nvidia"
+			if strings.Contains(vendor, vendorNVIDIA) {
+				return vendorNVIDIA
 			}
 		}
 		// If nvidia-smi exists, assume NVIDIA even if query fails
-		return "nvidia"
+		return vendorNVIDIA
 	}
 
 	// Check for AMD/ROCm
 	if _, err := exec.LookPath("rocm-smi"); err == nil {
-		return "amd"
+		return vendorAMD
 	}
 	if _, err := exec.LookPath("rocm-info"); err == nil {
-		return "amd"
+		return vendorAMD
 	}
 
 	// Check PCI devices (Linux)
@@ -245,10 +237,10 @@ func detectVendorFromSystem() string {
 						// NVIDIA: 0x10de (hex: 10de), AMD: 0x1002 (hex: 1002)
 						// Vendor ID format: 0x10de or 10de
 						if strings.Contains(vendorID, "10de") {
-							return "nvidia"
+							return vendorNVIDIA
 						}
 						if strings.Contains(vendorID, "1002") {
-							return "amd"
+							return vendorAMD
 						}
 					}
 				}
@@ -268,11 +260,11 @@ func detectVendorFromPCI() string {
 	}
 
 	outputStr := strings.ToLower(string(output))
-	if strings.Contains(outputStr, "nvidia") {
-		return "nvidia"
+	if strings.Contains(outputStr, vendorNVIDIA) {
+		return vendorNVIDIA
 	}
-	if strings.Contains(outputStr, "amd") || strings.Contains(outputStr, "radeon") {
-		return "amd"
+	if strings.Contains(outputStr, vendorAMD) || strings.Contains(outputStr, "radeon") {
+		return vendorAMD
 	}
 
 	return ""
@@ -282,10 +274,10 @@ func detectVendorFromPCI() string {
 func DetectVendorFromLibPath(libPath string) string {
 	lower := strings.ToLower(filepath.Base(libPath))
 	switch {
-	case strings.Contains(lower, "nvidia"):
-		return "nvidia"
-	case strings.Contains(lower, "amd"):
-		return "amd"
+	case strings.Contains(lower, vendorNVIDIA):
+		return vendorNVIDIA
+	case strings.Contains(lower, vendorAMD):
+		return vendorAMD
 	case strings.Contains(lower, "example"), strings.Contains(lower, "stub"):
 		return "stub"
 	default:
@@ -299,7 +291,7 @@ func CreateMockGPUs(count int) []api.GPUInfo {
 	for i := range count {
 		gpus[i] = api.GPUInfo{
 			GPUID:         fmt.Sprintf("GPU-%d", i),
-			Vendor:        "nvidia",
+			Vendor:        vendorNVIDIA,
 			Model:         "RTX 4090",
 			VRAMMb:        24576,
 			DriverVersion: "535.104.05",

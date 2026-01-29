@@ -13,9 +13,9 @@ import (
 
 	"github.com/NexusGPU/gpu-go/internal/platform"
 	"github.com/NexusGPU/gpu-go/internal/tui"
-	"k8s.io/klog/v2"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
+	"k8s.io/klog/v2"
 )
 
 const (
