@@ -13,7 +13,7 @@ import (
 
 	"github.com/NexusGPU/gpu-go/internal/platform"
 	"github.com/NexusGPU/gpu-go/internal/tui"
-	"github.com/rs/zerolog/log"
+	"k8s.io/klog/v2"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -137,7 +137,7 @@ This will sign you out of the GPU Go CLI and IDE extensions.`,
 			if err := os.Remove(tokenPath); err != nil {
 				// Runtime error - don't show help
 				cmd.SilenceUsage = true
-				log.Error().Err(err).Msg("Failed to remove token")
+				klog.Errorf("Failed to remove token: error=%v", err)
 				return err
 			}
 
@@ -162,7 +162,7 @@ func newStatusCmd() *cobra.Command {
 			if err != nil {
 				// Runtime error - don't show help
 				cmd.SilenceUsage = true
-				log.Error().Err(err).Msg("Failed to load token")
+				klog.Errorf("Failed to load token: error=%v", err)
 				return err
 			}
 
@@ -242,7 +242,7 @@ func interactiveLogin(noBrowser bool) error {
 		fmt.Println()
 
 		if err := openBrowser(dashboardURL); err != nil {
-			log.Warn().Err(err).Msg("Failed to open browser")
+			klog.Warningf("Failed to open browser: error=%v", err)
 			fmt.Println(tui.WarningMessage("Could not open browser automatically."))
 		}
 	} else {

@@ -5,16 +5,15 @@ go 1.25.0
 require (
 	github.com/NexusGPU/tensor-fusion v1.57.1
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-resty/resty/v2 v2.17.1
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
-	github.com/rs/zerolog v1.34.0
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
+	k8s.io/klog/v2 v2.130.1
 )
 
 // replace with the target commit id and run go mod tidy to get pseudo version
-replace github.com/NexusGPU/tensor-fusion => github.com/NexusGPU/tensor-fusion v1.54.7-0.20260129064726-64da6b017335
+replace github.com/NexusGPU/tensor-fusion => github.com/NexusGPU/tensor-fusion v1.54.7-0.20260129141825-b76804c03330
 
 require (
 	cel.dev/expr v0.24.0 // indirect
@@ -30,6 +29,7 @@ require (
 	github.com/ebitengine/purego v0.9.1 // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
 	github.com/evanphx/json-patch/v5 v5.9.11 // indirect
+	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.10 // indirect
 	github.com/gin-contrib/sse v1.1.0 // indirect
@@ -116,7 +116,6 @@ require (
 	k8s.io/component-base v0.35.0 // indirect
 	k8s.io/component-helpers v0.35.0 // indirect
 	k8s.io/dynamic-resource-allocation v0.35.0 // indirect
-	k8s.io/klog/v2 v2.130.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20250910181357-589584f1c912 // indirect
 	k8s.io/kube-scheduler v0.35.0 // indirect
 	k8s.io/utils v0.0.0-20251002143259-bc988d571ff4 // indirect
@@ -147,7 +146,6 @@ require (
 require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect

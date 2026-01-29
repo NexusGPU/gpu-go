@@ -18,8 +18,8 @@ import (
 	"time"
 
 	"github.com/NexusGPU/gpu-go/internal/api"
-	"github.com/NexusGPU/gpu-go/internal/log"
 	"github.com/NexusGPU/gpu-go/internal/platform"
+	"k8s.io/klog/v2"
 )
 
 const (
@@ -33,6 +33,13 @@ const (
 	CachedManifestFile = "releases-manifest.json"
 )
 
+// Library type constants
+const (
+	LibraryTypeVGPULibrary     = "vgpu-library"
+	LibraryTypeRemoteGPUWorker = "remote-gpu-worker"
+	LibraryTypeRemoteGPUClient = "remote-gpu-client"
+)
+
 // Library represents a downloadable library
 type Library struct {
 	Name     string `json:"name"`
@@ -42,6 +49,7 @@ type Library struct {
 	URL      string `json:"url"`
 	SHA256   string `json:"sha256"`
 	Size     int64  `json:"size"`
+	Type     string `json:"type,omitempty"` // e.g., "vgpu-library", "remote-gpu-worker", "remote-gpu-client"
 	// Vendor information from release
 	VendorSlug string `json:"vendorSlug,omitempty"` // e.g., "stub", "nvidia", "amd"
 	VendorName string `json:"vendorName,omitempty"` // e.g., "STUB", "NVIDIA", "AMD"
@@ -188,6 +196,12 @@ func (m *Manager) SyncReleases(ctx context.Context, os, arch string) (*Manifest,
 					fmt.Sscanf(sizeStr, "%d", &size)
 				}
 
+				// Get type from metadata if available
+				libType := ""
+				if typeStr, ok := artifact.Metadata["type"]; ok {
+					libType = typeStr
+				}
+
 				lib := Library{
 					Name:       libName,
 					Version:    release.Version,
@@ -196,6 +210,7 @@ func (m *Manager) SyncReleases(ctx context.Context, os, arch string) (*Manifest,
 					URL:        artifact.URL,
 					SHA256:     artifact.SHA256,
 					Size:       size,
+					Type:       libType,
 					VendorSlug: strings.ToLower(release.Vendor.Slug),
 					VendorName: release.Vendor.Name,
 				}
@@ -215,19 +230,14 @@ func (m *Manager) SyncReleases(ctx context.Context, os, arch string) (*Manifest,
 // extractLibraryName extracts library name from URL
 func (m *Manager) extractLibraryName(vendorSlug, url string) string {
 	if url == "" {
-		log.Default.Warn().
-			Str("vendor", vendorSlug).
-			Msg("empty URL, cannot extract library name")
+		klog.Warningf("Empty URL, cannot extract library name: vendor=%s", vendorSlug)
 		return ""
 	}
 
 	// Extract the last part of URL
 	parts := strings.Split(url, "/")
 	if len(parts) == 0 {
-		log.Default.Warn().
-			Str("vendor", vendorSlug).
-			Str("url", url).
-			Msg("invalid URL, cannot extract library name")
+		klog.Warningf("Invalid URL, cannot extract library name: vendor=%s url=%s", vendorSlug, url)
 		return ""
 	}
 
@@ -242,10 +252,7 @@ func (m *Manager) extractLibraryName(vendorSlug, url string) string {
 	}
 
 	if filename == "" {
-		log.Default.Warn().
-			Str("vendor", vendorSlug).
-			Str("url", url).
-			Msg("empty filename extracted from URL")
+		klog.Warningf("Empty filename extracted from URL: vendor=%s url=%s", vendorSlug, url)
 		return ""
 	}
 
@@ -322,11 +329,12 @@ func (m *Manager) FetchManifest(ctx context.Context) (*Manifest, error) {
 	return manifest, nil
 }
 
-// GetLibrariesForPlatform returns libraries matching the specified platform
+// GetLibrariesForPlatform returns libraries matching the specified platform and type
 // If both os and arch are empty strings, uses the current platform
 // If only os is provided, matches any arch for that os
 // If only arch is provided, matches any os for that arch
-func (m *Manager) GetLibrariesForPlatform(manifest *Manifest, os, arch string) []Library {
+// If type is empty string, matches any type
+func (m *Manager) GetLibrariesForPlatform(manifest *Manifest, os, arch, libType string) []Library {
 	var result []Library
 	targetOS := os
 	targetArch := arch
@@ -340,7 +348,8 @@ func (m *Manager) GetLibrariesForPlatform(manifest *Manifest, os, arch string) [
 	for _, lib := range manifest.Libraries {
 		osMatch := targetOS == "" || lib.Platform == targetOS
 		archMatch := targetArch == "" || lib.Arch == targetArch
-		if osMatch && archMatch {
+		typeMatch := libType == "" || lib.Type == libType
+		if osMatch && archMatch && typeMatch {
 			result = append(result, lib)
 		}
 	}
@@ -506,7 +515,7 @@ func (m *Manager) CheckUpdates(ctx context.Context) ([]Library, error) {
 	}
 
 	var updates []Library
-	for _, lib := range m.GetLibrariesForPlatform(manifest, "", "") {
+	for _, lib := range m.GetLibrariesForPlatform(manifest, "", "", "") {
 		installedLib, exists := installed.Libraries[lib.Name]
 		if !exists || installedLib.Version != lib.Version {
 			updates = append(updates, lib)
@@ -634,4 +643,50 @@ func VGPULibraries() []string {
 	default:
 		return nil
 	}
+}
+
+// GetRemoteGPUWorkerPath returns the path to the remote-gpu-worker binary
+// It first checks if already installed, if not downloads it from the API
+func (m *Manager) GetRemoteGPUWorkerPath(ctx context.Context) (string, error) {
+	// Check if already installed
+	installed, err := m.GetInstalledLibraries()
+	if err != nil {
+		return "", fmt.Errorf("failed to get installed libraries: %w", err)
+	}
+
+	// Look for existing remote-gpu-worker binary
+	for name, lib := range installed.Libraries {
+		if lib.Type == LibraryTypeRemoteGPUWorker {
+			path := m.GetLibraryPath(name)
+			if _, err := os.Stat(path); err == nil {
+				return path, nil
+			}
+		}
+	}
+
+	// Not found, try to download from manifest
+	manifest, err := m.FetchManifest(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch manifest: %w", err)
+	}
+
+	// Find remote-gpu-worker for current platform
+	libs := m.GetLibrariesForPlatform(manifest, "", "", LibraryTypeRemoteGPUWorker)
+	if len(libs) == 0 {
+		return "", fmt.Errorf("remote-gpu-worker not found for platform %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+
+	lib := libs[0]
+	klog.Infof("Downloading remote-gpu-worker: name=%s version=%s", lib.Name, lib.Version)
+
+	// Download and install
+	if err := m.DownloadLibrary(ctx, lib, nil); err != nil {
+		return "", fmt.Errorf("failed to download remote-gpu-worker: %w", err)
+	}
+
+	if err := m.InstallLibrary(lib); err != nil {
+		return "", fmt.Errorf("failed to install remote-gpu-worker: %w", err)
+	}
+
+	return m.GetLibraryPath(lib.Name), nil
 }

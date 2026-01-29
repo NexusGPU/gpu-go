@@ -2,19 +2,18 @@ package agent
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
+	"fmt"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/NexusGPU/gpu-go/internal/api"
 	"github.com/NexusGPU/gpu-go/internal/config"
 	"github.com/NexusGPU/gpu-go/internal/hypervisor"
-	"github.com/NexusGPU/gpu-go/internal/utils"
-	"github.com/fsnotify/fsnotify"
-	"github.com/rs/zerolog/log"
+	hvApi "github.com/NexusGPU/tensor-fusion/pkg/hypervisor/api"
+	"k8s.io/klog/v2"
 )
 
 const (
@@ -32,15 +31,14 @@ type Agent struct {
 
 	agentID       string
 	hostname      string
-	lastFileHash  string
 	configVersion int
 
 	// Hypervisor integration
 	hypervisorMgr *hypervisor.Manager
 	reconciler    *hypervisor.Reconciler
 
-	// File watcher
-	watcher *fsnotify.Watcher
+	// Dependencies for worker binary
+	workerBinaryPath string
 }
 
 // NewAgent creates a new agent
@@ -59,26 +57,22 @@ func NewAgent(client *api.Client, configMgr *config.Manager) *Agent {
 }
 
 // NewAgentWithHypervisor creates a new agent with hypervisor manager
-func NewAgentWithHypervisor(client *api.Client, configMgr *config.Manager, hvMgr *hypervisor.Manager) *Agent {
+func NewAgentWithHypervisor(client *api.Client, configMgr *config.Manager, hvMgr *hypervisor.Manager, workerBinaryPath string) *Agent {
 	agent := NewAgent(client, configMgr)
 	agent.hypervisorMgr = hvMgr
+	agent.workerBinaryPath = workerBinaryPath
 
 	// Create reconciler
 	agent.reconciler = hypervisor.NewReconciler(hypervisor.ReconcilerConfig{
 		Manager: hvMgr,
-		Logger:  log.Logger,
 		OnWorkerStarted: func(workerID string) {
-			log.Info().Str("worker_id", workerID).Msg("worker started via reconciler")
+			klog.Infof("Worker started via reconciler: worker_id=%s", workerID)
 		},
 		OnWorkerStopped: func(workerID string) {
-			log.Info().Str("worker_id", workerID).Msg("worker stopped via reconciler")
+			klog.Infof("Worker stopped via reconciler: worker_id=%s", workerID)
 		},
 		OnReconcileComplete: func(added, removed, updated int) {
-			log.Debug().
-				Int("added", added).
-				Int("removed", removed).
-				Int("updated", updated).
-				Msg("reconciliation complete")
+			klog.V(4).Infof("Reconciliation complete: added=%d removed=%d updated=%d", added, removed, updated)
 		},
 	})
 
@@ -134,9 +128,7 @@ func (a *Agent) Register(tempToken string, gpus []api.GPUInfo) error {
 	a.agentID = resp.AgentID
 	a.client.SetAgentSecret(resp.AgentSecret)
 
-	log.Info().
-		Str("agent_id", resp.AgentID).
-		Msg("Agent registered successfully")
+	klog.Infof("Agent registered successfully: agent_id=%s", resp.AgentID)
 
 	return nil
 }
@@ -156,18 +148,6 @@ func (a *Agent) Start() error {
 	a.configVersion = cfg.ConfigVersion
 	a.client.SetAgentSecret(cfg.AgentSecret)
 
-	// Initialize file watcher
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		return err
-	}
-	a.watcher = watcher
-
-	// Watch config directory
-	if err := watcher.Add(a.config.StateDir()); err != nil {
-		log.Warn().Err(err).Msg("Failed to watch state directory")
-	}
-
 	// Start reconciler if available
 	if a.reconciler != nil {
 		a.reconciler.Start()
@@ -175,30 +155,27 @@ func (a *Agent) Start() error {
 
 	// Pull initial config
 	if err := a.pullConfig(); err != nil {
-		log.Error().Err(err).Msg("Failed to pull initial config")
+		klog.Errorf("Failed to pull initial config: error=%v", err)
 	}
 
 	// Start background tasks
-	a.wg.Add(3)
+	a.wg.Add(2)
 	go a.statusReportLoop()
 	go a.configPollLoop()
-	go a.fileWatchLoop()
 
 	// Start WebSocket heartbeat
 	if err := a.client.StartHeartbeat(a.ctx, a.agentID, a.handleHeartbeatResponse); err != nil {
-		log.Warn().Err(err).Msg("Failed to start heartbeat, will retry")
+		klog.Warningf("Failed to start heartbeat, will retry: error=%v", err)
 	}
 
-	log.Info().
-		Str("agent_id", a.agentID).
-		Msg("Agent started")
+	klog.Infof("Agent started: agent_id=%s", a.agentID)
 
 	return nil
 }
 
 // Stop stops the agent
 func (a *Agent) Stop() {
-	log.Info().Msg("Stopping agent...")
+	klog.Info("Stopping agent...")
 
 	a.cancel()
 	a.client.StopHeartbeat()
@@ -211,17 +188,13 @@ func (a *Agent) Stop() {
 	// Stop hypervisor manager
 	if a.hypervisorMgr != nil {
 		if err := a.hypervisorMgr.Stop(); err != nil {
-			log.Error().Err(err).Msg("Failed to stop hypervisor manager")
+			klog.Errorf("Failed to stop hypervisor manager: error=%v", err)
 		}
-	}
-
-	if a.watcher != nil {
-		_ = a.watcher.Close()
 	}
 
 	a.wg.Wait()
 
-	log.Info().Msg("Agent stopped")
+	klog.Info("Agent stopped")
 }
 
 // statusReportLoop periodically reports status to the server
@@ -230,7 +203,7 @@ func (a *Agent) statusReportLoop() {
 
 	// Report immediately on start
 	if err := a.reportStatus(); err != nil {
-		log.Error().Err(err).Msg("Failed to report initial status")
+		klog.Errorf("Failed to report initial status: error=%v", err)
 	}
 
 	ticker := time.NewTicker(statusReportInterval)
@@ -242,7 +215,7 @@ func (a *Agent) statusReportLoop() {
 			return
 		case <-ticker.C:
 			if err := a.reportStatus(); err != nil {
-				log.Error().Err(err).Msg("Failed to report status")
+				klog.Errorf("Failed to report status: error=%v", err)
 			}
 		}
 	}
@@ -266,48 +239,13 @@ func (a *Agent) configPollLoop() {
 	}
 }
 
-// fileWatchLoop watches for file changes and reports status
-func (a *Agent) fileWatchLoop() {
-	defer a.wg.Done()
-
-	for {
-		select {
-		case <-a.ctx.Done():
-			return
-		case event, ok := <-a.watcher.Events:
-			if !ok {
-				return
-			}
-			if event.Has(fsnotify.Write) || event.Has(fsnotify.Create) {
-				// Check if file hash changed
-				newHash := a.computeFileHash()
-				if newHash != a.lastFileHash {
-					a.lastFileHash = newHash
-					log.Debug().Str("file", event.Name).Msg("File changed, reporting status")
-					if err := a.reportStatus(); err != nil {
-						log.Error().Err(err).Msg("Failed to report status after file change")
-					}
-				}
-			}
-		case err, ok := <-a.watcher.Errors:
-			if !ok {
-				return
-			}
-			log.Error().Err(err).Msg("File watcher error")
-		}
-	}
-}
-
 // handleHeartbeatResponse handles WebSocket heartbeat responses
 func (a *Agent) handleHeartbeatResponse(resp *api.HeartbeatResponse) {
 	if resp.ConfigVersion > a.configVersion {
-		log.Info().
-			Int("old_version", a.configVersion).
-			Int("new_version", resp.ConfigVersion).
-			Msg("Config version changed, pulling new config")
+		klog.Infof("Config version changed, pulling new config: old_version=%d new_version=%d", a.configVersion, resp.ConfigVersion)
 
 		if err := a.pullConfig(); err != nil {
-			log.Error().Err(err).Msg("Failed to pull config")
+			klog.Errorf("Failed to pull config: error=%v", err)
 		}
 	}
 }
@@ -324,19 +262,14 @@ func (a *Agent) pullConfig() error {
 		return err
 	}
 
-	// Convert and save workers
+	// Convert and save workers to local config (raw API result)
 	workers := make([]config.WorkerConfig, len(resp.Workers))
 	for i, w := range resp.Workers {
-		status := "stopped"
-		if w.Enabled {
-			status = "running"
-		}
 		workers[i] = config.WorkerConfig{
 			WorkerID:   w.WorkerID,
 			GPUIDs:     w.GPUIDs,
 			ListenPort: w.ListenPort,
 			Enabled:    w.Enabled,
-			Status:     status,
 		}
 	}
 	if err := a.config.SaveWorkers(workers); err != nil {
@@ -345,52 +278,54 @@ func (a *Agent) pullConfig() error {
 
 	// Reconcile workers with hypervisor if available
 	if a.reconciler != nil {
-		specs := a.convertToWorkerSpecs(resp.Workers)
-		a.reconciler.SetDesiredWorkers(specs)
+		infos := a.convertToWorkerInfos(resp.Workers)
+		a.reconciler.SetDesiredWorkers(infos)
 	}
 
 	a.configVersion = resp.ConfigVersion
 
-	log.Info().
-		Int("version", resp.ConfigVersion).
-		Int("workers", len(resp.Workers)).
-		Msg("Config pulled successfully")
+	klog.Infof("Config pulled successfully: version=%d workers=%d", resp.ConfigVersion, len(resp.Workers))
 
 	return nil
 }
 
-// convertToWorkerSpecs converts API worker configs to hypervisor worker specs
-func (a *Agent) convertToWorkerSpecs(apiWorkers []api.WorkerConfig) []hypervisor.WorkerSpec {
-	specs := make([]hypervisor.WorkerSpec, len(apiWorkers))
-	for i, w := range apiWorkers {
-		specs[i] = hypervisor.WorkerSpec{
-			WorkerID:       w.WorkerID,
-			GPUIDs:         w.GPUIDs,
-			Enabled:        w.Enabled,
-			VRAMMb:         w.VRAMMb,
-			ComputePercent: w.ComputePercent,
+// convertToWorkerInfos converts API worker configs to hypervisor WorkerInfo
+func (a *Agent) convertToWorkerInfos(apiWorkers []api.WorkerConfig) []*hvApi.WorkerInfo {
+	infos := make([]*hvApi.WorkerInfo, 0, len(apiWorkers))
+	for _, w := range apiWorkers {
+		if !w.Enabled {
+			continue
 		}
-		if w.IsolationMode != "" {
-			specs[i].IsolationMode = utils.ToTFIsolationMode(w.IsolationMode)
+
+		info := &hvApi.WorkerInfo{
+			WorkerUID:        w.WorkerID,
+			WorkerName:       w.WorkerID,
+			AllocatedDevices: w.GPUIDs,
+			Status:           hvApi.WorkerStatusPending,
 		}
+
+		// Set WorkerRunningInfo with remote-gpu-worker binary
+		info.WorkerRunningInfo = &hvApi.WorkerRunningInfo{
+			Type:       hvApi.WorkerRuntimeTypeProcess,
+			Executable: a.workerBinaryPath,
+			Args:       []string{"-p", fmt.Sprintf("%d", w.ListenPort), "-n", "native"},
+			WorkingDir: a.config.StateDir(),
+		}
+
+		infos = append(infos, info)
 	}
-	return specs
+	return infos
 }
 
 // reportStatus reports current status to the server
 func (a *Agent) reportStatus() error {
-	// Load current GPUs and workers
+	// Load current GPUs
 	gpuConfigs, err := a.config.LoadGPUs()
 	if err != nil {
 		return err
 	}
 
-	workerConfigs, err := a.config.LoadWorkers()
-	if err != nil {
-		return err
-	}
-
-	// Build status request
+	// Build GPU status
 	gpuStatuses := make([]api.GPUStatus, len(gpuConfigs))
 	for i, gpu := range gpuConfigs {
 		gpuStatuses[i] = api.GPUStatus{
@@ -399,20 +334,44 @@ func (a *Agent) reportStatus() error {
 		}
 	}
 
-	// If hypervisor is available, get worker status from it
+	// Get worker status from hypervisor (SSoT)
 	var workerStatuses []api.WorkerStatus
 	if a.hypervisorMgr != nil && a.hypervisorMgr.IsStarted() {
 		hvWorkers := a.hypervisorMgr.ListWorkers()
-		workerStatuses = make([]api.WorkerStatus, len(hvWorkers))
-		for i, w := range hvWorkers {
-			workerStatuses[i] = api.WorkerStatus{
-				WorkerID: w.WorkerUID,
-				Status:   string(w.Status),
-				GPUIDs:   w.AllocatedDevices,
+
+		// Build status and log summary
+		var runningCount, stoppedCount int
+		var summaryParts []string
+		workerStatuses = make([]api.WorkerStatus, 0, len(hvWorkers))
+
+		for _, w := range hvWorkers {
+			// Determine status from WorkerRunningInfo.IsRunning
+			status := "stopped"
+			if w.WorkerRunningInfo != nil && w.WorkerRunningInfo.IsRunning {
+				status = "running"
+				runningCount++
+			} else {
+				stoppedCount++
 			}
+
+			workerStatuses = append(workerStatuses, api.WorkerStatus{
+				WorkerID: w.WorkerUID,
+				Status:   status,
+				GPUIDs:   w.AllocatedDevices,
+			})
+			summaryParts = append(summaryParts, fmt.Sprintf("%s(%s)", w.WorkerUID, status))
+		}
+
+		if len(hvWorkers) > 0 {
+			klog.V(4).Infof("Workers summary: total=%d running=%d stopped=%d workers=[%s]",
+				len(hvWorkers), runningCount, stoppedCount, strings.Join(summaryParts, ", "))
 		}
 	} else {
-		// Fallback to config-based status
+		// Fallback to config-based status if hypervisor not available
+		workerConfigs, err := a.config.LoadWorkers()
+		if err != nil {
+			return err
+		}
 		workerStatuses = make([]api.WorkerStatus, len(workerConfigs))
 		for i, w := range workerConfigs {
 			workerStatuses[i] = api.WorkerStatus{
@@ -432,25 +391,6 @@ func (a *Agent) reportStatus() error {
 	}
 
 	return a.client.ReportAgentStatus(a.ctx, a.agentID, req)
-}
-
-// computeFileHash computes a hash of the relevant config files
-func (a *Agent) computeFileHash() string {
-	hash := sha256.New()
-
-	// Hash workers file
-	workersPath := a.config.WorkersPath()
-	if data, err := os.ReadFile(workersPath); err == nil {
-		hash.Write(data)
-	}
-
-	// Hash state directory workers file
-	stateWorkersPath := a.config.StateDir() + "/workers.json"
-	if data, err := os.ReadFile(stateWorkersPath); err == nil {
-		hash.Write(data)
-	}
-
-	return hex.EncodeToString(hash.Sum(nil))
 }
 
 // GetHypervisorManager returns the hypervisor manager if available

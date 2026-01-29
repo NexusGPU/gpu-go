@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/NexusGPU/gpu-go/internal/errors"
-	"github.com/NexusGPU/gpu-go/internal/log"
+	"k8s.io/klog/v2"
 )
 
 // WorkerMode represents the worker network mode
@@ -73,7 +73,6 @@ type Manager struct {
 	workerBinary string
 	ctx          context.Context
 	cancel       context.CancelFunc
-	log          *log.Logger
 }
 
 // NewManager creates a new worker manager
@@ -91,7 +90,6 @@ func NewManager(stateDir, workerBinary string) *Manager {
 		workerBinary: workerBinary,
 		ctx:          ctx,
 		cancel:       cancel,
-		log:          log.Default.WithComponent("worker-manager"),
 	}
 }
 
@@ -101,7 +99,6 @@ func (m *Manager) Start(config WorkerConfig) error {
 	defer m.mu.Unlock()
 
 	workerID := config.WorkerID
-	l := m.log.WithWorkerID(workerID)
 
 	// Check if already running
 	if state, exists := m.workers[workerID]; exists {
@@ -136,7 +133,7 @@ func (m *Manager) Start(config WorkerConfig) error {
 	// Redirect output to logs
 	logFile, err := m.createLogFile(workerID)
 	if err != nil {
-		l.Warn().Err(err).Msg("failed to create log file")
+		klog.Warningf("Failed to create log file: worker_id=%s error=%v", workerID, err)
 	} else {
 		cmd.Stdout = logFile
 		cmd.Stderr = logFile
@@ -161,7 +158,7 @@ func (m *Manager) Start(config WorkerConfig) error {
 	// Start goroutine to monitor process
 	go m.monitorProcess(workerID, cmd)
 
-	l.Info().Int("pid", cmd.Process.Pid).Int("port", config.ListenPort).Msg("worker started")
+	klog.Infof("Worker started: worker_id=%s pid=%d port=%d", workerID, cmd.Process.Pid, config.ListenPort)
 
 	return nil
 }
@@ -170,8 +167,6 @@ func (m *Manager) Start(config WorkerConfig) error {
 func (m *Manager) Stop(workerID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	l := m.log.WithWorkerID(workerID)
 
 	cmd, exists := m.processes[workerID]
 	if !exists {
@@ -186,7 +181,7 @@ func (m *Manager) Stop(workerID string) error {
 	// Send SIGTERM first for graceful shutdown
 	if cmd.Process != nil {
 		if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
-			l.Warn().Err(err).Msg("failed to send SIGTERM")
+			klog.Warningf("Failed to send SIGTERM: worker_id=%s error=%v", workerID, err)
 		}
 	}
 
@@ -198,15 +193,15 @@ func (m *Manager) Stop(workerID string) error {
 
 	select {
 	case <-done:
-		l.Info().Msg("worker stopped gracefully")
+		klog.Infof("Worker stopped gracefully: worker_id=%s", workerID)
 	case <-time.After(10 * time.Second):
 		// Force kill if graceful shutdown fails
 		if cmd.Process != nil {
 			if err := cmd.Process.Kill(); err != nil {
-				l.Warn().Err(err).Msg("failed to kill worker process")
+				klog.Warningf("Failed to kill worker process: worker_id=%s error=%v", workerID, err)
 			}
 		}
-		l.Warn().Msg("worker force killed after timeout")
+		klog.Warningf("Worker force killed after timeout: worker_id=%s", workerID)
 	}
 
 	state.Status = WorkerStatusStopped
@@ -257,7 +252,7 @@ func (m *Manager) Reconcile(desiredWorkers []WorkerConfig) error {
 			if state.Status == WorkerStatusRunning {
 				m.mu.Unlock()
 				if err := m.Stop(workerID); err != nil {
-					m.log.Error().Err(err).Str("worker_id", workerID).Msg("failed to stop unwanted worker")
+					klog.Errorf("Failed to stop unwanted worker: worker_id=%s error=%v", workerID, err)
 				}
 				m.mu.Lock()
 			}
@@ -274,7 +269,7 @@ func (m *Manager) Reconcile(desiredWorkers []WorkerConfig) error {
 			if exists && state.Status == WorkerStatusRunning {
 				m.mu.Unlock()
 				if err := m.Stop(workerID); err != nil {
-					m.log.Error().Err(err).Str("worker_id", workerID).Msg("failed to stop disabled worker")
+					klog.Errorf("Failed to stop disabled worker: worker_id=%s error=%v", workerID, err)
 				}
 				m.mu.Lock()
 			}
@@ -285,7 +280,7 @@ func (m *Manager) Reconcile(desiredWorkers []WorkerConfig) error {
 		if !exists || state.Status != WorkerStatusRunning {
 			m.mu.Unlock()
 			if err := m.Start(config); err != nil {
-				m.log.Error().Err(err).Str("worker_id", workerID).Msg("failed to start worker")
+				klog.Errorf("Failed to start worker: worker_id=%s error=%v", workerID, err)
 			}
 			m.mu.Lock()
 		}
@@ -307,7 +302,7 @@ func (m *Manager) Shutdown() {
 
 	for _, id := range workerIDs {
 		if err := m.Stop(id); err != nil {
-			m.log.Error().Err(err).Str("worker_id", id).Msg("failed to stop worker during shutdown")
+			klog.Errorf("Failed to stop worker during shutdown: worker_id=%s error=%v", id, err)
 		}
 	}
 }
@@ -423,14 +418,13 @@ func (m *Manager) monitorProcess(workerID string, cmd *exec.Cmd) {
 		return
 	}
 
-	l := m.log.WithWorkerID(workerID)
 	if err != nil {
 		state.Status = WorkerStatusError
 		state.Error = err.Error()
-		l.Error().Err(err).Msg("worker process exited with error")
+		klog.Errorf("Worker process exited with error: worker_id=%s error=%v", workerID, err)
 	} else {
 		state.Status = WorkerStatusTerminated
-		l.Info().Msg("worker process exited")
+		klog.Infof("Worker process exited: worker_id=%s", workerID)
 	}
 
 	delete(m.processes, workerID)

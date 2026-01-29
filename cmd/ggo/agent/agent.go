@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -11,12 +12,13 @@ import (
 	"github.com/NexusGPU/gpu-go/internal/agent"
 	"github.com/NexusGPU/gpu-go/internal/api"
 	"github.com/NexusGPU/gpu-go/internal/config"
+	"github.com/NexusGPU/gpu-go/internal/deps"
 	"github.com/NexusGPU/gpu-go/internal/hypervisor"
 	"github.com/NexusGPU/gpu-go/internal/platform"
 	"github.com/NexusGPU/gpu-go/internal/tui"
 	tfv1 "github.com/NexusGPU/tensor-fusion/api/v1"
-	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
+	"k8s.io/klog/v2"
 )
 
 var (
@@ -97,7 +99,6 @@ func getHypervisorManager() (*hypervisor.Manager, error) {
 			LibPath:       libPath,
 			Vendor:        agent.DetectVendorFromLibPath(libPath),
 			IsolationMode: getIsolationMode(),
-			Logger:        log.Logger,
 			StateDir:      stateDir,
 		})
 		if hypervisorErr != nil {
@@ -151,7 +152,7 @@ func newRegisterCmd() *cobra.Command {
 			agentInstance := agent.NewAgent(client, configMgr)
 			if err := agentInstance.Register(token, gpus); err != nil {
 				cmd.SilenceUsage = true
-				log.Error().Err(err).Msg("Failed to register agent")
+				klog.Errorf("Failed to register agent: error=%v", err)
 				return err
 			}
 
@@ -192,7 +193,7 @@ func newStartCmd() *cobra.Command {
 			cfg, err := configMgr.LoadConfig()
 			if err != nil {
 				cmd.SilenceUsage = true
-				log.Error().Err(err).Msg("Failed to load config")
+				klog.Errorf("Failed to load config: error=%v", err)
 				return err
 			}
 
@@ -205,20 +206,35 @@ func newStartCmd() *cobra.Command {
 			hvMgr, err := getHypervisorManager()
 			if err != nil {
 				// Log warning but continue - agent can work without hypervisor for some operations
-				log.Warn().Err(err).Msg("Failed to initialize hypervisor manager, worker management will be limited")
+				klog.Warningf("Failed to initialize hypervisor manager, worker management will be limited: error=%v", err)
+			}
+
+			// Get remote-gpu-worker binary path
+			var workerBinaryPath string
+			if hvMgr != nil {
+				depsMgr := deps.NewManager(
+					deps.WithPaths(paths),
+					deps.WithAPIClient(client),
+				)
+				workerBinaryPath, err = depsMgr.GetRemoteGPUWorkerPath(context.Background())
+				if err != nil {
+					klog.Warningf("Failed to get remote-gpu-worker path, workers may not start: error=%v", err)
+				} else {
+					klog.V(4).Infof("Using remote-gpu-worker binary: path=%s", workerBinaryPath)
+				}
 			}
 
 			// Create agent with hypervisor integration
 			var agentInstance *agent.Agent
 			if hvMgr != nil {
-				agentInstance = agent.NewAgentWithHypervisor(client, configMgr, hvMgr)
+				agentInstance = agent.NewAgentWithHypervisor(client, configMgr, hvMgr, workerBinaryPath)
 			} else {
 				agentInstance = agent.NewAgent(client, configMgr)
 			}
 
 			if err := agentInstance.Start(); err != nil {
 				cmd.SilenceUsage = true
-				log.Error().Err(err).Msg("Failed to start agent")
+				klog.Errorf("Failed to start agent: error=%v", err)
 				return err
 			}
 
@@ -266,7 +282,7 @@ func newStatusCmd() *cobra.Command {
 			cfg, err := configMgr.LoadConfig()
 			if err != nil {
 				cmd.SilenceUsage = true
-				log.Error().Err(err).Msg("Failed to load config")
+				klog.Errorf("Failed to load config: error=%v", err)
 				return err
 			}
 
@@ -376,20 +392,20 @@ func discoverGPUs() []api.GPUInfo {
 		if err != nil || count <= 0 {
 			count = 1
 		}
-		log.Info().Int("count", count).Msg("Using mock GPUs for testing")
+		klog.Infof("Using mock GPUs for testing: count=%d", count)
 		return agent.CreateMockGPUs(count)
 	}
 
 	// Use singleton hypervisor manager
 	hvMgr, err := getHypervisorManager()
 	if err != nil {
-		log.Warn().Err(err).Msg("Failed to get hypervisor manager")
+		klog.Warningf("Failed to get hypervisor manager: error=%v", err)
 		return nil
 	}
 
 	devices, err := hvMgr.ListDevices()
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to list devices")
+		klog.Errorf("Failed to list devices: error=%v", err)
 		return nil
 	}
 

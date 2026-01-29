@@ -9,7 +9,7 @@ import (
 
 	"github.com/NexusGPU/gpu-go/internal/api"
 	"github.com/NexusGPU/gpu-go/internal/platform"
-	"github.com/rs/zerolog/log"
+	"k8s.io/klog/v2"
 	"github.com/spf13/cobra"
 )
 
@@ -49,15 +49,11 @@ Examples:
 			if err != nil {
 				// Runtime error - don't show help
 				cmd.SilenceUsage = true
-				log.Error().Err(err).Msg("Failed to get share info")
+				klog.Errorf("Failed to get share info: error=%v", err)
 				return err
 			}
 
-			log.Info().
-				Str("worker_id", shareInfo.WorkerID).
-				Str("vendor", shareInfo.HardwareVendor).
-				Str("connection_url", shareInfo.ConnectionURL).
-				Msg("Found GPU worker")
+			klog.Infof("Found GPU worker: worker_id=%s vendor=%s connection_url=%s", shareInfo.WorkerID, shareInfo.HardwareVendor, shareInfo.ConnectionURL)
 
 			// Set up the environment
 			if longTerm {
@@ -111,7 +107,7 @@ Examples:
 
 // setupTemporaryEnv sets up a temporary GPU environment
 func setupTemporaryEnv(shareInfo *api.SharePublicInfo) error {
-	log.Info().Msg("Setting up temporary GPU environment...")
+	klog.Info("Setting up temporary GPU environment...")
 
 	// Create temporary directory
 	tmpDir, err := os.MkdirTemp("", "gpugo-*")
@@ -249,7 +245,7 @@ echo To deactivate, run: ggo clean
 
 // setupLongTermEnv sets up a long-term GPU environment
 func setupLongTermEnv(shareInfo *api.SharePublicInfo, outputDir string) error {
-	log.Info().Msg("Setting up long-term GPU environment...")
+	klog.Info("Setting up long-term GPU environment...")
 
 	if outputDir == "" {
 		outputDir = paths.UserDir()
@@ -367,13 +363,13 @@ echo Environment variables set. Please restart your terminal.
 
 // cleanEnv cleans up a specific GPU environment
 func cleanEnv(shortCode string) error {
-	log.Info().Str("short_code", shortCode).Msg("Cleaning up GPU environment...")
+	klog.Infof("Cleaning up GPU environment: short_code=%s", shortCode)
 
 	// Clean temporary directories using platform-appropriate glob
 	tmpDirs, _ := filepath.Glob(paths.GlobPattern("gpugo-"))
 	for _, dir := range tmpDirs {
 		if err := os.RemoveAll(dir); err != nil {
-			log.Warn().Err(err).Str("dir", dir).Msg("Failed to remove temp directory")
+			klog.Warningf("Failed to remove temp directory: dir=%s error=%v", dir, err)
 		}
 	}
 
@@ -383,15 +379,15 @@ func cleanEnv(shortCode string) error {
 
 // cleanAllEnv cleans up all GPU environments
 func cleanAllEnv() error {
-	log.Info().Msg("Cleaning up all GPU environments...")
+	klog.Info("Cleaning up all GPU environments...")
 
 	// Clean temporary directories using platform-appropriate glob
 	tmpDirs, _ := filepath.Glob(paths.GlobPattern("gpugo-"))
 	for _, dir := range tmpDirs {
 		if err := os.RemoveAll(dir); err != nil {
-			log.Warn().Err(err).Str("dir", dir).Msg("Failed to remove temp directory")
+			klog.Warningf("Failed to remove temp directory: dir=%s error=%v", dir, err)
 		} else {
-			log.Debug().Str("dir", dir).Msg("Removed temp directory")
+			klog.V(4).Infof("Removed temp directory: dir=%s", dir)
 		}
 	}
 
@@ -399,9 +395,9 @@ func cleanAllEnv() error {
 	gpugoDir := paths.UserDir()
 	if _, err := os.Stat(gpugoDir); err == nil {
 		if err := os.RemoveAll(gpugoDir); err != nil {
-			log.Warn().Err(err).Msg("Failed to remove .gpugo directory")
+			klog.Warningf("Failed to remove .gpugo directory: error=%v", err)
 		} else {
-			log.Debug().Str("dir", gpugoDir).Msg("Removed .gpugo directory")
+			klog.V(4).Infof("Removed .gpugo directory: dir=%s", gpugoDir)
 		}
 	}
 

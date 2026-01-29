@@ -15,7 +15,7 @@ import (
 	"github.com/NexusGPU/tensor-fusion/pkg/hypervisor/device"
 	"github.com/NexusGPU/tensor-fusion/pkg/hypervisor/framework"
 	"github.com/NexusGPU/tensor-fusion/pkg/hypervisor/worker"
-	"github.com/rs/zerolog"
+	"k8s.io/klog/v2"
 )
 
 // ErrNotStarted is returned when the manager is not started
@@ -25,7 +25,6 @@ var ErrNotStarted = errors.New("hypervisor manager not started")
 type Manager struct {
 	ctx    context.Context
 	cancel context.CancelFunc
-	log    zerolog.Logger
 
 	// Hypervisor components
 	deviceController     *device.Controller
@@ -57,9 +56,6 @@ type Config struct {
 
 	// StateDir for tensor-fusion state files (workers.json, devices.json)
 	StateDir string
-
-	// Logger for the manager
-	Logger zerolog.Logger
 }
 
 // NewManager creates a new hypervisor manager
@@ -76,25 +72,29 @@ func NewManager(cfg Config) (*Manager, error) {
 		cfg.IsolationMode = tfv1.IsolationModeSoft
 	}
 
-	if cfg.StateDir == "" {
-		cfg.StateDir = os.Getenv("TENSOR_FUSION_STATE_DIR")
-		if cfg.StateDir == "" {
-			homeDir, err := os.UserHomeDir()
-			if err != nil {
-				return nil, fmt.Errorf("failed to get user home directory: %w", err)
-			}
-			cfg.StateDir = filepath.Join(homeDir, ".gpugo", "state")
-		}
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user home directory: %w", err)
 	}
 
-	// Ensure state directory exists
+	// Use checkpoint dir for hypervisor backend state persistence
+	// This is where SingleNodeBackend persists worker state files
+	checkpointDir := filepath.Join(homeDir, ".gpugo", "checkpoint")
+	if err := os.MkdirAll(checkpointDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create checkpoint directory %s: %w", checkpointDir, err)
+	}
+
+	// Set TENSOR_FUSION_STATE_DIR to checkpoint dir for SingleNodeBackend
+	if err := os.Setenv("TENSOR_FUSION_STATE_DIR", checkpointDir); err != nil {
+		return nil, fmt.Errorf("failed to set TENSOR_FUSION_STATE_DIR: %w", err)
+	}
+
+	// Use provided state dir for ggo's own state files, or default
+	if cfg.StateDir == "" {
+		cfg.StateDir = filepath.Join(homeDir, ".gpugo", "state")
+	}
 	if err := os.MkdirAll(cfg.StateDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create state directory %s: %w", cfg.StateDir, err)
-	}
-
-	// Set state dir env var for hypervisor components
-	if err := os.Setenv("TENSOR_FUSION_STATE_DIR", cfg.StateDir); err != nil {
-		return nil, fmt.Errorf("failed to set TENSOR_FUSION_STATE_DIR: %w", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -102,7 +102,6 @@ func NewManager(cfg Config) (*Manager, error) {
 	return &Manager{
 		ctx:           ctx,
 		cancel:        cancel,
-		log:           cfg.Logger.With().Str("component", "hypervisor-manager").Logger(),
 		libPath:       cfg.LibPath,
 		vendor:        cfg.Vendor,
 		isolationMode: cfg.IsolationMode,
@@ -119,11 +118,7 @@ func (m *Manager) Start() error {
 		return nil
 	}
 
-	m.log.Info().
-		Str("lib_path", m.libPath).
-		Str("vendor", m.vendor).
-		Str("isolation_mode", string(m.isolationMode)).
-		Msg("starting hypervisor manager")
+	klog.Infof("Starting hypervisor manager: lib_path=%s vendor=%s isolation_mode=%s", m.libPath, m.vendor, m.isolationMode)
 
 	// 1. Create device controller with accelerator library
 	dc, err := device.NewController(m.ctx, m.libPath, m.vendor, 1*time.Hour, string(m.isolationMode))
@@ -158,7 +153,7 @@ func (m *Manager) Start() error {
 	// 7. Start backend
 	if err := m.backend.Start(); err != nil {
 		if stopErr := m.deviceController.Stop(); stopErr != nil {
-			m.log.Warn().Err(stopErr).Msg("failed to stop device controller during cleanup")
+			klog.Warningf("Failed to stop device controller during cleanup: %v", stopErr)
 		}
 		return fmt.Errorf("failed to start backend: %w", err)
 	}
@@ -166,16 +161,16 @@ func (m *Manager) Start() error {
 	// 8. Start worker controller
 	if err := m.workerController.Start(); err != nil {
 		if stopErr := m.backend.Stop(); stopErr != nil {
-			m.log.Warn().Err(stopErr).Msg("failed to stop backend during cleanup")
+			klog.Warningf("Failed to stop backend during cleanup: %v", stopErr)
 		}
 		if stopErr := m.deviceController.Stop(); stopErr != nil {
-			m.log.Warn().Err(stopErr).Msg("failed to stop device controller during cleanup")
+			klog.Warningf("Failed to stop device controller during cleanup: %v", stopErr)
 		}
 		return fmt.Errorf("failed to start worker controller: %w", err)
 	}
 
 	m.started = true
-	m.log.Info().Msg("hypervisor manager started")
+	klog.Info("Hypervisor manager started")
 
 	return nil
 }
@@ -189,7 +184,7 @@ func (m *Manager) Stop() error {
 		return nil
 	}
 
-	m.log.Info().Msg("stopping hypervisor manager")
+	klog.Info("Stopping hypervisor manager")
 
 	var errs []error
 
@@ -218,7 +213,7 @@ func (m *Manager) Stop() error {
 		return fmt.Errorf("errors during shutdown: %v", errs)
 	}
 
-	m.log.Info().Msg("hypervisor manager stopped")
+	klog.Info("Hypervisor manager stopped")
 	return nil
 }
 
@@ -273,15 +268,13 @@ func (m *Manager) StartWorker(workerInfo *api.WorkerInfo) error {
 	// Start the worker in the backend
 	if err := m.backend.StartWorker(workerInfo); err != nil {
 		if deallocErr := m.allocationController.DeallocateWorker(workerInfo.WorkerUID); deallocErr != nil {
-			m.log.Warn().Err(deallocErr).Str("worker_uid", workerInfo.WorkerUID).Msg("failed to deallocate worker during cleanup")
+			klog.Warningf("Failed to deallocate worker during cleanup: worker_uid=%s error=%v", workerInfo.WorkerUID, deallocErr)
 		}
 		return fmt.Errorf("start worker: %w", err)
 	}
 
-	m.log.Info().
-		Str("worker_uid", workerInfo.WorkerUID).
-		Strs("devices", workerInfo.AllocatedDevices).
-		Msg("worker started")
+	devicesStr := fmt.Sprintf("%v", workerInfo.AllocatedDevices)
+	klog.Infof("Worker started: worker_uid=%s devices=%s", workerInfo.WorkerUID, devicesStr)
 
 	return nil
 }
@@ -297,14 +290,14 @@ func (m *Manager) StopWorker(workerUID string) error {
 
 	// Deallocate worker devices (log warning but continue)
 	if err := m.allocationController.DeallocateWorker(workerUID); err != nil {
-		m.log.Warn().Err(err).Str("worker_uid", workerUID).Msg("deallocate failed")
+		klog.Warningf("Deallocate failed: worker_uid=%s error=%v", workerUID, err)
 	}
 
 	if err := m.backend.StopWorker(workerUID); err != nil {
 		return fmt.Errorf("stop worker: %w", err)
 	}
 
-	m.log.Info().Str("worker_uid", workerUID).Msg("worker stopped")
+	klog.Infof("Worker stopped: worker_uid=%s", workerUID)
 	return nil
 }
 

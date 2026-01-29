@@ -9,7 +9,7 @@ import (
 	"github.com/NexusGPU/gpu-go/cmd/ggo/auth"
 	"github.com/NexusGPU/gpu-go/internal/api"
 	"github.com/NexusGPU/gpu-go/internal/tui"
-	"github.com/rs/zerolog/log"
+	"k8s.io/klog/v2"
 	"github.com/spf13/cobra"
 )
 
@@ -86,7 +86,7 @@ func newShareCreateCmd() *cobra.Command {
 				if err != nil {
 					// Runtime error - don't show help
 					cmd.SilenceUsage = true
-					log.Error().Err(err).Msg("Failed to list workers")
+					klog.Errorf("Failed to list workers: error=%v", err)
 					return err
 				}
 
@@ -101,7 +101,7 @@ func newShareCreateCmd() *cobra.Command {
 				if workerID == "" {
 					// Runtime error - don't show help
 					cmd.SilenceUsage = true
-					log.Error().Str("name", workerName).Msg("Worker not found")
+					klog.Errorf("Worker not found: name=%s", workerName)
 					return fmt.Errorf("worker '%s' not found", workerName)
 				}
 			}
@@ -135,7 +135,7 @@ func newShareCreateCmd() *cobra.Command {
 			if err != nil {
 				// Runtime error - don't show help
 				cmd.SilenceUsage = true
-				log.Error().Err(err).Msg("Failed to create share")
+				klog.Errorf("Failed to create share: error=%v", err)
 				return err
 			}
 
@@ -197,7 +197,7 @@ func newShareListCmd() *cobra.Command {
 			if err != nil {
 				// Runtime error - don't show help
 				cmd.SilenceUsage = true
-				log.Error().Err(err).Msg("Failed to list shares")
+				klog.Errorf("Failed to list shares: error=%v", err)
 				return err
 			}
 
@@ -266,7 +266,7 @@ func newShareGetCmd() *cobra.Command {
 			if err != nil {
 				// Runtime error - don't show help
 				cmd.SilenceUsage = true
-				log.Error().Err(err).Msg("Failed to get share")
+				klog.Errorf("Failed to get share: error=%v", err)
 				return err
 			}
 
@@ -324,7 +324,7 @@ func newShareDeleteCmd() *cobra.Command {
 			if err := client.DeleteShare(ctx, shareID); err != nil {
 				// Runtime error - don't show help
 				cmd.SilenceUsage = true
-				log.Error().Err(err).Msg("Failed to delete share")
+				klog.Errorf("Failed to delete share: error=%v", err)
 				return err
 			}
 

@@ -9,7 +9,6 @@ import (
 	tfv1 "github.com/NexusGPU/tensor-fusion/api/v1"
 	"github.com/NexusGPU/tensor-fusion/pkg/hypervisor/api"
 	"github.com/NexusGPU/tensor-fusion/pkg/hypervisor/framework"
-	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -43,7 +42,6 @@ func TestManager_E2E_DeviceDiscovery(t *testing.T) {
 		Vendor:        "stub",
 		IsolationMode: tfv1.IsolationModeShared,
 		StateDir:      tmpDir,
-		Logger:        zerolog.Nop(),
 	})
 	require.NoError(t, err)
 	require.NotNil(t, mgr)
@@ -91,7 +89,6 @@ func TestManager_E2E_WorkerLifecycle(t *testing.T) {
 		Vendor:        "stub",
 		IsolationMode: tfv1.IsolationModeShared,
 		StateDir:      tmpDir,
-		Logger:        zerolog.Nop(),
 	})
 	require.NoError(t, err)
 
@@ -153,7 +150,6 @@ func TestManager_E2E_MultipleWorkers(t *testing.T) {
 		Vendor:        "stub",
 		IsolationMode: tfv1.IsolationModeShared,
 		StateDir:      tmpDir,
-		Logger:        zerolog.Nop(),
 	})
 	require.NoError(t, err)
 
@@ -204,7 +200,6 @@ func TestManager_E2E_Reconciler(t *testing.T) {
 		Vendor:        "stub",
 		IsolationMode: tfv1.IsolationModeShared,
 		StateDir:      tmpDir,
-		Logger:        zerolog.Nop(),
 	})
 	require.NoError(t, err)
 
@@ -222,7 +217,6 @@ func TestManager_E2E_Reconciler(t *testing.T) {
 	var startedWorkers, stoppedWorkers []string
 	reconciler := NewReconciler(ReconcilerConfig{
 		Manager: mgr,
-		Logger:  zerolog.Nop(),
 		OnWorkerStarted: func(workerID string) {
 			startedWorkers = append(startedWorkers, workerID)
 		},
@@ -235,8 +229,8 @@ func TestManager_E2E_Reconciler(t *testing.T) {
 	defer reconciler.Stop()
 
 	// Set desired workers
-	reconciler.SetDesiredWorkers([]WorkerSpec{
-		{WorkerID: "reconciler-worker-1", GPUIDs: []string{devices[0].UUID}, Enabled: true},
+	reconciler.SetDesiredWorkers([]*api.WorkerInfo{
+		{WorkerUID: "reconciler-worker-1", AllocatedDevices: []string{devices[0].UUID}},
 	})
 
 	// Wait for reconciliation
@@ -247,10 +241,8 @@ func TestManager_E2E_Reconciler(t *testing.T) {
 	workers := mgr.ListWorkers()
 	assert.Len(t, workers, 1)
 
-	// Disable worker
-	reconciler.SetDesiredWorkers([]WorkerSpec{
-		{WorkerID: "reconciler-worker-1", GPUIDs: []string{devices[0].UUID}, Enabled: false},
-	})
+	// Remove worker (by not including it in desired state)
+	reconciler.SetDesiredWorkers([]*api.WorkerInfo{})
 
 	time.Sleep(1 * time.Second)
 
@@ -273,7 +265,6 @@ func TestManager_StateFilePersistence(t *testing.T) {
 		Vendor:        "stub",
 		IsolationMode: tfv1.IsolationModeShared,
 		StateDir:      tmpDir,
-		Logger:        zerolog.Nop(),
 	})
 	require.NoError(t, err)
 
@@ -310,7 +301,6 @@ func TestManager_StateFilePersistence(t *testing.T) {
 		Vendor:        "stub",
 		IsolationMode: tfv1.IsolationModeShared,
 		StateDir:      tmpDir,
-		Logger:        zerolog.Nop(),
 	})
 	require.NoError(t, err)
 
@@ -330,7 +320,6 @@ func TestManager_NotStartedErrors(t *testing.T) {
 	mgr, err := NewManager(Config{
 		LibPath: "/nonexistent/path.so",
 		Vendor:  "stub",
-		Logger:  zerolog.Nop(),
 	})
 	require.NoError(t, err)
 
@@ -364,7 +353,6 @@ func TestManager_Idempotent(t *testing.T) {
 		Vendor:        "stub",
 		IsolationMode: tfv1.IsolationModeShared,
 		StateDir:      tmpDir,
-		Logger:        zerolog.Nop(),
 	})
 	require.NoError(t, err)
 

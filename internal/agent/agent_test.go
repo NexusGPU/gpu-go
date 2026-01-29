@@ -320,36 +320,5 @@ func TestAgent_HandleHeartbeatResponse(t *testing.T) {
 	assert.Equal(t, 10, agent.configVersion)
 }
 
-func TestAgent_ComputeFileHash(t *testing.T) {
-	tmpDir := t.TempDir()
-	configDir := filepath.Join(tmpDir, "config")
-	stateDir := filepath.Join(tmpDir, "state")
-
-	configMgr := config.NewManager(configDir, stateDir)
-
-	// Create directories
-	err := configMgr.EnsureDirs()
-	require.NoError(t, err)
-
-	agent := &Agent{
-		config: configMgr,
-	}
-
-	// Initial hash (no files)
-	hash1 := agent.computeFileHash()
-
-	// Create workers file
-	workers := []config.WorkerConfig{
-		{WorkerID: "worker_1", ListenPort: 9001},
-	}
-	err = configMgr.SaveWorkers(workers)
-	require.NoError(t, err)
-
-	// Hash should change
-	hash2 := agent.computeFileHash()
-	assert.NotEqual(t, hash1, hash2)
-
-	// Same content, same hash
-	hash3 := agent.computeFileHash()
-	assert.Equal(t, hash2, hash3)
-}
+// TestAgent_ComputeFileHash removed - file hash is no longer computed
+// Worker state is now managed via hypervisor reconciler which uses hypervisor backend as SSoT

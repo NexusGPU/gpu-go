@@ -8,9 +8,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
-	"time"
 
+	"github.com/NexusGPU/gpu-go/internal/api"
 	"github.com/NexusGPU/gpu-go/internal/platform"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -23,39 +24,58 @@ const (
 )
 
 func TestFetchManifest(t *testing.T) {
-	// Create mock server
-	manifest := Manifest{
-		Version:   "1.0.0",
-		UpdatedAt: time.Now(),
-		Libraries: []Library{
-			{
-				Name:     "libcuda.so.1",
-				Version:  "12.0",
-				Platform: "linux",
-				Arch:     "amd64",
-				URL:      "https://example.com/libcuda.so.1",
-				SHA256:   "abc123",
-				Size:     1024,
-			},
-		},
-	}
+	// Use temp directory to avoid cached manifests
+	tmpDir := t.TempDir()
+	paths := platform.DefaultPaths().WithConfigDir(tmpDir)
 
+	// Create mock API server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == ManifestPath {
-			json.NewEncoder(w).Encode(manifest)
+		if r.URL.Path == "/api/ecosystem/releases" {
+			// Return a mock releases response
+			resp := api.ReleasesResponse{
+				Releases: []api.ReleaseInfo{
+					{
+						ID:      "release-1",
+						Vendor:  api.VendorInfo{Slug: "stub", Name: "STUB"},
+						Version: "1.0.0",
+						Artifacts: []api.ReleaseArtifact{
+							{
+								CPUArch: runtime.GOARCH,
+								OS:      runtime.GOOS,
+								URL:     "https://example.com/libcuda.so.1",
+								SHA256:  "abc123",
+								Metadata: map[string]string{
+									"type": "vgpu-library",
+									"size": "1024",
+								},
+							},
+						},
+					},
+				},
+				Count: 1,
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
 		} else {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 	defer server.Close()
 
-	mgr := NewManager(WithCDNBaseURL(server.URL))
+	// Create manager with mocked API client
+	apiClient := api.NewClient(api.WithBaseURL(server.URL))
+	mgr := NewManager(
+		WithPaths(paths),
+		WithAPIClient(apiClient),
+	)
 	ctx := context.Background()
 
 	result, err := mgr.FetchManifest(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, "1.0.0", result.Version)
+	// Version should be in format "api-{timestamp}"
+	assert.True(t, strings.HasPrefix(result.Version, "api-"), "version should start with 'api-'")
 	assert.Len(t, result.Libraries, 1)
+	assert.Equal(t, "libcuda.so.1", result.Libraries[0].Name)
 }
 
 func TestGetLibrariesForPlatform(t *testing.T) {
@@ -68,7 +88,7 @@ func TestGetLibrariesForPlatform(t *testing.T) {
 	}
 
 	mgr := NewManager()
-	libs := mgr.GetLibrariesForPlatform(manifest, "", "")
+	libs := mgr.GetLibrariesForPlatform(manifest, "", "", "")
 
 	// Should only return libraries matching current platform
 	for _, lib := range libs {
@@ -77,7 +97,7 @@ func TestGetLibrariesForPlatform(t *testing.T) {
 	}
 
 	// Test with specific platform
-	linuxLibs := mgr.GetLibrariesForPlatform(manifest, "linux", "amd64")
+	linuxLibs := mgr.GetLibrariesForPlatform(manifest, "linux", "amd64", "")
 	assert.Len(t, linuxLibs, 1)
 	assert.Equal(t, "libcuda.so.1", linuxLibs[0].Name)
 	assert.Equal(t, "linux", linuxLibs[0].Platform)

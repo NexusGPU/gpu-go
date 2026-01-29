@@ -8,7 +8,7 @@ import (
 
 	"github.com/NexusGPU/gpu-go/internal/api"
 	"github.com/NexusGPU/gpu-go/internal/deps"
-	"github.com/rs/zerolog/log"
+	"k8s.io/klog/v2"
 	"github.com/spf13/cobra"
 )
 
@@ -75,7 +75,7 @@ func newSyncCmd() *cobra.Command {
 			manifest, err := mgr.SyncReleases(ctx, targetOS, targetArch)
 			if err != nil {
 				cmd.SilenceUsage = true
-				log.Error().Err(err).Msg("Failed to sync releases")
+				klog.Errorf("Failed to sync releases: error=%v", err)
 				return err
 			}
 
@@ -125,7 +125,7 @@ func newListCmd() *cobra.Command {
 			// Get installed libraries
 			installed, err := mgr.GetInstalledLibraries()
 			if err != nil {
-				log.Warn().Err(err).Msg("Failed to load installed libraries")
+				klog.Warningf("Failed to load installed libraries: error=%v", err)
 			}
 
 			if len(installed.Libraries) > 0 {
@@ -142,7 +142,7 @@ func newListCmd() *cobra.Command {
 			if err != nil {
 				// Runtime error - don't show help
 				cmd.SilenceUsage = true
-				log.Error().Err(err).Msg("Failed to fetch manifest")
+				klog.Errorf("Failed to fetch manifest: error=%v", err)
 				return err
 			}
 
@@ -155,7 +155,7 @@ func newListCmd() *cobra.Command {
 				filterDesc = "all platforms"
 			} else {
 				// Filter by specified OS/Arch (empty string means current platform)
-				libs = mgr.GetLibrariesForPlatform(manifest, listOS, listArch)
+				libs = mgr.GetLibrariesForPlatform(manifest, listOS, listArch, "")
 				if listOS != "" && listArch != "" {
 					filterDesc = fmt.Sprintf("%s/%s", listOS, listArch)
 				} else if listOS != "" {
@@ -236,7 +236,7 @@ func newDownloadCmd() *cobra.Command {
 			if err != nil {
 				// Runtime error - don't show help
 				cmd.SilenceUsage = true
-				log.Error().Err(err).Msg("Failed to fetch manifest")
+				klog.Errorf("Failed to fetch manifest: error=%v", err)
 				return err
 			}
 
@@ -245,7 +245,7 @@ func newDownloadCmd() *cobra.Command {
 			targetArch := downloadArch
 
 			// Get libraries for the target platform
-			libs := mgr.GetLibrariesForPlatform(manifest, targetOS, targetArch)
+			libs := mgr.GetLibrariesForPlatform(manifest, targetOS, targetArch, "")
 			if len(libs) == 0 {
 				platformDesc := "this platform"
 				if targetOS != "" || targetArch != "" {
@@ -299,7 +299,7 @@ func newDownloadCmd() *cobra.Command {
 				if err := mgr.DownloadLibrary(ctx, lib, progressFn); err != nil {
 					// Runtime error - don't show help
 					cmd.SilenceUsage = true
-					log.Error().Err(err).Str("library", lib.Name).Msg("Failed to download")
+					klog.Errorf("Failed to download: library=%s error=%v", lib.Name, err)
 					return err
 				}
 				fmt.Println("\n  Done!")
@@ -331,11 +331,11 @@ func newInstallCmd() *cobra.Command {
 			if err != nil {
 				// Runtime error - don't show help
 				cmd.SilenceUsage = true
-				log.Error().Err(err).Msg("Failed to fetch manifest")
+				klog.Errorf("Failed to fetch manifest: error=%v", err)
 				return err
 			}
 
-			libs := mgr.GetLibrariesForPlatform(manifest, "", "")
+			libs := mgr.GetLibrariesForPlatform(manifest, "", "", "")
 			if len(libs) == 0 {
 				fmt.Println("No libraries available for this platform")
 				return nil
@@ -369,7 +369,7 @@ func newInstallCmd() *cobra.Command {
 				if err := mgr.DownloadLibrary(ctx, lib, progressFn); err != nil {
 					// Runtime error - don't show help
 					cmd.SilenceUsage = true
-					log.Error().Err(err).Str("library", lib.Name).Msg("Failed to download")
+					klog.Errorf("Failed to download: library=%s error=%v", lib.Name, err)
 					return err
 				}
 				fmt.Println()
@@ -379,7 +379,7 @@ func newInstallCmd() *cobra.Command {
 				if err := mgr.InstallLibrary(lib); err != nil {
 					// Runtime error - don't show help
 					cmd.SilenceUsage = true
-					log.Error().Err(err).Str("library", lib.Name).Msg("Failed to install")
+					klog.Errorf("Failed to install: library=%s error=%v", lib.Name, err)
 					return err
 				}
 				fmt.Println("  Done!")
@@ -410,7 +410,7 @@ func newUpdateCmd() *cobra.Command {
 			if err != nil {
 				// Runtime error - don't show help
 				cmd.SilenceUsage = true
-				log.Error().Err(err).Msg("Failed to check updates")
+				klog.Errorf("Failed to check updates: error=%v", err)
 				return err
 			}
 
@@ -436,13 +436,13 @@ func newUpdateCmd() *cobra.Command {
 				}
 
 				if err := mgr.DownloadLibrary(ctx, lib, progressFn); err != nil {
-					log.Error().Err(err).Str("library", lib.Name).Msg("Failed to download")
+					klog.Errorf("Failed to download: library=%s error=%v", lib.Name, err)
 					continue
 				}
 				fmt.Println()
 
 				if err := mgr.InstallLibrary(lib); err != nil {
-					log.Error().Err(err).Str("library", lib.Name).Msg("Failed to install")
+					klog.Errorf("Failed to install: library=%s error=%v", lib.Name, err)
 					continue
 				}
 				fmt.Println("  Done!")
@@ -466,7 +466,7 @@ func newCleanCmd() *cobra.Command {
 			if err := mgr.CleanCache(); err != nil {
 				// Runtime error - don't show help
 				cmd.SilenceUsage = true
-				log.Error().Err(err).Msg("Failed to clean cache")
+				klog.Errorf("Failed to clean cache: error=%v", err)
 				return err
 			}
 

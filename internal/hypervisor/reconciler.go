@@ -3,35 +3,23 @@ package hypervisor
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sync"
 	"time"
 
-	tfv1 "github.com/NexusGPU/tensor-fusion/api/v1"
 	"github.com/NexusGPU/tensor-fusion/pkg/hypervisor/api"
-	"github.com/rs/zerolog"
+	"k8s.io/klog/v2"
 )
-
-// WorkerSpec represents the desired worker specification from cloud backend
-type WorkerSpec struct {
-	WorkerID          string
-	GPUIDs            []string
-	Enabled           bool
-	IsolationMode     tfv1.IsolationModeType
-	VRAMMb            int64
-	ComputePercent    int
-	PartitionTemplate string
-}
 
 // Reconciler reconciles cloud-desired workers with hypervisor-actual workers
 type Reconciler struct {
 	manager *Manager
-	log     zerolog.Logger
 
 	mu              sync.RWMutex
 	ctx             context.Context
 	cancel          context.CancelFunc
 	reconcileSignal chan struct{}
-	desiredWorkers  map[string]*WorkerSpec
+	desiredWorkers  map[string]*api.WorkerInfo
 
 	// Callbacks for status updates
 	onWorkerStarted     func(workerID string)
@@ -42,7 +30,6 @@ type Reconciler struct {
 // ReconcilerConfig holds configuration for the reconciler
 type ReconcilerConfig struct {
 	Manager *Manager
-	Logger  zerolog.Logger
 
 	// Optional callbacks
 	OnWorkerStarted     func(workerID string)
@@ -56,11 +43,10 @@ func NewReconciler(cfg ReconcilerConfig) *Reconciler {
 
 	return &Reconciler{
 		manager:             cfg.Manager,
-		log:                 cfg.Logger.With().Str("component", "reconciler").Logger(),
 		ctx:                 ctx,
 		cancel:              cancel,
 		reconcileSignal:     make(chan struct{}, 1),
-		desiredWorkers:      make(map[string]*WorkerSpec),
+		desiredWorkers:      make(map[string]*api.WorkerInfo),
 		onWorkerStarted:     cfg.OnWorkerStarted,
 		onWorkerStopped:     cfg.OnWorkerStopped,
 		onReconcileComplete: cfg.OnReconcileComplete,
@@ -69,17 +55,16 @@ func NewReconciler(cfg ReconcilerConfig) *Reconciler {
 
 // SetDesiredWorkers updates the desired worker state
 // This should be called when cloud backend config is pulled
-func (r *Reconciler) SetDesiredWorkers(specs []WorkerSpec) {
+func (r *Reconciler) SetDesiredWorkers(infos []*api.WorkerInfo) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	r.desiredWorkers = make(map[string]*WorkerSpec, len(specs))
-	for i := range specs {
-		spec := specs[i]
-		r.desiredWorkers[spec.WorkerID] = &spec
+	r.desiredWorkers = make(map[string]*api.WorkerInfo, len(infos))
+	for _, info := range infos {
+		r.desiredWorkers[info.WorkerUID] = info
 	}
 
-	r.log.Debug().Int("count", len(specs)).Msg("desired workers updated")
+	klog.V(4).Infof("Desired workers updated: count=%d", len(infos))
 
 	// Signal reconciliation
 	select {
@@ -91,13 +76,13 @@ func (r *Reconciler) SetDesiredWorkers(specs []WorkerSpec) {
 // Start begins the reconciliation loop
 func (r *Reconciler) Start() {
 	go r.reconcileLoop()
-	r.log.Info().Msg("reconciler started")
+	klog.Info("Reconciler started")
 }
 
 // Stop stops the reconciliation loop
 func (r *Reconciler) Stop() {
 	r.cancel()
-	r.log.Info().Msg("reconciler stopped")
+	klog.Info("Reconciler stopped")
 }
 
 // TriggerReconcile triggers an immediate reconciliation
@@ -129,13 +114,11 @@ func (r *Reconciler) reconcileLoop() {
 
 func (r *Reconciler) reconcile() {
 	r.mu.RLock()
-	desired := make(map[string]*WorkerSpec, len(r.desiredWorkers))
-	for k, v := range r.desiredWorkers {
-		desired[k] = v
-	}
+	desired := make(map[string]*api.WorkerInfo, len(r.desiredWorkers))
+	maps.Copy(desired, r.desiredWorkers)
 	r.mu.RUnlock()
 
-	// Get actual workers from hypervisor
+	// Get actual workers from hypervisor manager (SSoT)
 	actual := r.manager.ListWorkers()
 	actualMap := make(map[string]*api.WorkerInfo, len(actual))
 	for _, w := range actual {
@@ -144,32 +127,20 @@ func (r *Reconciler) reconcile() {
 
 	var added, removed, updated int
 
-	// 1. Find workers to start (in desired but not in actual, or disabled in actual)
-	for workerID, spec := range desired {
-		if !spec.Enabled {
-			// If worker should be disabled, stop it if running
-			if _, exists := actualMap[workerID]; exists {
-				if err := r.stopWorker(workerID); err != nil {
-					r.log.Error().Err(err).Str("worker_id", workerID).Msg("failed to stop disabled worker")
-				} else {
-					removed++
-				}
-			}
-			continue
-		}
-
+	// 1. Find workers to start (in desired but not in actual)
+	for workerID, desiredInfo := range desired {
 		actualWorker, exists := actualMap[workerID]
 		if !exists {
 			// Worker doesn't exist, start it
-			if err := r.startWorker(spec); err != nil {
-				r.log.Error().Err(err).Str("worker_id", workerID).Msg("failed to start worker")
+			if err := r.startWorker(desiredInfo); err != nil {
+				klog.Errorf("Failed to start worker: worker_id=%s error=%v", workerID, err)
 			} else {
 				added++
 			}
-		} else if r.needsUpdate(spec, actualWorker) {
-			// Worker exists but config changed, restart it
-			if err := r.restartWorker(spec); err != nil {
-				r.log.Error().Err(err).Str("worker_id", workerID).Msg("failed to restart worker")
+		} else if r.needsUpdate(desiredInfo, actualWorker) {
+			// Worker exists but config changed (non-status fields), restart it
+			if err := r.restartWorker(desiredInfo); err != nil {
+				klog.Errorf("Failed to restart worker: worker_id=%s error=%v", workerID, err)
 			} else {
 				updated++
 			}
@@ -180,7 +151,7 @@ func (r *Reconciler) reconcile() {
 	for workerID := range actualMap {
 		if _, exists := desired[workerID]; !exists {
 			if err := r.stopWorker(workerID); err != nil {
-				r.log.Error().Err(err).Str("worker_id", workerID).Msg("failed to stop orphan worker")
+				klog.Errorf("Failed to stop orphan worker: worker_id=%s error=%v", workerID, err)
 			} else {
 				removed++
 			}
@@ -188,11 +159,7 @@ func (r *Reconciler) reconcile() {
 	}
 
 	if added > 0 || removed > 0 || updated > 0 {
-		r.log.Info().
-			Int("added", added).
-			Int("removed", removed).
-			Int("updated", updated).
-			Msg("reconciliation complete")
+		klog.Infof("Reconciliation complete: added=%d removed=%d updated=%d", added, removed, updated)
 
 		if r.onReconcileComplete != nil {
 			r.onReconcileComplete(added, removed, updated)
@@ -200,15 +167,13 @@ func (r *Reconciler) reconcile() {
 	}
 }
 
-func (r *Reconciler) startWorker(spec *WorkerSpec) error {
-	workerInfo := r.specToWorkerInfo(spec)
-
-	if err := r.manager.StartWorker(workerInfo); err != nil {
+func (r *Reconciler) startWorker(info *api.WorkerInfo) error {
+	if err := r.manager.StartWorker(info); err != nil {
 		return err
 	}
 
 	if r.onWorkerStarted != nil {
-		r.onWorkerStarted(spec.WorkerID)
+		r.onWorkerStarted(info.WorkerUID)
 	}
 
 	return nil
@@ -226,28 +191,29 @@ func (r *Reconciler) stopWorker(workerID string) error {
 	return nil
 }
 
-func (r *Reconciler) restartWorker(spec *WorkerSpec) error {
+func (r *Reconciler) restartWorker(info *api.WorkerInfo) error {
 	// Stop first
-	if err := r.stopWorker(spec.WorkerID); err != nil {
-		r.log.Warn().Err(err).Str("worker_id", spec.WorkerID).Msg("failed to stop worker during restart")
+	if err := r.stopWorker(info.WorkerUID); err != nil {
+		klog.Warningf("Failed to stop worker during restart: worker_id=%s error=%v", info.WorkerUID, err)
 	}
 
 	// Small delay to ensure cleanup
 	time.Sleep(100 * time.Millisecond)
 
 	// Start with new config
-	return r.startWorker(spec)
+	return r.startWorker(info)
 }
 
-func (r *Reconciler) needsUpdate(spec *WorkerSpec, actual *api.WorkerInfo) bool {
+// needsUpdate checks if worker config changed (non-status fields only)
+func (r *Reconciler) needsUpdate(desired, actual *api.WorkerInfo) bool {
 	// Check if GPU allocation changed
-	if len(spec.GPUIDs) != len(actual.AllocatedDevices) {
+	if len(desired.AllocatedDevices) != len(actual.AllocatedDevices) {
 		return true
 	}
 
 	// Create set of desired GPUs
-	desiredGPUs := make(map[string]bool, len(spec.GPUIDs))
-	for _, gpuID := range spec.GPUIDs {
+	desiredGPUs := make(map[string]bool, len(desired.AllocatedDevices))
+	for _, gpuID := range desired.AllocatedDevices {
 		desiredGPUs[gpuID] = true
 	}
 
@@ -258,37 +224,23 @@ func (r *Reconciler) needsUpdate(spec *WorkerSpec, actual *api.WorkerInfo) bool 
 		}
 	}
 
-	// Check if isolation mode changed
-	if spec.IsolationMode != "" && spec.IsolationMode != actual.IsolationMode {
-		return true
+	// Check if WorkerRunningInfo changed (port, executable, etc.)
+	if desired.WorkerRunningInfo != nil && actual.WorkerRunningInfo != nil {
+		if desired.WorkerRunningInfo.Executable != actual.WorkerRunningInfo.Executable {
+			return true
+		}
+		// Check args (specifically the port)
+		if len(desired.WorkerRunningInfo.Args) != len(actual.WorkerRunningInfo.Args) {
+			return true
+		}
+		for i, arg := range desired.WorkerRunningInfo.Args {
+			if i < len(actual.WorkerRunningInfo.Args) && arg != actual.WorkerRunningInfo.Args[i] {
+				return true
+			}
+		}
 	}
 
 	return false
-}
-
-func (r *Reconciler) specToWorkerInfo(spec *WorkerSpec) *api.WorkerInfo {
-	isolationMode := spec.IsolationMode
-	if isolationMode == "" {
-		isolationMode = tfv1.IsolationModeShared
-	}
-
-	workerInfo := &api.WorkerInfo{
-		WorkerUID:           spec.WorkerID,
-		WorkerName:          spec.WorkerID,
-		AllocatedDevices:    spec.GPUIDs,
-		Status:              api.WorkerStatusPending,
-		IsolationMode:       isolationMode,
-		PartitionTemplateID: spec.PartitionTemplate,
-	}
-
-	// Set resource requests if specified
-	if spec.VRAMMb > 0 || spec.ComputePercent > 0 {
-		workerInfo.Requests = tfv1.Resource{}
-		// Note: Resource fields use resource.Quantity which needs proper conversion
-		// This is a simplified version
-	}
-
-	return workerInfo
 }
 
 // GetStatus returns current reconciler status
@@ -311,18 +263,13 @@ func (r *Reconciler) isInSync(actual []*api.WorkerInfo) bool {
 		actualMap[w.WorkerUID] = w
 	}
 
-	enabledCount := 0
-	for workerID, spec := range r.desiredWorkers {
-		if !spec.Enabled {
-			continue
-		}
-		enabledCount++
+	for workerID := range r.desiredWorkers {
 		if _, exists := actualMap[workerID]; !exists {
 			return false
 		}
 	}
 
-	return enabledCount == len(actual)
+	return len(r.desiredWorkers) == len(actual)
 }
 
 // ReconcilerStatus represents the current reconciliation status

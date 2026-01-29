@@ -11,7 +11,7 @@ import (
 
 	"github.com/go-resty/resty/v2"
 	"github.com/gorilla/websocket"
-	"github.com/rs/zerolog/log"
+	"k8s.io/klog/v2"
 )
 
 const (
@@ -169,6 +169,7 @@ const (
 
 // doGet performs a GET request with the specified auth type
 func doGet[T any](c *Client, ctx context.Context, path string, auth authType, customAuth string) (*T, error) {
+	klog.Infof("doGet: path=%s, auth=%d", path, auth)
 	var resp T
 	req := c.httpClient.R().
 		SetContext(ctx).
@@ -239,6 +240,7 @@ func doPost[T any](c *Client, ctx context.Context, path string, body any, auth a
 
 // doPostNoResponse performs a POST request that doesn't return a body
 func doPostNoResponse(c *Client, ctx context.Context, path string, body any, auth authType) error {
+	klog.Infof("doPost: path=%s, body=%+v, auth=%d", path, body, auth)
 	req := c.httpClient.R().
 		SetContext(ctx).
 		SetHeader("Content-Type", "application/json").
@@ -265,6 +267,7 @@ func doPostNoResponse(c *Client, ctx context.Context, path string, body any, aut
 
 // doPatch performs a PATCH request
 func doPatch[T any](c *Client, ctx context.Context, path string, body any, auth authType) (*T, error) {
+	klog.Infof("doPatch: path=%s, body=%+v, auth=%d", path, body, auth)
 	var resp T
 	req := c.httpClient.R().
 		SetContext(ctx).
@@ -293,6 +296,7 @@ func doPatch[T any](c *Client, ctx context.Context, path string, body any, auth 
 
 // doDelete performs a DELETE request
 func doDelete(c *Client, ctx context.Context, path string, auth authType) error {
+	klog.Infof("doDelete: path=%s, auth=%d", path, auth)
 	req := c.httpClient.R().
 		SetContext(ctx)
 
@@ -555,7 +559,7 @@ func (c *Client) connectWebSocket(ctx context.Context) error {
 	c.wsConn = conn
 	c.wsMu.Unlock()
 
-	log.Info().Str("agent_id", agentID).Msg("WebSocket connected")
+	klog.Infof("WebSocket connected: agent_id=%s", agentID)
 	return nil
 }
 
@@ -579,9 +583,7 @@ func (c *Client) reconnectWithBackoff(ctx context.Context, currentBackoff *time.
 		default:
 		}
 
-		log.Info().
-			Dur("backoff", *currentBackoff).
-			Msg("Attempting WebSocket reconnection")
+		klog.Infof("Attempting WebSocket reconnection: backoff=%v", *currentBackoff)
 
 		// Wait before reconnecting
 		select {
@@ -594,10 +596,7 @@ func (c *Client) reconnectWithBackoff(ctx context.Context, currentBackoff *time.
 
 		// Attempt reconnection
 		if err := c.connectWebSocket(ctx); err != nil {
-			log.Error().
-				Err(err).
-				Dur("backoff", *currentBackoff).
-				Msg("WebSocket reconnection failed, will retry")
+			klog.Errorf("WebSocket reconnection failed, will retry: error=%v backoff=%v", err, *currentBackoff)
 
 			// Increase backoff for next attempt (exponential: 1min, 2min, 4min, 8min, ... 60min max)
 			*currentBackoff = min(*currentBackoff*2, wsMaxBackoff)
@@ -606,7 +605,7 @@ func (c *Client) reconnectWithBackoff(ctx context.Context, currentBackoff *time.
 
 		// Reconnection successful, reset backoff
 		*currentBackoff = wsInitialBackoff
-		log.Info().Msg("WebSocket reconnection successful")
+		klog.Info("WebSocket reconnection successful")
 		return true
 	}
 }
@@ -654,13 +653,11 @@ func (c *Client) heartbeatLoop(ctx context.Context, handler HeartbeatHandler) {
 
 			// Send ping
 			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				log.Error().Err(err).Msg("Failed to send heartbeat ping")
+				klog.Errorf("Failed to send heartbeat ping: error=%v", err)
 				consecutiveFailures++
 
 				if consecutiveFailures >= wsMaxConsecutiveFailures {
-					log.Warn().
-						Int("failures", consecutiveFailures).
-						Msg("Too many consecutive failures, reconnecting")
+					klog.Warningf("Too many consecutive failures, reconnecting: failures=%d", consecutiveFailures)
 
 					if !c.reconnectWithBackoff(ctx, &backoff) {
 						return
@@ -672,22 +669,20 @@ func (c *Client) heartbeatLoop(ctx context.Context, handler HeartbeatHandler) {
 
 			// Set read deadline
 			if err := conn.SetReadDeadline(time.Now().Add(wsReadTimeout)); err != nil {
-				log.Error().Err(err).Msg("Failed to set read deadline")
+				klog.Errorf("Failed to set read deadline: error=%v", err)
 			}
 
 			// Read response
 			_, message, err := conn.ReadMessage()
 			if err != nil {
-				log.Error().Err(err).Msg("Failed to read heartbeat response")
+				klog.Errorf("Failed to read heartbeat response: error=%v", err)
 				consecutiveFailures++
 
 				// Check if this is a connection error that requires reconnection
 				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) ||
 					websocket.IsUnexpectedCloseError(err) ||
 					consecutiveFailures >= wsMaxConsecutiveFailures {
-					log.Warn().
-						Int("failures", consecutiveFailures).
-						Msg("Connection error detected, reconnecting")
+					klog.Warningf("Connection error detected, reconnecting: failures=%d", consecutiveFailures)
 
 					if !c.reconnectWithBackoff(ctx, &backoff) {
 						return
@@ -703,7 +698,7 @@ func (c *Client) heartbeatLoop(ctx context.Context, handler HeartbeatHandler) {
 
 			var resp HeartbeatResponse
 			if err := json.Unmarshal(message, &resp); err != nil {
-				log.Error().Err(err).Msg("Failed to parse heartbeat response")
+				klog.Errorf("Failed to parse heartbeat response: error=%v", err)
 				continue
 			}
 
@@ -801,14 +796,11 @@ func (c *Client) pollingLoop(ctx context.Context, handler HeartbeatHandler) {
 		// Perform long polling request
 		resp, err := c.pollHeartbeat(ctx, agentID)
 		if err != nil {
-			log.Error().Err(err).Msg("Long polling heartbeat failed")
+			klog.Errorf("Long polling heartbeat failed: error=%v", err)
 			consecutiveFailures++
 
 			if consecutiveFailures >= lpMaxConsecutiveFailures {
-				log.Warn().
-					Int("failures", consecutiveFailures).
-					Dur("backoff", backoff).
-					Msg("Too many consecutive failures, backing off")
+				klog.Warningf("Too many consecutive failures, backing off: failures=%d backoff=%v", consecutiveFailures, backoff)
 
 				// Increase backoff for next attempt
 				currentBackoff := backoff

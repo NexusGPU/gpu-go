@@ -10,8 +10,8 @@ import (
 	"github.com/NexusGPU/gpu-go/internal/api"
 	"github.com/NexusGPU/gpu-go/internal/config"
 	"github.com/NexusGPU/gpu-go/internal/tui"
-	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
+	"k8s.io/klog/v2"
 )
 
 var (
@@ -82,7 +82,7 @@ func newWorkerListCmd() *cobra.Command {
 			if err != nil {
 				// Runtime error - don't show help
 				cmd.SilenceUsage = true
-				log.Error().Err(err).Msg("Failed to list workers")
+				klog.Errorf("Failed to list workers: error=%v", err)
 				return err
 			}
 
@@ -161,7 +161,7 @@ func newWorkerCreateCmd() *cobra.Command {
 			if err != nil {
 				// Runtime error - don't show help
 				cmd.SilenceUsage = true
-				log.Error().Err(err).Msg("Failed to create worker")
+				klog.Errorf("Failed to create worker: error=%v", err)
 				return err
 			}
 
@@ -213,7 +213,7 @@ func newWorkerGetCmd() *cobra.Command {
 			if err != nil {
 				// Runtime error - don't show help
 				cmd.SilenceUsage = true
-				log.Error().Err(err).Msg("Failed to get worker")
+				klog.Errorf("Failed to get worker: error=%v", err)
 				return err
 			}
 
@@ -307,7 +307,7 @@ func newWorkerUpdateCmd() *cobra.Command {
 			if err != nil {
 				// Runtime error - don't show help
 				cmd.SilenceUsage = true
-				log.Error().Err(err).Msg("Failed to update worker")
+				klog.Errorf("Failed to update worker: error=%v", err)
 				return err
 			}
 
@@ -367,7 +367,7 @@ func newWorkerDeleteCmd() *cobra.Command {
 			if err := client.DeleteWorker(ctx, workerID); err != nil {
 				// Runtime error - don't show help
 				cmd.SilenceUsage = true
-				log.Error().Err(err).Msg("Failed to delete worker")
+				klog.Errorf("Failed to delete worker: error=%v", err)
 				return err
 			}
 

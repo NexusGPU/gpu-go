@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/NexusGPU/tensor-fusion/pkg/hypervisor/api"
-	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -98,9 +97,8 @@ func newTestReconciler() *testReconciler {
 	}
 
 	r.Reconciler = &Reconciler{
-		log:             zerolog.Nop(),
 		reconcileSignal: make(chan struct{}, 1),
-		desiredWorkers:  make(map[string]*WorkerSpec),
+		desiredWorkers:  make(map[string]*api.WorkerInfo),
 	}
 
 	return r
@@ -109,7 +107,7 @@ func newTestReconciler() *testReconciler {
 // Override reconcile to use mock manager
 func (r *testReconciler) reconcileWithMock() (added, removed, updated int) {
 	r.mu.RLock()
-	desired := make(map[string]*WorkerSpec, len(r.desiredWorkers))
+	desired := make(map[string]*api.WorkerInfo, len(r.desiredWorkers))
 	for k, v := range r.desiredWorkers {
 		desired[k] = v
 	}
@@ -122,27 +120,12 @@ func (r *testReconciler) reconcileWithMock() (added, removed, updated int) {
 		actualMap[w.WorkerUID] = w
 	}
 
-	// 1. Find workers to start (in desired but not in actual, or disabled in actual)
-	for workerID, spec := range desired {
-		if !spec.Enabled {
-			// If worker should be disabled, stop it if running
-			if _, exists := actualMap[workerID]; exists {
-				r.mockMgr.StopWorker(workerID)
-				removed++
-			}
-			continue
-		}
-
+	// 1. Find workers to start (in desired but not in actual)
+	for workerID, desiredInfo := range desired {
 		_, exists := actualMap[workerID]
 		if !exists {
 			// Worker doesn't exist, start it
-			workerInfo := &api.WorkerInfo{
-				WorkerUID:        spec.WorkerID,
-				AllocatedDevices: spec.GPUIDs,
-				Status:           api.WorkerStatusPending,
-				IsolationMode:    spec.IsolationMode,
-			}
-			r.mockMgr.StartWorker(workerInfo)
+			r.mockMgr.StartWorker(desiredInfo)
 			added++
 		}
 	}
@@ -162,9 +145,9 @@ func TestReconciler_AddWorkers(t *testing.T) {
 	r := newTestReconciler()
 
 	// Set desired workers
-	r.SetDesiredWorkers([]WorkerSpec{
-		{WorkerID: "worker-1", GPUIDs: []string{"gpu-0"}, Enabled: true},
-		{WorkerID: "worker-2", GPUIDs: []string{"gpu-1"}, Enabled: true},
+	r.SetDesiredWorkers([]*api.WorkerInfo{
+		{WorkerUID: "worker-1", AllocatedDevices: []string{"gpu-0"}},
+		{WorkerUID: "worker-2", AllocatedDevices: []string{"gpu-1"}},
 	})
 
 	// Run reconciliation
@@ -183,8 +166,8 @@ func TestReconciler_RemoveWorkers(t *testing.T) {
 	r.mockMgr.workers["worker-2"] = &api.WorkerInfo{WorkerUID: "worker-2"}
 
 	// Set desired workers (only worker-1)
-	r.SetDesiredWorkers([]WorkerSpec{
-		{WorkerID: "worker-1", GPUIDs: []string{"gpu-0"}, Enabled: true},
+	r.SetDesiredWorkers([]*api.WorkerInfo{
+		{WorkerUID: "worker-1", AllocatedDevices: []string{"gpu-0"}},
 	})
 
 	// Run reconciliation
@@ -194,24 +177,6 @@ func TestReconciler_RemoveWorkers(t *testing.T) {
 	assert.Equal(t, 1, removed, "should remove 1 worker")
 	assert.Equal(t, 1, len(r.mockMgr.workers), "should have 1 worker")
 	assert.Contains(t, r.mockMgr.workers, "worker-1", "worker-1 should remain")
-}
-
-func TestReconciler_DisabledWorkers(t *testing.T) {
-	r := newTestReconciler()
-
-	// Pre-populate with a running worker
-	r.mockMgr.workers["worker-1"] = &api.WorkerInfo{WorkerUID: "worker-1"}
-
-	// Set desired workers with worker-1 disabled
-	r.SetDesiredWorkers([]WorkerSpec{
-		{WorkerID: "worker-1", GPUIDs: []string{"gpu-0"}, Enabled: false},
-	})
-
-	// Run reconciliation
-	_, removed, _ := r.reconcileWithMock()
-
-	assert.Equal(t, 1, removed, "should remove 1 disabled worker")
-	assert.Equal(t, 0, len(r.mockMgr.workers), "should have 0 workers")
 }
 
 func TestReconciler_MixedOperations(t *testing.T) {
@@ -225,12 +190,11 @@ func TestReconciler_MixedOperations(t *testing.T) {
 	// Set desired workers:
 	// - worker-1: keep
 	// - worker-2: remove
-	// - worker-3: disable
+	// - worker-3: remove
 	// - worker-4: add
-	r.SetDesiredWorkers([]WorkerSpec{
-		{WorkerID: "worker-1", GPUIDs: []string{"gpu-0"}, Enabled: true},
-		{WorkerID: "worker-3", GPUIDs: []string{"gpu-0"}, Enabled: false},
-		{WorkerID: "worker-4", GPUIDs: []string{"gpu-1"}, Enabled: true},
+	r.SetDesiredWorkers([]*api.WorkerInfo{
+		{WorkerUID: "worker-1", AllocatedDevices: []string{"gpu-0"}},
+		{WorkerUID: "worker-4", AllocatedDevices: []string{"gpu-1"}},
 	})
 
 	// Run reconciliation
@@ -250,8 +214,8 @@ func TestReconciler_NoChanges(t *testing.T) {
 	r.mockMgr.workers["worker-1"] = &api.WorkerInfo{WorkerUID: "worker-1", AllocatedDevices: []string{"gpu-0"}}
 
 	// Set same desired workers
-	r.SetDesiredWorkers([]WorkerSpec{
-		{WorkerID: "worker-1", GPUIDs: []string{"gpu-0"}, Enabled: true},
+	r.SetDesiredWorkers([]*api.WorkerInfo{
+		{WorkerUID: "worker-1", AllocatedDevices: []string{"gpu-0"}},
 	})
 
 	// Run reconciliation
@@ -266,9 +230,9 @@ func TestReconcilerStatus(t *testing.T) {
 	r := newTestReconciler()
 
 	// Set desired workers
-	r.SetDesiredWorkers([]WorkerSpec{
-		{WorkerID: "worker-1", GPUIDs: []string{"gpu-0"}, Enabled: true},
-		{WorkerID: "worker-2", GPUIDs: []string{"gpu-1"}, Enabled: true},
+	r.SetDesiredWorkers([]*api.WorkerInfo{
+		{WorkerUID: "worker-1", AllocatedDevices: []string{"gpu-0"}},
+		{WorkerUID: "worker-2", AllocatedDevices: []string{"gpu-1"}},
 	})
 
 	// Before reconciliation - use mock status
@@ -297,18 +261,13 @@ func (r *testReconciler) isInSyncWithMock(actual []*api.WorkerInfo) bool {
 		actualMap[w.WorkerUID] = w
 	}
 
-	enabledCount := 0
-	for workerID, spec := range r.desiredWorkers {
-		if !spec.Enabled {
-			continue
-		}
-		enabledCount++
+	for workerID := range r.desiredWorkers {
 		if _, exists := actualMap[workerID]; !exists {
 			return false
 		}
 	}
 
-	return enabledCount == len(actual)
+	return len(r.desiredWorkers) == len(actual)
 }
 
 func TestReconciler_TriggerReconcile(t *testing.T) {

@@ -16,8 +16,7 @@
                 "GPU_GO_ENDPOINT": "http://127.0.0.1:8787"
             },
             "args": [
-                "agent", "register", "--token", "tmp_kpteq4k08krolid2",
-                "--accelerator-lib", "/Users/joeyyang/Code/tensor-fusion/tensor-fusion-operator/provider/build/libaccelerator_example.so"
+                "agent", "register", "--token", "tmp_kpteq4k08krolid2"
             ],
             "program": "${workspaceFolder}/cmd/ggo/main.go",
         },

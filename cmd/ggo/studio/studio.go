@@ -7,7 +7,7 @@ import (
 
 	"github.com/NexusGPU/gpu-go/internal/studio"
 	"github.com/NexusGPU/gpu-go/internal/tui"
-	"github.com/rs/zerolog/log"
+	"k8s.io/klog/v2"
 	"github.com/spf13/cobra"
 )
 
@@ -240,7 +240,7 @@ Examples:
 			if err != nil {
 				// Runtime error - don't show help
 				cmd.SilenceUsage = true
-				log.Error().Err(err).Msg("Failed to create environment")
+				klog.Errorf("Failed to create environment: error=%v", err)
 				return err
 			}
 
@@ -267,7 +267,7 @@ Examples:
 			if env.SSHPort > 0 && !noSSH {
 				// Add SSH config
 				if err := mgr.AddSSHConfig(env); err != nil {
-					log.Warn().Err(err).Msg("Failed to add SSH config")
+					klog.Warningf("Failed to add SSH config: error=%v", err)
 				} else {
 					fmt.Println()
 					fmt.Println(styles.Subtitle.Render("SSH Configuration"))
@@ -329,7 +329,7 @@ func newListCmd() *cobra.Command {
 			if err != nil {
 				// Runtime error - don't show help
 				cmd.SilenceUsage = true
-				log.Error().Err(err).Msg("Failed to list environments")
+				klog.Errorf("Failed to list environments: error=%v", err)
 				return err
 			}
 
@@ -390,7 +390,7 @@ func newStartCmd() *cobra.Command {
 			if err := mgr.Start(ctx, args[0]); err != nil {
 				// Runtime error - don't show help
 				cmd.SilenceUsage = true
-				log.Error().Err(err).Msg("Failed to start environment")
+				klog.Errorf("Failed to start environment: error=%v", err)
 				return err
 			}
 
@@ -417,7 +417,7 @@ func newStopCmd() *cobra.Command {
 			if err := mgr.Stop(ctx, args[0]); err != nil {
 				// Runtime error - don't show help
 				cmd.SilenceUsage = true
-				log.Error().Err(err).Msg("Failed to stop environment")
+				klog.Errorf("Failed to stop environment: error=%v", err)
 				return err
 			}
 
@@ -462,13 +462,13 @@ func newRemoveCmd() *cobra.Command {
 			if err := mgr.Remove(ctx, name); err != nil {
 				// Runtime error - don't show help
 				cmd.SilenceUsage = true
-				log.Error().Err(err).Msg("Failed to remove environment")
+				klog.Errorf("Failed to remove environment: error=%v", err)
 				return err
 			}
 
 			// Remove SSH config
 			if err := mgr.RemoveSSHConfig(name); err != nil {
-				log.Warn().Err(err).Msg("Failed to remove SSH config")
+				klog.Warningf("Failed to remove SSH config: error=%v", err)
 			}
 
 			if out.IsJSON() {
@@ -498,7 +498,7 @@ func newSSHCmd() *cobra.Command {
 			if err != nil {
 				// Runtime error - don't show help
 				cmd.SilenceUsage = true
-				log.Error().Err(err).Msg("Failed to get environment")
+				klog.Errorf("Failed to get environment: error=%v", err)
 				return err
 			}
 
@@ -558,7 +558,7 @@ func newLogsCmd() *cobra.Command {
 			if err != nil {
 				// Runtime error - don't show help
 				cmd.SilenceUsage = true
-				log.Error().Err(err).Msg("Failed to get environment")
+				klog.Errorf("Failed to get environment: error=%v", err)
 				return err
 			}
 

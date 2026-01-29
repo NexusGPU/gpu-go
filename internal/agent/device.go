@@ -76,10 +76,10 @@ func DownloadOrFindAccelerator() (string, error) {
 		return "", fmt.Errorf("failed to fetch manifest: %w", err)
 	}
 
-	// Step 3: Find library in manifest matching platform and vendor slug
+	// Step 3: Find library in manifest matching platform, type, and vendor slug
 	var targetLib *deps.Library
 	var candidateLibs []deps.Library
-	platformLibs := depsMgr.GetLibrariesForPlatform(manifest, "", "")
+	platformLibs := depsMgr.GetLibrariesForPlatform(manifest, "", "", deps.LibraryTypeVGPULibrary)
 
 	// Match by vendor slug from manifest
 	for i := range platformLibs {

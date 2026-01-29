@@ -12,7 +12,6 @@ import (
 	"github.com/NexusGPU/gpu-go/cmd/ggo/use"
 	"github.com/NexusGPU/gpu-go/cmd/ggo/version"
 	"github.com/NexusGPU/gpu-go/cmd/ggo/worker"
-	"github.com/NexusGPU/gpu-go/internal/log"
 	"github.com/spf13/cobra"
 )
 
@@ -29,9 +28,7 @@ It provides commands to:
   - Manage workers on GPU servers
   - Share GPU workers with others via share links`,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
-			// Configure logging using centralized log package
-			log.SetVerbose(verbose)
-			log.Default = log.New(os.Stderr)
+			// klog verbosity is controlled by -v flag, no need to configure here
 		},
 	}
 )
