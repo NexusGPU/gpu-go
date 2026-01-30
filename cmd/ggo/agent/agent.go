@@ -210,7 +210,7 @@ func newStartCmd() *cobra.Command {
 			hvMgr, err := getHypervisorManager()
 			if err != nil {
 				// Log warning but continue - agent can work without hypervisor for some operations
-				klog.Fatal("Failed to initialize hypervisor manager, worker management will be limited: error=%v", err)
+				klog.Fatalf("Failed to initialize hypervisor manager, worker management will be limited: error=%v", err)
 			}
 
 			// Get remote-gpu-worker binary path
