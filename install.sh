@@ -10,16 +10,16 @@
 #
 # Examples:
 #   # Install latest version
-#   curl -sfL https://get.tensor-fusion.ai | sh -s -
+#   curl -sfL https://cdn.tensor-fusion.ai/gpugo/install.sh | sh -s -
 #
 #   # Install specific version
-#   curl -sfL https://get.tensor-fusion.ai | GGO_VERSION=v1.0.0 sh -s -
+#   curl -sfL https://cdn.tensor-fusion.ai/gpugo/install.sh | GGO_VERSION=v1.0.0 sh -s -
 #
 #   # Install to custom directory
-#   curl -sfL https://get.tensor-fusion.ai | GGO_INSTALL_DIR=/opt/bin sh -s -
+#   curl -sfL https://cdn.tensor-fusion.ai/gpugo/install.sh | GGO_INSTALL_DIR=/opt/bin sh -s -
 #
 #   # Agent mode (register and start agent)
-#   curl -sfL https://get.tensor-fusion.ai | sh -s - agent --token <token>
+#   curl -sfL https://cdn.tensor-fusion.ai/gpugo/install.sh | sh -s - agent --token <token>
 
 set -e
 

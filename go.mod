@@ -13,7 +13,7 @@ require (
 )
 
 // replace with the target commit id and run go mod tidy to get pseudo version
-replace github.com/NexusGPU/tensor-fusion => github.com/NexusGPU/tensor-fusion v1.54.7-0.20260129141825-b76804c03330
+replace github.com/NexusGPU/tensor-fusion => github.com/NexusGPU/tensor-fusion v1.54.7-0.20260130063938-c772a0ec0fe8
 
 require (
 	cel.dev/expr v0.24.0 // indirect

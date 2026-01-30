@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -196,6 +197,9 @@ func newStartCmd() *cobra.Command {
 				klog.Errorf("Failed to load config: error=%v", err)
 				return err
 			}
+
+			// Set product name environment variable based on license type
+			setProductNameEnv(cfg.License)
 
 			client := api.NewClient(
 				api.WithBaseURL(serverURL),
@@ -425,4 +429,58 @@ func boolToYesNo(b bool) string {
 		return "yes"
 	}
 	return "no"
+}
+
+// parseLicenseType parses the license type from the license plain text
+// Returns "free", "paid", or empty string if unknown
+func parseLicenseType(license api.License) string {
+	if license.Plain == "" {
+		return ""
+	}
+
+	// Try to parse license.plain as JSON
+	var licenseData map[string]any
+	if err := json.Unmarshal([]byte(license.Plain), &licenseData); err != nil {
+		// If not JSON, try to check if it contains type information in other formats
+		// For now, we'll return empty if it's not valid JSON
+		return ""
+	}
+
+	// Check for type field
+	if licenseType, ok := licenseData["type"].(string); ok {
+		return licenseType
+	}
+
+	// Check for license_type field
+	if licenseType, ok := licenseData["license_type"].(string); ok {
+		return licenseType
+	}
+
+	return ""
+}
+
+// setProductNameEnv sets the product name environment variable based on license type
+func setProductNameEnv(license api.License) {
+	licenseType := parseLicenseType(license)
+
+	var productName string
+	switch licenseType {
+	case "free":
+		// ProductNameGpuGoFree = "gpu-go-free" from github.com/NexusGPU/tensor-fusion/pkg/constants
+		productName = "gpu-go-free"
+	case "paid":
+		// ProductNameGpuGoPaid = "gpu-go-paid" from github.com/NexusGPU/tensor-fusion/pkg/constants
+		productName = "gpu-go-paid"
+	default:
+		// Unknown license type, don't set environment variable
+		return
+	}
+
+	// Set environment variable
+	if err := os.Setenv("GPU_GO_PRODUCT_NAME", productName); err != nil {
+		klog.Warningf("Failed to set GPU_GO_PRODUCT_NAME environment variable: error=%v", err)
+		return
+	}
+
+	klog.Infof("License type detected: type=%s, product_name=%s", licenseType, productName)
 }
