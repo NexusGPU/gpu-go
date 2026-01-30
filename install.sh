@@ -304,10 +304,10 @@ register_agent() {
     REGISTER_CMD="${binary_path} agent register -t ${token}"
     
     if [ -n "${ENDPOINT}" ]; then
-        REGISTER_CMD="${REGISTER_CMD} --endpoint ${ENDPOINT}"
+        REGISTER_CMD="${REGISTER_CMD} --server ${ENDPOINT}"
     fi
     
-    info "Running: ggo agent register -t <token>"
+    info "Running: ggo agent register"
     
     if ${REGISTER_CMD}; then
         info "Agent registered successfully!"
