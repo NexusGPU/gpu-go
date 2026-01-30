@@ -1,6 +1,6 @@
 #!/bin/sh
 # GPU Go (ggo) Installation Script
-# Usage: GPU_GO_TOKEN="xxx" curl -sfL https://cdn.tensor-fusion.ai/gpugo/install.sh | sh
+# Usage: GPU_GO_TOKEN="xxx" curl -sfL https://cdn.tensor-fusion.ai/archive/gpugo/install.sh | sh
 #
 # Environment variables:
 #   - GPU_GO_VERSION: Specific version to install (default: latest)
@@ -12,24 +12,24 @@
 #
 # Examples:
 #   # Install latest version (client mode)
-#   curl -sfL https://cdn.tensor-fusion.ai/gpugo/install.sh | sh
+#   curl -sfL https://cdn.tensor-fusion.ai/archive/gpugo/install.sh | sh
 #
 #   # Install specific version
-#   GPU_GO_VERSION=v1.0.0 curl -sfL https://cdn.tensor-fusion.ai/gpugo/install.sh | sh
+#   GPU_GO_VERSION=v1.0.0 curl -sfL https://cdn.tensor-fusion.ai/archive/gpugo/install.sh | sh
 #
 #   # Install to custom directory
-#   curl -sfL https://cdn.tensor-fusion.ai/gpugo/install.sh | GGO_INSTALL_DIR=/opt/bin sh
+#   curl -sfL https://cdn.tensor-fusion.ai/archive/gpugo/install.sh | GGO_INSTALL_DIR=/opt/bin sh
 #
 #   # Agent mode (Linux only): install, register agent, and setup systemd service
-#   GPU_GO_TOKEN="your-token" curl -sfL https://cdn.tensor-fusion.ai/gpugo/install.sh | sh
+#   GPU_GO_TOKEN="your-token" curl -sfL https://cdn.tensor-fusion.ai/archive/gpugo/install.sh | sh
 #
 #   # Agent mode with custom endpoint
-#   GPU_GO_TOKEN="your-token" GPU_GO_ENDPOINT="https://api.example.com" curl -sfL https://cdn.tensor-fusion.ai/gpugo/install.sh | sh
+#   GPU_GO_TOKEN="your-token" GPU_GO_ENDPOINT="https://api.example.com" curl -sfL https://cdn.tensor-fusion.ai/archive/gpugo/install.sh | sh
 
 set -e
 
 # --- Configuration ---
-CDN_BASE_URL="https://cdn.tensor-fusion.ai/gpugo"
+CDN_BASE_URL="https://cdn.tensor-fusion.ai/archive/gpugo"
 BINARY_NAME="ggo"
 INSTALL_DIR="${GGO_INSTALL_DIR:-/usr/local/bin}"
 VERSION="${GPU_GO_VERSION:-latest}"
@@ -76,8 +76,8 @@ build_download_url() {
     arch="$2"
     version="$3"
     
-    # CDN URL format: https://cdn.tensor-fusion.ai/gpugo/{version}/gpugo-{os}-{arch}
-    # For Linux, the format might be: https://cdn.tensor-fusion.ai/gpugo/{version}/gpugo-{arch}
+    # CDN URL format: https://cdn.tensor-fusion.ai/archive/gpugo/{version}/gpugo-{os}-{arch}
+    # For Linux, the format might be: https://cdn.tensor-fusion.ai/archive/gpugo/{version}/gpugo-{arch}
     # We'll try both formats for compatibility
     
     if [ "${os}" = "linux" ]; then
