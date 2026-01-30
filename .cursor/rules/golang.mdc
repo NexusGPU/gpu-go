@@ -21,6 +21,7 @@ alwaysApply: false
 - Prioritize elegant and typed error handling, define centralized error definition
 - Rely on github.com/NexusGPU/tensor-fusion to manage workers and GPUs, this repo should be JUST WRAPPER in terms of worker/GPU Mgmt.
 - Don't repeat yourself, think abstraction for similar or duplicated codes
+- Run `golangci-lint run --fix` after each change, MUST fix all lint issues for all go related tasks
 
 # Reference
 

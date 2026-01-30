@@ -124,9 +124,9 @@ func (d *LibraryDownloader) Download(lib LibraryInfo) (string, error) {
 	// Determine library filename
 	var ext string
 	switch lib.Arch.OS {
-	case "darwin":
+	case OSDarwin:
 		ext = "dylib"
-	case "windows":
+	case OSWindows:
 		ext = "dll"
 	default:
 		ext = "so"
