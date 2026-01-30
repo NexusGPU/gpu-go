@@ -12,6 +12,9 @@ permissions:
   issues: write
   pull-requests: write
 
+env:
+  VERSION_PKG: github.com/NexusGPU/gpu-go/cmd/ggo/version
+
 jobs:
   test:
     name: Test
@@ -61,112 +64,10 @@ jobs:
         with:
           version: v2.8.0
 
-  # Single build job that builds all platform binaries
-  build:
-    name: Build All Platforms
-    runs-on: ubuntu-latest
-    needs: [test, lint]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.25'
-          cache: true
-
-      - name: Configure Go Toolchain
-        run: go env -w GOTOOLCHAIN=go1.25.0+auto
-
-      - name: Build all platform binaries
-        env:
-          CGO_ENABLED: 0
-          GOTOOLCHAIN: go1.25.0+auto
-        run: |
-          mkdir -p binaries
-
-          # Build all platforms (Go cross-compilation doesn't need native runners)
-          GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o binaries/ggo-linux-amd64 ./cmd/ggo
-          GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o binaries/ggo-linux-arm64 ./cmd/ggo
-          GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o binaries/ggo-darwin-amd64 ./cmd/ggo
-          GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o binaries/ggo-darwin-arm64 ./cmd/ggo
-          GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o binaries/ggo-windows-amd64.exe ./cmd/ggo
-
-          ls -la binaries/
-
-      - name: Upload binaries artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: binaries
-          path: binaries/
-          retention-days: 7
-          if-no-files-found: error
-
-  upload-to-cdn:
-    name: Upload to CDN
-    runs-on: ubuntu-latest
-    needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Download binaries artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: binaries
-          path: binaries/
-
-      - name: Prepare binaries for CDN (latest)
-        run: |
-          mkdir -p cdn-binaries
-
-          # Rename to CDN naming convention (gpugo- prefix, simplified linux naming)
-          cp binaries/ggo-linux-amd64 cdn-binaries/gpugo-amd64
-          cp binaries/ggo-linux-arm64 cdn-binaries/gpugo-arm64
-          cp binaries/ggo-darwin-amd64 cdn-binaries/gpugo-darwin-amd64
-          cp binaries/ggo-darwin-arm64 cdn-binaries/gpugo-darwin-arm64
-          cp binaries/ggo-windows-amd64.exe cdn-binaries/gpugo-windows-amd64.exe
-
-          ls -la cdn-binaries/
-
-      - name: Prepare scripts for upload
-        run: |
-          mkdir -p cdn-scripts
-          cp install.sh cdn-scripts/
-          cp install.ps1 cdn-scripts/
-          cp install.bat cdn-scripts/
-          cp uninstall.sh cdn-scripts/
-          cp uninstall.ps1 cdn-scripts/
-          cp uninstall.bat cdn-scripts/
-
-      - name: Upload binaries to Cloudflare R2 (latest)
-        uses: ryand56/r2-upload-action@latest
-        with:
-          r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
-          r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
-          r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          r2-bucket: "cuda-fusion-libs"
-          source-dir: cdn-binaries
-          destination-dir: ./archive/gpugo/latest/
-          keep-file-fresh: true
-
-      - name: Upload scripts to Cloudflare R2
-        uses: ryand56/r2-upload-action@latest
-        with:
-          r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
-          r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
-          r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          r2-bucket: "cuda-fusion-libs"
-          source-dir: cdn-scripts
-          destination-dir: ./archive/gpugo/
-          keep-file-fresh: true
-
   semantic-release:
     name: Semantic Release
     runs-on: ubuntu-latest
-    needs: build
+    needs: [test, lint]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     outputs:
       published: ${{ steps.semantic.outputs.new_release_published }}
@@ -195,41 +96,44 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # Only runs when semantic-release publishes a new version
   release:
-    name: Release
+    name: Build & Release
     runs-on: ubuntu-latest
-    needs: [build, semantic-release]
+    needs: semantic-release
     if: needs.semantic-release.outputs.published == 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download binaries artifact
-        uses: actions/download-artifact@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
-          name: binaries
-          path: binaries/
+          go-version: '1.25'
+          cache: true
 
-      - name: Prepare release assets
+      - name: Configure Go Toolchain
+        run: go env -w GOTOOLCHAIN=go1.25.0+auto
+
+      - name: Build all platform binaries
+        env:
+          CGO_ENABLED: 0
+          GOTOOLCHAIN: go1.25.0+auto
         run: |
-          VERSION="${{ needs.semantic-release.outputs.version }}"
+          VERSION="v${{ needs.semantic-release.outputs.version }}"
+          LDFLAGS="-s -w -X ${VERSION_PKG}.Version=${VERSION}"
           mkdir -p release
 
-          # Copy binaries to release folder (already built, just rename)
-          cp binaries/ggo-linux-amd64 release/ggo-linux-amd64
-          cp binaries/ggo-linux-arm64 release/ggo-linux-arm64
-          cp binaries/ggo-darwin-amd64 release/ggo-darwin-amd64
-          cp binaries/ggo-darwin-arm64 release/ggo-darwin-arm64
-          cp binaries/ggo-windows-amd64.exe release/ggo-windows-amd64.exe
+          GOOS=linux GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o release/ggo-linux-amd64 ./cmd/ggo
+          GOOS=linux GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o release/ggo-linux-arm64 ./cmd/ggo
+          GOOS=darwin GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o release/ggo-darwin-amd64 ./cmd/ggo
+          GOOS=darwin GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o release/ggo-darwin-arm64 ./cmd/ggo
+          GOOS=windows GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o release/ggo-windows-amd64.exe ./cmd/ggo
 
-          # Generate checksums
-          cd release
-          for f in ggo-*; do
-            sha256sum "$f" > "$f.sha256"
-          done
+          cd release && for f in ggo-*; do sha256sum "$f" > "$f.sha256"; done
           ls -la
 
-      - name: Upload release assets
+      - name: Upload release assets to GitHub
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.semantic-release.outputs.tag }}
@@ -239,30 +143,50 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Prepare versioned binaries for R2 upload
+      - name: Prepare CDN binaries
         run: |
-          mkdir -p r2-upload
+          mkdir -p cdn-binaries
+          cp release/ggo-linux-amd64 cdn-binaries/gpugo-amd64
+          cp release/ggo-linux-arm64 cdn-binaries/gpugo-arm64
+          cp release/ggo-darwin-amd64 cdn-binaries/gpugo-darwin-amd64
+          cp release/ggo-darwin-arm64 cdn-binaries/gpugo-darwin-arm64
+          cp release/ggo-windows-amd64.exe cdn-binaries/gpugo-windows-amd64.exe
+          cd cdn-binaries && for f in gpugo-*; do sha256sum "$f" > "$f.sha256"; done
 
-          # Copy with CDN naming convention
-          cp binaries/ggo-linux-amd64 r2-upload/gpugo-amd64
-          cp binaries/ggo-linux-arm64 r2-upload/gpugo-arm64
-          cp binaries/ggo-darwin-amd64 r2-upload/gpugo-darwin-amd64
-          cp binaries/ggo-darwin-arm64 r2-upload/gpugo-darwin-arm64
-          cp binaries/ggo-windows-amd64.exe r2-upload/gpugo-windows-amd64.exe
+      - name: Prepare install scripts
+        run: |
+          mkdir -p cdn-scripts
+          cp install.sh install.ps1 install.bat cdn-scripts/
+          cp uninstall.sh uninstall.ps1 uninstall.bat cdn-scripts/
 
-          # Generate checksums for CDN
-          cd r2-upload
-          for f in gpugo-*; do
-            sha256sum "$f" > "$f.sha256"
-          done
-          ls -la
-
-      - name: Upload versioned binaries to Cloudflare R2
+      - name: Upload to R2 (latest)
         uses: ryand56/r2-upload-action@latest
         with:
           r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
           r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
           r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           r2-bucket: "cuda-fusion-libs"
-          source-dir: r2-upload
+          source-dir: cdn-binaries
+          destination-dir: ./archive/gpugo/latest/
+          keep-file-fresh: true
+
+      - name: Upload to R2 (versioned)
+        uses: ryand56/r2-upload-action@latest
+        with:
+          r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+          r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          r2-bucket: "cuda-fusion-libs"
+          source-dir: cdn-binaries
           destination-dir: ./archive/gpugo/v${{ needs.semantic-release.outputs.version }}/
+
+      - name: Upload scripts to R2
+        uses: ryand56/r2-upload-action@latest
+        with:
+          r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+          r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          r2-bucket: "cuda-fusion-libs"
+          source-dir: cdn-scripts
+          destination-dir: ./archive/gpugo/
+          keep-file-fresh: true
