@@ -79,7 +79,8 @@ func NewAgentWithHypervisor(client *api.Client, configMgr *config.Manager, hvMgr
 	return agent
 }
 
-// Register registers the agent with the server using a temporary token
+// Register registers the agent with the server using a temporary token.
+// Registration does not send a status report; status is reported only after Start() via statusReportLoop.
 func (a *Agent) Register(tempToken string, gpus []api.GPUInfo) error {
 	// Get network IPs
 	networkIPs := getNetworkIPs()
@@ -317,6 +318,17 @@ func (a *Agent) convertToWorkerInfos(apiWorkers []api.WorkerConfig) []*hvApi.Wor
 	return infos
 }
 
+// normalizeWorkerStatus maps status to API-allowed WorkerStatus: "pending" | "running" | "stopping" | "stopped".
+// Empty or invalid values become "pending".
+func normalizeWorkerStatus(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "running", "stopping", "stopped", "pending":
+		return strings.ToLower(strings.TrimSpace(status))
+	default:
+		return "pending"
+	}
+}
+
 // reportStatus reports current status to the server
 func (a *Agent) reportStatus() error {
 	// Load current GPUs
@@ -345,7 +357,7 @@ func (a *Agent) reportStatus() error {
 		workerStatuses = make([]api.WorkerStatus, 0, len(hvWorkers))
 
 		for _, w := range hvWorkers {
-			// Determine status from WorkerRunningInfo.IsRunning
+			// Determine status from WorkerRunningInfo.IsRunning (API: pending|running|stopping|stopped)
 			status := "stopped"
 			if w.WorkerRunningInfo != nil && w.WorkerRunningInfo.IsRunning {
 				status = "running"
@@ -356,7 +368,7 @@ func (a *Agent) reportStatus() error {
 
 			workerStatuses = append(workerStatuses, api.WorkerStatus{
 				WorkerID: w.WorkerUID,
-				Status:   status,
+				Status:   normalizeWorkerStatus(status),
 				GPUIDs:   w.AllocatedDevices,
 			})
 			summaryParts = append(summaryParts, fmt.Sprintf("%s(%s)", w.WorkerUID, status))
@@ -376,7 +388,7 @@ func (a *Agent) reportStatus() error {
 		for i, w := range workerConfigs {
 			workerStatuses[i] = api.WorkerStatus{
 				WorkerID:    w.WorkerID,
-				Status:      w.Status,
+				Status:      normalizeWorkerStatus(w.Status),
 				PID:         w.PID,
 				GPUIDs:      w.GPUIDs,
 				Connections: w.Connections,

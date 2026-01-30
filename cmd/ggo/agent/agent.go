@@ -206,7 +206,7 @@ func newStartCmd() *cobra.Command {
 			hvMgr, err := getHypervisorManager()
 			if err != nil {
 				// Log warning but continue - agent can work without hypervisor for some operations
-				klog.Warningf("Failed to initialize hypervisor manager, worker management will be limited: error=%v", err)
+				klog.Fatal("Failed to initialize hypervisor manager, worker management will be limited: error=%v", err)
 			}
 
 			// Get remote-gpu-worker binary path
@@ -360,8 +360,12 @@ func newStatusCmd() *cobra.Command {
 
 				var rows [][]string
 				for _, w := range workers {
-					statusIcon := tui.StatusIcon(w.Status)
-					statusStyled := styles.StatusStyle(w.Status).Render(statusIcon + " " + w.Status)
+					status := w.Status
+					if status == "" {
+						status = "unknown"
+					}
+					statusIcon := tui.StatusIcon(status)
+					statusStyled := styles.StatusStyle(status).Render(statusIcon + " " + status)
 
 					enabledIcon := tui.StatusIcon(boolToYesNo(w.Enabled))
 					enabledStyled := styles.StatusStyle(boolToYesNo(w.Enabled)).Render(enabledIcon)

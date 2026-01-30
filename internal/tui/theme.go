@@ -205,6 +205,8 @@ func (s *Styles) StatusStyle(status string) lipgloss.Style {
 		return s.Error
 	case "starting", "stopping", "pending", "initializing":
 		return s.Warning
+	case "unknown", "n/a":
+		return s.Muted
 	default:
 		return s.Text
 	}
@@ -225,6 +227,8 @@ func StatusIcon(status string) string {
 		return "✓"
 	case "disabled", "no":
 		return "✕"
+	case "unknown", "n/a":
+		return "◐"
 	default:
 		return "•"
 	}
