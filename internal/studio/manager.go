@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -78,7 +79,37 @@ func (m *Manager) detectBestBackend() (Backend, error) {
 		}
 	}
 
-	return nil, errors.Unavailable("no backend available for platform: " + runtime.GOOS)
+	return nil, errors.Unavailable("no backend available for platform: " + runtime.GOOS + ". " + platformBackendHint(ctx, runtime.GOOS))
+}
+
+// platformBackendHint returns a short hint for what to install/start on the given OS.
+// On Linux, if docker is installed but fails with permission denied, suggests adding user to docker group.
+func platformBackendHint(ctx context.Context, goos string) string {
+	if goos == "linux" {
+		if hint := linuxDockerPermissionHint(ctx); hint != "" {
+			return hint
+		}
+		return "Install and start Docker (https://docs.docker.com/get-docker/). If you get permission denied, add your user to the docker group: sudo usermod -aG docker $USER, then log out and back in."
+	}
+	switch goos {
+	case "darwin":
+		return "Install and start Colima, Docker, or Apple Container runtime."
+	case "windows":
+		return "Install and start WSL or Docker Desktop."
+	default:
+		return "Install Docker or another supported runtime."
+	}
+}
+
+// linuxDockerPermissionHint runs docker info and if the failure is permission-related, returns a hint.
+func linuxDockerPermissionHint(ctx context.Context) string {
+	cmd := exec.CommandContext(ctx, "docker", "info")
+	output, _ := cmd.CombinedOutput()
+	s := strings.ToLower(string(output))
+	if strings.Contains(s, "permission denied") || strings.Contains(s, "got permission denied") {
+		return "Docker is installed but the current user does not have permission. Add your user to the docker group: sudo usermod -aG docker $USER, then log out and back in (or run with sudo)."
+	}
+	return ""
 }
 
 // ListAvailableBackends returns all available backends

@@ -238,9 +238,7 @@ Examples:
 
 			env, err := mgr.Create(ctx, opts)
 			if err != nil {
-				// Runtime error - don't show help
 				cmd.SilenceUsage = true
-				klog.Errorf("Failed to create environment: error=%v", err)
 				return err
 			}
 
@@ -327,9 +325,7 @@ func newListCmd() *cobra.Command {
 
 			envs, err := mgr.List(ctx)
 			if err != nil {
-				// Runtime error - don't show help
 				cmd.SilenceUsage = true
-				klog.Errorf("Failed to list environments: error=%v", err)
 				return err
 			}
 
@@ -388,9 +384,7 @@ func newStartCmd() *cobra.Command {
 			out := getOutput()
 
 			if err := mgr.Start(ctx, args[0]); err != nil {
-				// Runtime error - don't show help
 				cmd.SilenceUsage = true
-				klog.Errorf("Failed to start environment: error=%v", err)
 				return err
 			}
 
@@ -415,9 +409,7 @@ func newStopCmd() *cobra.Command {
 			out := getOutput()
 
 			if err := mgr.Stop(ctx, args[0]); err != nil {
-				// Runtime error - don't show help
 				cmd.SilenceUsage = true
-				klog.Errorf("Failed to stop environment: error=%v", err)
 				return err
 			}
 
@@ -460,9 +452,7 @@ func newRemoveCmd() *cobra.Command {
 			}
 
 			if err := mgr.Remove(ctx, name); err != nil {
-				// Runtime error - don't show help
 				cmd.SilenceUsage = true
-				klog.Errorf("Failed to remove environment: error=%v", err)
 				return err
 			}
 
@@ -496,9 +486,7 @@ func newSSHCmd() *cobra.Command {
 
 			env, err := mgr.Get(ctx, args[0])
 			if err != nil {
-				// Runtime error - don't show help
 				cmd.SilenceUsage = true
-				klog.Errorf("Failed to get environment: error=%v", err)
 				return err
 			}
 
@@ -556,9 +544,7 @@ func newLogsCmd() *cobra.Command {
 
 			env, err := mgr.Get(ctx, args[0])
 			if err != nil {
-				// Runtime error - don't show help
 				cmd.SilenceUsage = true
-				klog.Errorf("Failed to get environment: error=%v", err)
 				return err
 			}
 
