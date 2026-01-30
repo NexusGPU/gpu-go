@@ -116,13 +116,19 @@ jobs:
           name: ggo-${{ matrix.goos }}-${{ matrix.goarch }}
           path: ggo-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.suffix }}
 
-      - name: Prepare files for Cloudflare R2 upload
+      - name: Prepare binary for Cloudflare R2 upload
         if: matrix.goos == 'linux'
         run: |
           mkdir -p temp-upload
           cp ggo-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.suffix }} temp-upload/gpugo-${{ matrix.goarch }}
 
-      - name: Upload Latest Files to Cloudflare R2
+      - name: Prepare install.sh for Cloudflare R2 upload
+        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
+        run: |
+          mkdir -p install-upload
+          cp install.sh install-upload/install.sh
+
+      - name: Upload Latest Binary to Cloudflare R2
         if: matrix.goos == 'linux'
         uses: ryand56/r2-upload-action@latest
         with:
@@ -134,7 +140,19 @@ jobs:
           destination-dir: ./archive/gpugo/latest/
           keep-file-fresh: true
 
-      - name: Upload Tag Files to Cloudflare R2
+      - name: Upload install.sh to Cloudflare R2
+        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
+        uses: ryand56/r2-upload-action@latest
+        with:
+          r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+          r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          r2-bucket: "cuda-fusion-libs"
+          source-dir: install-upload
+          destination-dir: ./archive/gpugo/
+          keep-file-fresh: true
+
+      - name: Upload Versioned Binary to Cloudflare R2
         if: matrix.goos == 'linux' && startsWith(github.ref, 'refs/tags/v')
         uses: ryand56/r2-upload-action@latest
         with:
@@ -144,7 +162,6 @@ jobs:
           r2-bucket: "cuda-fusion-libs"
           source-dir: temp-upload
           destination-dir: ./archive/gpugo/${{ github.ref_name }}/
-          keep-file-fresh: true
 
   release:
     name: Release
