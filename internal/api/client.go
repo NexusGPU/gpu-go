@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	defaultBaseURL = "https://tensor-fusion.ai"
+	defaultBaseURL = "https://go.gpu.tf"
 	defaultTimeout = 30 * time.Second
 )
 

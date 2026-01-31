@@ -31,6 +31,15 @@ const (
 
 	// CachedManifestFile is the filename for the cached releases manifest
 	CachedManifestFile = "releases-manifest.json"
+
+	// DownloadedManifestFile is the filename for the downloaded dependencies manifest
+	DownloadedManifestFile = "downloaded-manifest.json"
+
+	// InstalledManifestFile is the filename for the installed dependencies manifest
+	InstalledManifestFile = "deps-manifest.json"
+
+	// AutoSyncInterval is the interval for auto-syncing the manifest
+	AutoSyncInterval = 7 * 24 * time.Hour
 )
 
 // Library type constants
@@ -66,6 +75,12 @@ type Manifest struct {
 type LocalManifest struct {
 	InstalledAt time.Time          `json:"installed_at"`
 	Libraries   map[string]Library `json:"libraries"` // name -> library
+}
+
+// DownloadedManifest represents locally downloaded dependencies
+type DownloadedManifest struct {
+	UpdatedAt time.Time          `json:"updated_at"`
+	Libraries map[string]Library `json:"libraries"` // name -> library
 }
 
 // Manager manages dependency downloads and versions
@@ -140,7 +155,7 @@ func WithAPIClient(client *api.Client) ManagerOption {
 // SyncReleases fetches releases from the API and caches them locally
 // If os and arch are empty strings, uses the current platform
 // Returns the synced manifest for verbose output
-func (m *Manager) SyncReleases(ctx context.Context, os, arch string) (*Manifest, error) {
+func (m *Manager) SyncReleases(ctx context.Context, osStr, arch string) (*Manifest, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -158,7 +173,7 @@ func (m *Manager) SyncReleases(ctx context.Context, os, arch string) (*Manifest,
 	}
 
 	// Determine target platform
-	targetOS := os
+	targetOS := osStr
 	targetArch := arch
 	if targetOS == "" {
 		targetOS = runtime.GOOS
@@ -302,31 +317,38 @@ func (m *Manager) saveCachedManifest(manifest *Manifest) error {
 	return os.Rename(tmpPath, manifestPath)
 }
 
-// FetchManifest loads the cached manifest, or syncs from API if not available
-func (m *Manager) FetchManifest(ctx context.Context) (*Manifest, error) {
+// FetchManifest loads the cached manifest, and syncs from API if not available or outdated
+// Returns true as second argument if an auto-sync was performed and updates were found
+func (m *Manager) FetchManifest(ctx context.Context) (*Manifest, bool, error) {
 	// Try to load from cache first
 	manifest, err := m.LoadCachedManifest()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
-	// If no cached manifest, sync from API
-	if manifest == nil {
-		_, err := m.SyncReleases(ctx, "", "")
+	synced := false
+	// If no cached manifest, or it's outdated, sync from API
+	if manifest == nil || time.Since(manifest.UpdatedAt) > AutoSyncInterval {
+		lastSync := "never"
+		if manifest != nil {
+			lastSync = manifest.UpdatedAt.Format(time.RFC3339)
+		}
+		klog.Infof("Manifest missing or outdated (last sync: %s), syncing from API...", lastSync)
+		newManifest, err := m.SyncReleases(ctx, "", "")
 		if err != nil {
-			return nil, fmt.Errorf("failed to sync releases: %w", err)
+			// If sync fails but we have a stale manifest, return it with a warning?
+			// For now, return error to be safe, or just return the stale one if available?
+			if manifest != nil {
+				klog.Warningf("Failed to sync releases, using stale manifest: %v", err)
+				return manifest, false, nil
+			}
+			return nil, false, fmt.Errorf("failed to sync releases: %w", err)
 		}
-		// Load again after sync
-		manifest, err = m.LoadCachedManifest()
-		if err != nil {
-			return nil, err
-		}
-		if manifest == nil {
-			return nil, fmt.Errorf("failed to load manifest after sync")
-		}
+		manifest = newManifest
+		synced = true
 	}
 
-	return manifest, nil
+	return manifest, synced, nil
 }
 
 // GetLibrariesForPlatform returns libraries matching the specified platform and type
@@ -334,9 +356,9 @@ func (m *Manager) FetchManifest(ctx context.Context) (*Manifest, error) {
 // If only os is provided, matches any arch for that os
 // If only arch is provided, matches any os for that arch
 // If type is empty string, matches any type
-func (m *Manager) GetLibrariesForPlatform(manifest *Manifest, os, arch, libType string) []Library {
+func (m *Manager) GetLibrariesForPlatform(manifest *Manifest, osStr, arch, libType string) []Library {
 	var result []Library
-	targetOS := os
+	targetOS := osStr
 	targetArch := arch
 
 	// If both are empty, use current platform
@@ -378,6 +400,10 @@ func (m *Manager) DownloadLibrary(ctx context.Context, lib Library, progressFn f
 
 	// Check if already downloaded with correct hash (skip if SHA256 is empty)
 	if lib.SHA256 != "" && m.VerifyLibrary(destPath, lib.SHA256) {
+		// Update downloaded manifest even if file exists (to ensure it's tracked)
+		if err := m.updateDownloadedManifest(lib); err != nil {
+			klog.Warningf("Failed to update downloaded manifest: %v", err)
+		}
 		return nil // Already downloaded
 	}
 
@@ -445,6 +471,11 @@ func (m *Manager) DownloadLibrary(ctx context.Context, lib Library, progressFn f
 		return fmt.Errorf("failed to move file: %w", err)
 	}
 
+	// Update downloaded manifest
+	if err := m.updateDownloadedManifest(lib); err != nil {
+		klog.Warningf("Failed to update downloaded manifest: %v", err)
+	}
+
 	return nil
 }
 
@@ -485,7 +516,7 @@ func (m *Manager) GetInstalledLibraries() (*LocalManifest, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	manifestPath := filepath.Join(m.paths.ConfigDir(), "deps-manifest.json")
+	manifestPath := filepath.Join(m.paths.ConfigDir(), InstalledManifestFile)
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -502,9 +533,31 @@ func (m *Manager) GetInstalledLibraries() (*LocalManifest, error) {
 	return &manifest, nil
 }
 
+// GetDownloadedLibraries returns the downloaded libraries
+func (m *Manager) GetDownloadedLibraries() (*DownloadedManifest, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	manifestPath := filepath.Join(m.paths.ConfigDir(), DownloadedManifestFile)
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &DownloadedManifest{Libraries: make(map[string]Library)}, nil
+		}
+		return nil, err
+	}
+
+	var manifest DownloadedManifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return nil, err
+	}
+
+	return &manifest, nil
+}
+
 // CheckUpdates checks if any installed libraries have updates available
 func (m *Manager) CheckUpdates(ctx context.Context) ([]Library, error) {
-	manifest, err := m.FetchManifest(ctx)
+	manifest, _, err := m.FetchManifest(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -550,6 +603,12 @@ func (m *Manager) CleanCache() error {
 		}
 	}
 
+	// Also remove downloaded manifest
+	manifestPath := filepath.Join(m.paths.ConfigDir(), DownloadedManifestFile)
+	if err := os.Remove(manifestPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+
 	return nil
 }
 
@@ -580,7 +639,7 @@ func (m *Manager) VerifyLibrary(path, expectedHash string) bool {
 
 // updateLocalManifest updates the local manifest with an installed library
 func (m *Manager) updateLocalManifest(lib Library) error {
-	manifestPath := filepath.Join(m.paths.ConfigDir(), "deps-manifest.json")
+	manifestPath := filepath.Join(m.paths.ConfigDir(), InstalledManifestFile)
 
 	// Load existing manifest
 	var manifest LocalManifest
@@ -593,6 +652,46 @@ func (m *Manager) updateLocalManifest(lib Library) error {
 	}
 
 	manifest.InstalledAt = time.Now()
+	manifest.Libraries[lib.Name] = lib
+
+	// Save manifest
+	data, err = json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(manifestPath), 0755); err != nil {
+		return err
+	}
+
+	return os.WriteFile(manifestPath, data, 0644)
+}
+
+// updateDownloadedManifest updates the downloaded manifest
+func (m *Manager) updateDownloadedManifest(lib Library) error {
+	// Note: We don't lock here as it's called from DownloadLibrary which already holds the lock
+	// But since DownloadLibrary calls this, we should be careful if we call this from outside
+	// However, updateDownloadedManifest is private and only called from DownloadLibrary.
+	// But wait, DownloadLibrary holds the lock, so we can't lock again inside unless it's a recursive lock (sync.Mutex is not).
+	// So we should expect the caller to hold the lock, or this function should not lock.
+	// DownloadLibrary holds m.mu.Lock(). So this function should NOT lock m.mu.
+	// But LoadDownloadedManifest locks. We should be careful.
+	// Let's implement this without locking the Manager, but locking the file access?
+	// Actually, DownloadLibrary holds the lock on the Manager, which protects the file operations too effectively.
+
+	manifestPath := filepath.Join(m.paths.ConfigDir(), DownloadedManifestFile)
+
+	// Load existing manifest
+	var manifest DownloadedManifest
+	data, err := os.ReadFile(manifestPath)
+	if err == nil {
+		_ = json.Unmarshal(data, &manifest)
+	}
+	if manifest.Libraries == nil {
+		manifest.Libraries = make(map[string]Library)
+	}
+
+	manifest.UpdatedAt = time.Now()
 	manifest.Libraries[lib.Name] = lib
 
 	// Save manifest
@@ -665,7 +764,7 @@ func (m *Manager) GetRemoteGPUWorkerPath(ctx context.Context) (string, error) {
 	}
 
 	// Not found, try to download from manifest
-	manifest, err := m.FetchManifest(ctx)
+	manifest, _, err := m.FetchManifest(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch manifest: %w", err)
 	}

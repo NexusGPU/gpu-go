@@ -70,7 +70,7 @@ func TestFetchManifest(t *testing.T) {
 	)
 	ctx := context.Background()
 
-	result, err := mgr.FetchManifest(ctx)
+	result, _, err := mgr.FetchManifest(ctx)
 	require.NoError(t, err)
 	// Version should be in format "api-{timestamp}"
 	assert.True(t, strings.HasPrefix(result.Version, "api-"), "version should start with 'api-'")

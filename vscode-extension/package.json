@@ -282,7 +282,7 @@
       "properties": {
         "gpugo.serverUrl": {
           "type": "string",
-          "default": "https://tensor-fusion.ai",
+          "default": "https://go.gpu.tf",
           "description": "GPU Go API server URL"
         },
         "gpugo.dashboardUrl": {

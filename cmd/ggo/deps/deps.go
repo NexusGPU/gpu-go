@@ -8,6 +8,7 @@ import (
 
 	"github.com/NexusGPU/gpu-go/internal/api"
 	"github.com/NexusGPU/gpu-go/internal/deps"
+	"github.com/NexusGPU/gpu-go/internal/tui"
 	"github.com/spf13/cobra"
 	"k8s.io/klog/v2"
 )
@@ -128,22 +129,27 @@ func newListCmd() *cobra.Command {
 				klog.Warningf("Failed to load installed libraries: error=%v", err)
 			}
 
-			if len(installed.Libraries) > 0 {
-				fmt.Println("Installed libraries:")
-				for name, lib := range installed.Libraries {
-					fmt.Printf("  %s (version: %s, platform: %s/%s)\n", name, lib.Version, lib.Platform, lib.Arch)
-				}
-				fmt.Println()
+			// Get downloaded libraries
+			downloaded, err := mgr.GetDownloadedLibraries()
+			if err != nil {
+				klog.Warningf("Failed to load downloaded libraries: error=%v", err)
 			}
 
 			// Fetch available libraries (from cached manifest or sync)
-			fmt.Println("Fetching available libraries...")
-			manifest, err := mgr.FetchManifest(ctx)
+			manifest, synced, err := mgr.FetchManifest(ctx)
 			if err != nil {
 				// Runtime error - don't show help
 				cmd.SilenceUsage = true
 				klog.Errorf("Failed to fetch manifest: error=%v", err)
 				return err
+			}
+
+			if synced {
+				// Check for updates after a sync
+				updates, _ := mgr.CheckUpdates(ctx)
+				if len(updates) > 0 {
+					fmt.Printf("\n%s\n", tui.InfoMessage(fmt.Sprintf("Manifest updated. %d updates available. Run 'ggo deps update' to upgrade.", len(updates))))
+				}
 			}
 
 			// Determine if we should list all architectures or filter
@@ -174,46 +180,56 @@ func newListCmd() *cobra.Command {
 				return nil
 			}
 
-			// Group by platform/arch if listing all or filtering by OS only
-			shouldGroup := (listOS == "" && listArch == "") || (listOS != "" && listArch == "")
-			if shouldGroup {
-				// Group libraries by platform/arch
-				grouped := make(map[string][]deps.Library)
-				for _, lib := range libs {
-					key := fmt.Sprintf("%s/%s", lib.Platform, lib.Arch)
-					grouped[key] = append(grouped[key], lib)
+			// Use TUI table
+			headers := []string{"Name", "Version", "Platform", "Size", "Status"}
+			tb := tui.NewTable().Headers(headers...)
+
+			// Sort libs by name for consistent output
+			slices.SortFunc(libs, func(a, b deps.Library) int {
+				if a.Name != b.Name {
+					return compareStrings(a.Name, b.Name)
+				}
+				return compareStrings(a.Platform, b.Platform)
+			})
+
+			for _, lib := range libs {
+				status := "Available"
+				style := tui.DefaultStyles().Muted
+
+				// Check installed status
+				isInstalled := false
+				if installedLib, exists := installed.Libraries[lib.Name]; exists {
+					if installedLib.Version == lib.Version && installedLib.Platform == lib.Platform && installedLib.Arch == lib.Arch {
+						status = "Installed"
+						style = tui.DefaultStyles().Success
+						isInstalled = true
+					} else if installedLib.Version != lib.Version {
+						status = fmt.Sprintf("Update: %s -> %s", installedLib.Version, lib.Version)
+						style = tui.DefaultStyles().Warning
+					}
 				}
 
-				fmt.Printf("\nAvailable libraries for %s (manifest version: %s):\n", filterDesc, manifest.Version)
-				for platformArch, platformLibs := range grouped {
-					fmt.Printf("\n  Platform: %s\n", platformArch)
-					for _, lib := range platformLibs {
-						status := ""
-						if installedLib, exists := installed.Libraries[lib.Name]; exists {
-							if installedLib.Version == lib.Version && installedLib.Platform == lib.Platform && installedLib.Arch == lib.Arch {
-								status = " [installed]"
-							} else if installedLib.Version != lib.Version {
-								status = fmt.Sprintf(" [update available: %s -> %s]", installedLib.Version, lib.Version)
-							}
-						}
-						fmt.Printf("    %s (version: %s, size: %d bytes)%s\n", lib.Name, lib.Version, lib.Size, status)
-					}
-				}
-			} else {
-				fmt.Printf("\nAvailable libraries for %s (manifest version: %s):\n", filterDesc, manifest.Version)
-				for _, lib := range libs {
-					status := ""
-					if installedLib, exists := installed.Libraries[lib.Name]; exists {
-						if installedLib.Version == lib.Version && installedLib.Platform == lib.Platform && installedLib.Arch == lib.Arch {
-							status = " [installed]"
-						} else if installedLib.Version != lib.Version {
-							status = fmt.Sprintf(" [update available: %s -> %s]", installedLib.Version, lib.Version)
+				// Check downloaded status (if not installed)
+				if !isInstalled {
+					// Check if downloaded
+					if downloadedLib, exists := downloaded.Libraries[lib.Name]; exists {
+						if downloadedLib.Version == lib.Version && downloadedLib.Platform == lib.Platform && downloadedLib.Arch == lib.Arch {
+							status = "Downloaded"
+							style = tui.DefaultStyles().Info
 						}
 					}
-					fmt.Printf("  %s (version: %s, size: %d bytes)%s\n", lib.Name, lib.Version, lib.Size, status)
 				}
+
+				tb.Row(
+					lib.Name,
+					lib.Version,
+					fmt.Sprintf("%s/%s", lib.Platform, lib.Arch),
+					formatSize(lib.Size),
+					style.Render(status),
+				)
 			}
 
+			fmt.Println(tb.String())
 			return nil
 		},
 	}
@@ -221,6 +237,29 @@ func newListCmd() *cobra.Command {
 	cmd.Flags().StringVar(&listOS, "os", "", "Filter by OS (linux, darwin, windows). Omit to list all architectures")
 	cmd.Flags().StringVar(&listArch, "arch", "", "Filter by architecture (amd64, arm64). Omit to list all architectures")
 	return cmd
+}
+
+func compareStrings(a, b string) int {
+	if a < b {
+		return -1
+	}
+	if a > b {
+		return 1
+	}
+	return 0
+}
+
+func formatSize(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
 func newDownloadCmd() *cobra.Command {
@@ -232,7 +271,7 @@ func newDownloadCmd() *cobra.Command {
 			mgr := getManager()
 			ctx := context.Background()
 
-			manifest, err := mgr.FetchManifest(ctx)
+			manifest, _, err := mgr.FetchManifest(ctx)
 			if err != nil {
 				// Runtime error - don't show help
 				cmd.SilenceUsage = true
@@ -327,7 +366,7 @@ func newInstallCmd() *cobra.Command {
 			mgr := getManager()
 			ctx := context.Background()
 
-			manifest, err := mgr.FetchManifest(ctx)
+			manifest, _, err := mgr.FetchManifest(ctx)
 			if err != nil {
 				// Runtime error - don't show help
 				cmd.SilenceUsage = true

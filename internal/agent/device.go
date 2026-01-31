@@ -75,7 +75,7 @@ func DownloadOrFindAccelerator() (string, error) {
 	ctx := context.Background()
 
 	// Fetch manifest (auto-syncs if not cached)
-	manifest, err := depsMgr.FetchManifest(ctx)
+	manifest, _, err := depsMgr.FetchManifest(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch manifest: %w", err)
 	}
