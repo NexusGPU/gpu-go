@@ -398,13 +398,19 @@ func (m *Manager) DownloadLibrary(ctx context.Context, lib Library, progressFn f
 	destPath := filepath.Join(cacheDir, lib.Name)
 	tmpPath := destPath + ".tmp"
 
-	// Check if already downloaded with correct hash (skip if SHA256 is empty)
-	if lib.SHA256 != "" && m.VerifyLibrary(destPath, lib.SHA256) {
-		// Update downloaded manifest even if file exists (to ensure it's tracked)
-		if err := m.updateDownloadedManifest(lib); err != nil {
-			klog.Warningf("Failed to update downloaded manifest: %v", err)
+	// Check if already downloaded
+	if info, err := os.Stat(destPath); err == nil {
+		// File exists - verify hash if available, otherwise trust it
+		if lib.SHA256 == "" || m.VerifyLibrary(destPath, lib.SHA256) {
+			// Update size from actual file
+			lib.Size = info.Size()
+			// Update downloaded manifest
+			if err := m.updateDownloadedManifest(lib); err != nil {
+				klog.Warningf("Failed to update downloaded manifest: %v", err)
+			}
+			return nil // Already downloaded
 		}
-		return nil // Already downloaded
+		// Hash mismatch - will re-download below
 	}
 
 	// Create request
@@ -471,6 +477,11 @@ func (m *Manager) DownloadLibrary(ctx context.Context, lib Library, progressFn f
 		return fmt.Errorf("failed to move file: %w", err)
 	}
 
+	// Update size if it was zero (discovered during download)
+	if lib.Size == 0 {
+		lib.Size = downloaded
+	}
+
 	// Update downloaded manifest
 	if err := m.updateDownloadedManifest(lib); err != nil {
 		klog.Warningf("Failed to update downloaded manifest: %v", err)
@@ -479,30 +490,22 @@ func (m *Manager) DownloadLibrary(ctx context.Context, lib Library, progressFn f
 	return nil
 }
 
-// InstallLibrary installs a downloaded library to the lib directory
+// InstallLibrary installs a downloaded library (marks it as installed)
 func (m *Manager) InstallLibrary(lib Library) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	cacheDir := m.paths.CacheDir()
-	libDir := m.paths.LibDir()
-
-	// Ensure lib directory exists
-	if err := os.MkdirAll(libDir, 0755); err != nil {
-		return fmt.Errorf("failed to create lib directory: %w", err)
-	}
-
 	srcPath := filepath.Join(cacheDir, lib.Name)
-	destPath := filepath.Join(libDir, lib.Name)
 
-	// Copy file (don't move, keep in cache)
-	if err := copyFile(srcPath, destPath); err != nil {
-		return fmt.Errorf("failed to install library: %w", err)
+	// Verify file exists in cache
+	if _, err := os.Stat(srcPath); err != nil {
+		return fmt.Errorf("library not found in cache: %w", err)
 	}
 
-	// Make executable on Unix
+	// Make executable on Unix (in cache directly)
 	if runtime.GOOS != "windows" {
-		if err := os.Chmod(destPath, 0755); err != nil {
+		if err := os.Chmod(srcPath, 0755); err != nil {
 			return fmt.Errorf("failed to set permissions: %w", err)
 		}
 	}
@@ -578,9 +581,9 @@ func (m *Manager) CheckUpdates(ctx context.Context) ([]Library, error) {
 	return updates, nil
 }
 
-// GetLibraryPath returns the path to an installed library
+// GetLibraryPath returns the path to an installed library (in cache)
 func (m *Manager) GetLibraryPath(name string) string {
-	return filepath.Join(m.paths.LibDir(), name)
+	return filepath.Join(m.paths.CacheDir(), name)
 }
 
 // CleanCache removes all cached downloads
@@ -705,24 +708,6 @@ func (m *Manager) updateDownloadedManifest(lib Library) error {
 	}
 
 	return os.WriteFile(manifestPath, data, 0644)
-}
-
-// copyFile copies a file from src to dst
-func copyFile(src, dst string) error {
-	srcFile, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = srcFile.Close() }()
-
-	dstFile, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = dstFile.Close() }()
-
-	_, err = io.Copy(dstFile, srcFile)
-	return err
 }
 
 // VGPULibraries returns the standard vGPU library names for the current platform

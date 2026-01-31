@@ -6,83 +6,80 @@ import * as https from 'https';
 import * as http from 'http';
 import { exec as execCallback } from 'child_process';
 import { promisify } from 'util';
+import { Logger } from '../logger';
 
 const mkdir = promisify(fs.mkdir);
 const chmod = promisify(fs.chmod);
 const access = promisify(fs.access);
 const exec = promisify(execCallback);
+const writeFile = promisify(fs.writeFile);
 
 export interface DownloadOptions {
     baseUrl: string;
     version: string;
-    targetDir: string;
+}
+
+interface PlatformInfo {
+    platform: string;
+    arch: string;
+    ext: string;
 }
 
 export class CLIDownloader {
-    private context: vscode.ExtensionContext;
-
-    constructor(context: vscode.ExtensionContext) {
-        this.context = context;
-    }
+    constructor(private context: vscode.ExtensionContext) { }
 
     /**
-     * Detect the current platform and architecture
-     * Returns platform-arch string like 'darwin-arm64', 'linux-amd64', 'windows-amd64'
+     * Detect the current platform and architecture for binary selection.
      */
-    private detectPlatformArch(): { platform: string; arch: string; ext: string } {
-        const platform = os.platform();
-        const arch = os.arch();
-
-        // Map Node.js arch to common naming conventions
+    private detectPlatformArch(): PlatformInfo {
+        const platformMap: Record<string, string> = {
+            'win32': 'windows',
+            'darwin': 'darwin',
+            'linux': 'linux'
+        };
         const archMap: Record<string, string> = {
             'x64': 'amd64',
             'arm64': 'arm64',
-            'arm': 'arm',
             'ia32': '386'
         };
-
-        // Map Node.js platform to common naming conventions
-        const platformMap: Record<string, string> = {
-            'darwin': 'darwin',
-            'linux': 'linux',
-            'win32': 'windows'
-        };
-
-        const mappedPlatform = platformMap[platform] || platform;
-        const mappedArch = archMap[arch] || arch;
-        const ext = platform === 'win32' ? '.exe' : '';
+        const platform = os.platform();
 
         return {
-            platform: mappedPlatform,
-            arch: mappedArch,
-            ext
+            platform: platformMap[platform] || platform,
+            arch: archMap[os.arch()] || os.arch(),
+            ext: platform === 'win32' ? '.exe' : ''
         };
     }
 
     /**
-     * Get the CLI binary name based on platform
+     * Get the cache directory for CLI binaries.
+     * Uses ~/.gpugo/cache for cross-instance sharing.
      */
-    private getCliBinaryName(): string {
-        const { platform, arch, ext } = this.detectPlatformArch();
-        return `ggo-${platform}-${arch}${ext}`;
+    private getCacheDir(): string {
+        return path.join(os.homedir(), '.gpugo', 'cache');
     }
 
     /**
-     * Get the local path where the CLI should be stored
+     * Get the full path to the CLI binary.
      */
     getCliPath(): string {
         const { ext } = this.detectPlatformArch();
-        const binaryName = `ggo${ext}`;
-        return path.join(this.context.globalStorageUri.fsPath, 'bin', binaryName);
+        return path.join(this.getCacheDir(), `ggo${ext}`);
     }
 
     /**
-     * Check if CLI is already downloaded
+     * Get the path to the version file.
+     */
+    private getVersionPath(): string {
+        return path.join(this.getCacheDir(), 'version');
+    }
+
+    /**
+     * Check if CLI binary is already downloaded and executable.
      */
     async isCliDownloaded(): Promise<boolean> {
-        const cliPath = this.getCliPath();
         try {
-            await access(cliPath, fs.constants.X_OK);
+            await access(this.getCliPath(), fs.constants.X_OK);
             return true;
         } catch {
             return false;
@@ -90,7 +87,7 @@ export class CLIDownloader {
     }
 
     /**
-     * Download file from URL
+     * Download a file from URL to target path, following redirects.
      */
     private downloadFile(url: string, targetPath: string): Promise<void> {
         return new Promise((resolve, reject) => {
@@ -101,14 +98,14 @@ export class CLIDownloader {
                 if (response.statusCode === 301 || response.statusCode === 302) {
                     const redirectUrl = response.headers.location;
                     if (redirectUrl) {
-                        this.downloadFile(redirectUrl, targetPath).then(resolve).catch(reject);
-                        return;
+                        return this.downloadFile(redirectUrl, targetPath)
+                            .then(resolve)
+                            .catch(reject);
                     }
                 }
 
                 if (response.statusCode !== 200) {
-                    reject(new Error(`Failed to download: HTTP ${response.statusCode}`));
-                    return;
+                    return reject(new Error(`Failed to download: HTTP ${response.statusCode}`));
                 }
 
                 const fileStream = fs.createWriteStream(targetPath);
@@ -120,161 +117,131 @@ export class CLIDownloader {
                 });
 
                 fileStream.on('error', (err) => {
-                    fs.unlink(targetPath, () => { });
+                    fs.unlink(targetPath, () => { /* ignore cleanup errors */ });
                     reject(err);
                 });
-            }).on('error', (err) => {
-                reject(err);
-            });
+            }).on('error', reject);
         });
     }
 
     /**
-     * Download and install the CLI binary
+     * Download and install the CLI binary.
      */
     async downloadCli(options?: Partial<DownloadOptions>): Promise<string> {
         const config = vscode.workspace.getConfiguration('gpugo');
-        const baseUrl = options?.baseUrl || config.get<string>('cliDownloadUrl', 'https://github.com/NexusGPU/gpu-go/releases/latest/download');
+        const baseUrl = options?.baseUrl || config.get<string>(
+            'cliDownloadUrl',
+            'https://github.com/NexusGPU/gpu-go/releases/latest/download'
+        );
         const version = options?.version || config.get<string>('cliVersion', 'latest');
 
-        const { platform, arch } = this.detectPlatformArch();
-        const binaryName = this.getCliBinaryName();
+        const { platform, arch, ext } = this.detectPlatformArch();
+        const binaryName = `ggo-${platform}-${arch}${ext}`;
         const cliPath = this.getCliPath();
-        const binDir = path.dirname(cliPath);
 
-        // Construct download URL
-        let downloadUrl: string;
-        if (version === 'latest') {
-            downloadUrl = `${baseUrl}/${binaryName}`;
-        } else {
-            // For specific versions, adjust URL pattern as needed
-            downloadUrl = `${baseUrl.replace('/latest/', `/${version}/`)}/${binaryName}`;
-        }
+        // Build download URL
+        const downloadUrl = version === 'latest'
+            ? `${baseUrl}/${binaryName}`
+            : `${baseUrl.replace('/latest', `/${version}`)}/${binaryName}`;
 
-        console.log(`Downloading CLI from: ${downloadUrl}`);
-        console.log(`Platform: ${platform}, Arch: ${arch}`);
-        console.log(`Target path: ${cliPath}`);
+        Logger.log(`Downloading CLI from: ${downloadUrl}`);
+        Logger.log(`Target path: ${cliPath}`);
+        Logger.log(`Platform: ${platform}, Arch: ${arch}`);
 
         try {
-            // Create bin directory if it doesn't exist
-            await mkdir(binDir, { recursive: true });
+            // Ensure cache directory exists
+            await mkdir(path.dirname(cliPath), { recursive: true });
 
-            // Download the binary
+            // Download with progress notification
             await vscode.window.withProgress({
                 location: vscode.ProgressLocation.Notification,
-                title: "GPU Go",
+                title: 'GPU Go',
                 cancellable: false
             }, async (progress) => {
-                progress.report({ message: "Downloading GPU Go CLI..." });
+                progress.report({ message: `Downloading CLI (${version})...` });
                 await this.downloadFile(downloadUrl, cliPath);
-                progress.report({ message: "Setting permissions..." });
+                progress.report({ message: 'Setting permissions...' });
             });
 
-            // Make the binary executable (Unix-like systems)
+            // Make executable on Unix systems
             if (platform !== 'windows') {
                 await chmod(cliPath, 0o755);
             }
 
-            console.log(`CLI downloaded successfully to: ${cliPath}`);
+            // Record version for future reference
+            await writeFile(this.getVersionPath(), version, 'utf8');
+
+            Logger.log(`CLI downloaded successfully to: ${cliPath}`);
+            vscode.window.showInformationMessage('GPU Go CLI downloaded successfully.');
             return cliPath;
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            console.error('Failed to download CLI:', errorMessage);
-            throw new Error(`Failed to download GPU Go CLI: ${errorMessage}`);
-        }
-    }
+            const userMessage = `Failed to download GPU Go CLI: ${errorMessage}`;
+            Logger.error('CLI download failed:', error);
 
-    /**
-     * Ensure CLI is available - download if needed
-     */
-    async ensureCliAvailable(): Promise<string> {
-        const config = vscode.workspace.getConfiguration('gpugo');
-        const customPath = config.get<string>('cliPath', '');
-
-        // Check environment variable first (useful for debugging/testing)
-        const envCliPath = process.env.GPUGO_CLI_PATH;
-        if (envCliPath) {
-            console.log(`Using CLI path from env GPUGO_CLI_PATH: ${envCliPath}`);
-            return envCliPath;
-        }
-
-        // Check if CLI download should be skipped (e.g., during tests)
-        const skipDownload = process.env.GPUGO_SKIP_CLI_DOWNLOAD === 'true';
-        const autoDownload = skipDownload ? false : config.get<boolean>('autoDownloadCli', true);
-
-        // If user specified a custom path, use that
-        if (customPath) {
-            console.log(`Using custom CLI path: ${customPath}`);
-            return customPath;
-        }
-
-        // Check if CLI is already downloaded
-        const isDownloaded = await this.isCliDownloaded();
-        if (isDownloaded) {
-            console.log('CLI already downloaded');
-            return this.getCliPath();
-        }
-
-        // Try to find ggo in PATH
-        try {
-            await exec('ggo --version');
-            console.log('CLI found in PATH');
-            return 'ggo';
-        } catch {
-            console.log('CLI not found in PATH');
-        }
-
-        // Auto-download if enabled
-        if (autoDownload) {
-            try {
-                const cliPath = await this.downloadCli();
-                vscode.window.showInformationMessage('GPU Go CLI downloaded successfully!');
-                return cliPath;
-            } catch (error) {
-                const errorMessage = error instanceof Error ? error.message : String(error);
-                console.error('Failed to download CLI:', errorMessage);
-
-                // Show non-blocking error message
-                // Don't await the response to avoid blocking extension activation
-                vscode.window.showErrorMessage(
-                    `Failed to download GPU Go CLI: ${errorMessage}. Configure manually in settings.`,
-                    'Open Settings'
-                ).then(action => {
-                    if (action === 'Open Settings') {
-                        vscode.commands.executeCommand('workbench.action.openSettings', 'gpugo.cliPath');
-                    }
-                });
-
-                throw error;
-            }
-        } else {
-            // Show non-blocking warning
-            vscode.window.showWarningMessage(
-                'GPU Go CLI not found. Please download or configure manually.',
-                'Download',
-                'Open Settings'
-            ).then(action => {
-                if (action === 'Download') {
-                    this.downloadCli().catch(console.error);
-                } else if (action === 'Open Settings') {
+            vscode.window.showErrorMessage(userMessage, 'Open Settings').then(selection => {
+                if (selection === 'Open Settings') {
                     vscode.commands.executeCommand('workbench.action.openSettings', 'gpugo.cliPath');
                 }
             });
 
-            throw new Error('CLI not available');
+            throw new Error(userMessage);
         }
     }
 
     /**
-     * Manually trigger CLI download (can be exposed as a command)
+     * Ensure CLI is available - check custom path, PATH, cache, or download.
+     *
+     * Resolution order:
+     * 1. Custom path from settings (gpugo.cliPath)
+     * 2. 'ggo' in system PATH
+     * 3. Previously downloaded binary in cache
+     * 4. Auto-download (if enabled)
      */
-    async manualDownload(): Promise<void> {
-        try {
-            const cliPath = await this.downloadCli();
-            vscode.window.showInformationMessage(`GPU Go CLI downloaded to: ${cliPath}`);
-        } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            vscode.window.showErrorMessage(`Failed to download CLI: ${errorMessage}`);
+    async ensureCliAvailable(): Promise<string> {
+        const config = vscode.workspace.getConfiguration('gpugo');
+        const customPath = config.get<string>('cliPath');
+
+        // 1. Custom Path (User Setting)
+        if (customPath) {
+            Logger.log(`Using custom CLI path: ${customPath}`);
+            return customPath;
         }
+
+        // 2. Check system PATH
+        try {
+            await exec('ggo --version');
+            Logger.log('CLI found in system PATH');
+            return 'ggo';
+        } catch {
+            Logger.log('CLI not found in PATH, checking cache...');
+        }
+
+        // 3. Check existing download in cache
+        if (await this.isCliDownloaded()) {
+            const cliPath = this.getCliPath();
+            Logger.log(`Using cached CLI at: ${cliPath}`);
+            return cliPath;
+        }
+
+        // 4. Auto-download if enabled
+        if (config.get<boolean>('autoDownloadCli', true)) {
+            Logger.log('Auto-downloading CLI...');
+            return this.downloadCli();
+        }
+
+        // 5. CLI not available - prompt user
+        const message = 'GPU Go CLI not found. Please download or configure manually.';
+        Logger.log(message);
+
+        vscode.window.showWarningMessage(message, 'Download', 'Open Settings').then(selection => {
+            if (selection === 'Download') {
+                this.downloadCli().catch(err => Logger.error('Manual download failed:', err));
+            } else if (selection === 'Open Settings') {
+                vscode.commands.executeCommand('workbench.action.openSettings', 'gpugo.cliPath');
+            }
+        });
+
+        throw new Error(message);
     }
 }

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { CLI, Agent, GPU } from '../cli/cli';
 import { AuthManager } from '../auth/authManager';
 import { PropertyItem, createLoginItem, createEmptyItem, createActionItem, getStatusIcon, getStatusContext } from './treeUtils';
+import { Logger } from '../logger';
 
 export class AgentTreeItem extends vscode.TreeItem {
     constructor(
@@ -9,10 +10,10 @@ export class AgentTreeItem extends vscode.TreeItem {
         public readonly collapsibleState: vscode.TreeItemCollapsibleState
     ) {
         super(agent.hostname, collapsibleState);
-        
+
         this.tooltip = `Host: ${agent.hostname}\nStatus: ${agent.status}\nOS: ${agent.os}/${agent.arch}`;
         this.description = `${agent.status} - ${agent.os}`;
-        
+
         // Set icon and context based on status
         this.iconPath = getStatusIcon(agent.status, 'agent');
         this.contextValue = getStatusContext(agent.status, 'agent');
@@ -25,12 +26,12 @@ export class GPUTreeItem extends vscode.TreeItem {
         public readonly deviceId: string
     ) {
         super(gpu.model, vscode.TreeItemCollapsibleState.None);
-        
+
         const vramGb = (gpu.vramMb / 1024).toFixed(1);
         this.description = `${vramGb} GB`;
         this.tooltip = `${gpu.vendor} ${gpu.model}\nVRAM: ${vramGb} GB\nDriver: ${gpu.driverVersion || 'N/A'}\nCUDA: ${gpu.cudaVersion || 'N/A'}`;
         this.iconPath = new vscode.ThemeIcon('circuit-board', new vscode.ThemeColor('charts.yellow'));
-        
+
         // Make clickable to open details
         this.command = {
             command: 'gpugo.openDeviceDetails',
@@ -72,8 +73,10 @@ export class DevicesTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
         if (!element) {
             // Root level - show agents/hosts
             try {
+                Logger.log('Fetching agents...');
                 this.agents = await this.cli.agentList();
-                
+                Logger.log(`Found ${this.agents.length} agents`);
+
                 if (this.agents.length === 0) {
                     // Show placeholder with instructions
                     return [
@@ -82,10 +85,11 @@ export class DevicesTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
                     ];
                 }
 
-                return this.agents.map(agent => 
+                return this.agents.map(agent =>
                     new AgentTreeItem(agent, vscode.TreeItemCollapsibleState.Collapsed)
                 );
-            } catch {
+            } catch (error) {
+                Logger.error('Error fetching agents:', error);
                 // If no agents, show helpful message
                 return [
                     createEmptyItem('No GPU devices found', 'Add GPU servers to get started'),
@@ -102,7 +106,7 @@ export class DevicesTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
             // Agent info
             items.push(new PropertyItem('Agent ID', agent.agentId.substring(0, 8) + '...'));
             items.push(new PropertyItem('OS', `${agent.os}/${agent.arch}`));
-            
+
             if (agent.networkIps && agent.networkIps.length > 0) {
                 items.push(new PropertyItem('IP', agent.networkIps[0]));
             }

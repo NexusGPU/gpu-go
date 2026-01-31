@@ -203,6 +203,10 @@ func newListCmd() *cobra.Command {
 						status = "Installed"
 						style = tui.DefaultStyles().Success
 						isInstalled = true
+						// Use installed size if API size is missing
+						if lib.Size == 0 && installedLib.Size > 0 {
+							lib.Size = installedLib.Size
+						}
 					} else if installedLib.Version != lib.Version {
 						status = fmt.Sprintf("Update: %s -> %s", installedLib.Version, lib.Version)
 						style = tui.DefaultStyles().Warning
@@ -216,6 +220,10 @@ func newListCmd() *cobra.Command {
 						if downloadedLib.Version == lib.Version && downloadedLib.Platform == lib.Platform && downloadedLib.Arch == lib.Arch {
 							status = "Downloaded"
 							style = tui.DefaultStyles().Info
+							// Use downloaded size if API size is missing
+							if lib.Size == 0 && downloadedLib.Size > 0 {
+								lib.Size = downloadedLib.Size
+							}
 						}
 					}
 				}

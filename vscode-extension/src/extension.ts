@@ -8,6 +8,7 @@ import { DeviceDetailPanel } from './views/deviceDetailPanel';
 import { CreateWorkerPanel } from './views/createWorkerPanel';
 import { CreateStudioPanel } from './views/createStudioPanel';
 import { CLI } from './cli/cli';
+import { Logger } from './logger';
 
 let authManager: AuthManager;
 let studioProvider: StudioTreeProvider;
@@ -16,7 +17,9 @@ let devicesProvider: DevicesTreeProvider;
 let refreshInterval: NodeJS.Timeout | undefined;
 
 export async function activate(context: vscode.ExtensionContext) {
-    console.log('GPU Go extension is now active');
+    // Initialize Logger
+    Logger.initialize(context, 'GPU Go');
+    Logger.log('GPU Go extension is now active');
 
     // Initialize CLI wrapper
     const cli = new CLI(context);
@@ -25,7 +28,7 @@ export async function activate(context: vscode.ExtensionContext) {
     try {
         await cli.initialize();
     } catch (error) {
-        console.error('Failed to initialize CLI:', error);
+        Logger.error('Failed to initialize CLI:', error);
         vscode.window.showWarningMessage(
             'GPU Go CLI could not be initialized. Some features may not work.',
             'Open Settings'
@@ -267,7 +270,7 @@ function registerCommands(context: vscode.ExtensionContext, cli: CLI) {
         vscode.commands.registerCommand('gpugo.downloadCli', async () => {
             const { CLIDownloader } = await import('./cli/downloader');
             const downloader = new CLIDownloader(context);
-            await downloader.manualDownload();
+            await downloader.downloadCli();
         })
     );
 }

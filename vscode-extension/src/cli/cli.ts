@@ -3,8 +3,12 @@ import { spawn } from 'child_process';
 import * as path from 'path';
 import * as os from 'os';
 import { CLIDownloader } from './downloader';
+import { Logger } from '../logger';
 
-// JSON response types from CLI
+// =============================================================================
+// JSON Response Types (snake_case from CLI)
+// =============================================================================
+
 interface ListResponse<T> {
     items: T[];
     total: number;
@@ -20,8 +24,7 @@ interface ActionResponse {
     id?: string;
 }
 
-// Studio types (from JSON output)
-export interface StudioEnvJSON {
+interface StudioEnvJSON {
     name: string;
     id: string;
     mode: string;
@@ -31,8 +34,67 @@ export interface StudioEnvJSON {
     ssh_port?: number;
     ssh_user?: string;
     gpu_worker_url?: string;
+}
+
+interface WorkerJSON {
+    worker_id: string;
+    agent_id?: string;
+    name: string;
+    status: string;
+    gpu_ids?: string[];
+    listen_port: number;
+    enabled: boolean;
+    is_default?: boolean;
+    connections?: ConnectionJSON[];
     created_at?: string;
 }
+
+interface ConnectionJSON {
+    client_ip: string;
+    connected_at: string;
+}
+
+interface ShareJSON {
+    share_id: string;
+    short_code: string;
+    short_link: string;
+    worker_id: string;
+    hardware_vendor: string;
+    connection_url: string;
+    expires_at?: string;
+    max_uses?: number;
+    used_count: number;
+    created_at: string;
+}
+
+interface GPUJSON {
+    gpu_id: string;
+    vendor: string;
+    model: string;
+    vram_mb: number;
+    driver_version?: string;
+    cuda_version?: string;
+}
+
+interface AuthStatusJSON {
+    logged_in: boolean;
+    token?: string;
+    created_at?: string;
+    expires_at?: string;
+}
+
+interface AgentStatusJSON {
+    registered: boolean;
+    agent_id?: string;
+    config_version?: number;
+    server_url?: string;
+    gpus?: GPUJSON[];
+    workers?: WorkerJSON[];
+}
+
+// =============================================================================
+// Domain Types (camelCase for TypeScript)
+// =============================================================================
 
 export interface StudioEnv {
     name: string;
@@ -44,36 +106,7 @@ export interface StudioEnv {
     sshPort?: number;
     sshUser?: string;
     gpuWorkerUrl?: string;
-    /** Mapped ports from container (host:container format) */
     ports?: string[];
-}
-
-export interface StudioImageJSON {
-    name: string;
-    tag: string;
-    description: string;
-    features: string[];
-    size: string;
-    registry: string;
-}
-
-export interface StudioBackendJSON {
-    name: string;
-    mode: string;
-}
-
-// Worker types (from JSON output)
-export interface WorkerJSON {
-    worker_id: string;
-    agent_id: string;
-    name: string;
-    status: string;
-    gpu_ids: string[];
-    listen_port: number;
-    enabled: boolean;
-    is_default?: boolean;
-    connections?: ConnectionJSON[];
-    created_at?: string;
 }
 
 export interface Worker {
@@ -89,28 +122,9 @@ export interface Worker {
     createdAt?: string;
 }
 
-export interface ConnectionJSON {
-    client_ip: string;
-    connected_at: string;
-}
-
 export interface Connection {
     clientIp: string;
     connectedAt: string;
-}
-
-// Agent types
-export interface AgentJSON {
-    agent_id: string;
-    hostname: string;
-    status: string;
-    os: string;
-    arch: string;
-    network_ips?: string[];
-    gpus?: GPUJSON[];
-    workers?: WorkerJSON[];
-    last_seen_at?: string;
-    created_at?: string;
 }
 
 export interface Agent {
@@ -125,15 +139,6 @@ export interface Agent {
     lastSeenAt: string;
 }
 
-export interface GPUJSON {
-    gpu_id: string;
-    vendor: string;
-    model: string;
-    vram_mb: number;
-    driver_version?: string;
-    cuda_version?: string;
-}
-
 export interface GPU {
     gpuId: string;
     vendor: string;
@@ -143,33 +148,11 @@ export interface GPU {
     cudaVersion?: string;
 }
 
-// Auth types
-export interface AuthStatusJSON {
-    logged_in: boolean;
-    token?: string;
-    created_at?: string;
-    expires_at?: string;
-}
-
 export interface AuthStatus {
     loggedIn: boolean;
     token?: string;
     createdAt?: string;
     expiresAt?: string;
-}
-
-// Share types
-export interface ShareJSON {
-    share_id: string;
-    short_code: string;
-    short_link: string;
-    worker_id: string;
-    hardware_vendor: string;
-    connection_url: string;
-    expires_at?: string;
-    max_uses?: number;
-    used_count: number;
-    created_at: string;
 }
 
 export interface Share {
@@ -185,113 +168,196 @@ export interface Share {
     createdAt: string;
 }
 
+export interface AgentStatus {
+    registered: boolean;
+    agentId?: string;
+    configVersion?: number;
+    serverUrl?: string;
+    gpus?: GPU[];
+    workers?: Worker[];
+}
+
+// =============================================================================
+// Options Types
+// =============================================================================
+
+export interface StudioCreateOptions {
+    mode?: string;
+    image?: string;
+    gpuUrl?: string;
+    ports?: string[];
+    volumes?: string[];
+    envs?: string[];
+}
+
+export interface WorkerCreateOptions {
+    agentId: string;
+    name: string;
+    gpuIds: string[];
+    port?: number;
+    enabled?: boolean;
+}
+
+export interface WorkerUpdateOptions {
+    name?: string;
+    gpuIds?: string[];
+    port?: number;
+    enabled?: boolean;
+}
+
+export interface ShareCreateOptions {
+    expiresIn?: string;
+    maxUses?: number;
+}
+
+// =============================================================================
+// CLI Class
+// =============================================================================
+
 export class CLI {
-    private context: vscode.ExtensionContext;
     private downloader: CLIDownloader;
     private cliPath: string | null = null;
 
-    constructor(context: vscode.ExtensionContext) {
-        this.context = context;
+    constructor(private context: vscode.ExtensionContext) {
         this.downloader = new CLIDownloader(context);
     }
 
-    /**
-     * Initialize CLI - ensure it's available
-     */
     async initialize(): Promise<void> {
         try {
             this.cliPath = await this.downloader.ensureCliAvailable();
-            console.log(`CLI initialized at: ${this.cliPath}`);
+            Logger.log(`CLI initialized at: ${this.cliPath}`);
         } catch (error) {
-            console.error('Failed to initialize CLI:', error);
-            // Set to default and hope it's in PATH
-            this.cliPath = 'ggo';
+            Logger.error('Failed to initialize CLI:', error);
+            this.cliPath = null;
+
+            vscode.window.showErrorMessage(
+                'GPU Go CLI initialization failed. Please check your settings or install manually.',
+                'Settings',
+                'Retry'
+            ).then(selection => {
+                if (selection === 'Settings') {
+                    vscode.commands.executeCommand('workbench.action.openSettings', 'gpugo.cliPath');
+                } else if (selection === 'Retry') {
+                    this.initialize();
+                }
+            });
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Internal Helpers
+    // -------------------------------------------------------------------------
 
     private getCliPath(): string {
         if (this.cliPath) {
             return this.cliPath;
         }
-        
         const config = vscode.workspace.getConfiguration('gpugo');
-        const customPath = config.get<string>('cliPath', '');
-        if (customPath) {
-            return customPath;
+        return config.get<string>('cliPath') || 'ggo';
+    }
+
+    getServerUrl(): string {
+        if (process.env.GPU_GO_ENDPOINT) {
+            return process.env.GPU_GO_ENDPOINT;
         }
-        return 'ggo';
+        return vscode.workspace.getConfiguration('gpugo').get<string>('serverUrl', 'https://go.gpu.tf');
+    }
+
+    getTokenPath(): string {
+        return path.join(os.homedir(), '.gpugo', 'token.json');
     }
 
     private async execCommand(args: string[]): Promise<string> {
         const cliPath = this.getCliPath();
         const serverUrl = this.getServerUrl();
-        
-        // Add server URL to commands that need it
+
+        // Inject server URL for commands that need it
         const serverCommands = ['worker', 'share', 'agent'];
-        const needsServer = args.length > 0 && serverCommands.includes(args[0]);
-        const finalArgs = needsServer ? [...args, '--server', serverUrl] : args;
-        
-        // Get user token: prioritize GPU_GO_TOKEN env var, then fall back to token file
-        let userToken = process.env.GPU_GO_TOKEN || '';
+        const finalArgs = (args.length > 0 && serverCommands.includes(args[0]))
+            ? [...args, '--server', serverUrl]
+            : args;
+
+        Logger.log(`Executing: ${cliPath} ${finalArgs.join(' ')}`);
+
+        // Resolve token
+        let userToken = process.env.GPU_GO_TOKEN;
         if (!userToken) {
             try {
                 const fs = await import('fs/promises');
-                const tokenContent = await fs.readFile(this.getTokenPath(), 'utf-8');
-                const tokenConfig = JSON.parse(tokenContent);
-                userToken = tokenConfig.token || '';
+                const tokenData = JSON.parse(await fs.readFile(this.getTokenPath(), 'utf-8'));
+                userToken = tokenData.token;
             } catch {
-                // Token file doesn't exist or is invalid
+                // Token file doesn't exist or is invalid - continue without token
             }
         }
-        
+
         return new Promise((resolve, reject) => {
-            const childProcess = spawn(cliPath, finalArgs, {
-                env: { 
-                    ...process.env,
-                    ...(userToken ? { GPU_GO_TOKEN: userToken } : {})
-                },
+            const child = spawn(cliPath, finalArgs, {
+                env: { ...process.env, ...(userToken ? { GPU_GO_TOKEN: userToken } : {}) },
                 shell: true
             });
 
             let stdout = '';
             let stderr = '';
 
-            childProcess.stdout.on('data', (data: Buffer) => {
+            child.stdout.on('data', (data: Buffer) => {
                 stdout += data.toString();
             });
 
-            childProcess.stderr.on('data', (data: Buffer) => {
+            child.stderr.on('data', (data: Buffer) => {
                 stderr += data.toString();
             });
 
-            childProcess.on('close', (code: number | null) => {
+            child.on('close', (code) => {
                 if (code === 0) {
+                    Logger.log(`Command success: ${args[0]}`);
                     resolve(stdout);
                 } else {
-                    reject(new Error(stderr || `Command failed with code ${code}`));
+                    const msg = stderr || `Command failed with code ${code}`;
+                    Logger.error(`Command failed (code ${code}):`, msg);
+
+                    // Special handling for CLI not found
+                    if (code === 127) {
+                        vscode.window.showErrorMessage(
+                            `GPU Go CLI not found at '${cliPath}'. Please check your settings.`,
+                            'Settings'
+                        ).then(s => {
+                            if (s === 'Settings') {
+                                vscode.commands.executeCommand('workbench.action.openSettings', 'gpugo.cliPath');
+                            }
+                        });
+                    }
+
+                    reject(new Error(msg));
                 }
             });
 
-            childProcess.on('error', (err: Error) => {
-                reject(err);
-            });
+            child.on('error', reject);
         });
     }
 
-    /**
-     * Execute a command with JSON output format
-     */
     private async execCommandJSON<T>(args: string[]): Promise<T> {
-        const output = await this.execCommand([...args, '-o', 'json']);
         try {
-        return JSON.parse(output) as T;
+            const output = await this.execCommand([...args, '-o', 'json']);
+            return JSON.parse(output) as T;
         } catch (error) {
-            console.error('Failed to parse JSON output:', output);
-            throw new Error(`Failed to parse CLI output as JSON: ${error}`);
+            Logger.error('JSON command failed:', error);
+            throw error;
         }
     }
 
-    // ==================== Auth commands ====================
+    private async execAction(args: string[], fallbackMsg: string, id: string): Promise<ActionResponse> {
+        try {
+            return await this.execCommandJSON<ActionResponse>(args);
+        } catch {
+            await this.execCommand(args);
+            return { success: true, message: fallbackMsg, id };
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Auth Commands
+    // -------------------------------------------------------------------------
 
     async login(token: string): Promise<void> {
         await this.execCommand(['login', '--token', token]);
@@ -303,51 +369,43 @@ export class CLI {
 
     async authStatus(): Promise<AuthStatus> {
         try {
-            // Try JSON output first
-            const result = await this.execCommandJSON<AuthStatusJSON>(['auth', 'status']);
+            const res = await this.execCommandJSON<AuthStatusJSON>(['auth', 'status']);
             return {
-                loggedIn: result.logged_in,
-                token: result.token,
-                createdAt: result.created_at,
-                expiresAt: result.expires_at
+                loggedIn: res.logged_in,
+                token: res.token,
+                createdAt: res.created_at,
+                expiresAt: res.expires_at
             };
         } catch {
-            // Fallback: check token file exists
             return { loggedIn: await this.isLoggedIn() };
         }
     }
 
-    // Check if user is logged in by checking token file
     async isLoggedIn(): Promise<boolean> {
-        const tokenPath = this.getTokenPath();
         try {
-            const fs = await import('fs/promises');
-            await fs.access(tokenPath);
+            await (await import('fs/promises')).access(this.getTokenPath());
             return true;
         } catch {
             return false;
         }
     }
 
-    getTokenPath(): string {
-        const homeDir = os.homedir();
-        return path.join(homeDir, '.gpugo', 'token.json');
-    }
-
-    // ==================== Studio commands ====================
+    // -------------------------------------------------------------------------
+    // Studio Commands
+    // -------------------------------------------------------------------------
 
     async studioList(): Promise<StudioEnv[]> {
         try {
-            const result = await this.execCommandJSON<ListResponse<StudioEnvJSON>>(['studio', 'list']);
-            return result.items.map(env => this.convertStudioEnv(env));
+            const res = await this.execCommandJSON<ListResponse<StudioEnvJSON>>(['studio', 'list']);
+            return res.items.map(env => this.convertStudioEnv(env));
         } catch (error) {
-            console.error('Failed to list studios:', error);
+            Logger.error('Failed to list studios', error);
             return [];
         }
     }
 
     private convertStudioEnv(json: StudioEnvJSON): StudioEnv {
-                const env: StudioEnv = {
+        const env: StudioEnv = {
             name: json.name,
             id: json.id,
             mode: json.mode,
@@ -357,59 +415,47 @@ export class CLI {
             sshPort: json.ssh_port,
             sshUser: json.ssh_user,
             gpuWorkerUrl: json.gpu_worker_url
-                };
-                
-                // Add default ports based on image type for running environments
-                if (env.status === 'running') {
-                    env.ports = this.getDefaultPortsForImage(env.image);
-                }
-                
+        };
+        if (env.status === 'running') {
+            env.ports = this.getDefaultPorts(env.image);
+        }
         return env;
     }
 
-    /**
-     * Get default ports based on image type
-     */
-    private getDefaultPortsForImage(image: string): string[] {
+    private getDefaultPorts(image: string): string[] {
         const ports: string[] = [];
-        const imageLower = image.toLowerCase();
-        
-        // Jupyter-based images
-        if (imageLower.includes('jupyter') || imageLower.includes('notebook')) {
+        const img = image.toLowerCase();
+
+        if (img.includes('jupyter') || img.includes('notebook')) {
             ports.push('8888:8888');
         }
-        // TensorFlow/PyTorch images often have TensorBoard
-        if (imageLower.includes('tensorflow') || imageLower.includes('torch') || imageLower.includes('pytorch')) {
-            if (!ports.includes('8888:8888')) { ports.push('8888:8888'); }
+        if (img.includes('tensorflow') || img.includes('torch') || img.includes('pytorch')) {
+            if (!ports.includes('8888:8888')) {
+                ports.push('8888:8888');
+            }
             ports.push('6006:6006');
         }
-        // RStudio images
-        if (imageLower.includes('rstudio') || imageLower.includes('rocker')) {
+        if (img.includes('rstudio') || img.includes('rocker')) {
             ports.push('8787:8787');
         }
-        // Spark images
-        if (imageLower.includes('spark')) {
+        if (img.includes('spark')) {
             ports.push('4040:4040');
         }
-        // TensorFusion images have standard ports
-        if (imageLower.includes('tensorfusion') || imageLower.includes('studio')) {
-            if (!ports.includes('8888:8888')) { ports.push('8888:8888'); }
-            if (!ports.includes('6006:6006')) { ports.push('6006:6006'); }
+        if (img.includes('tensorfusion') || img.includes('studio')) {
+            if (!ports.includes('8888:8888')) {
+                ports.push('8888:8888');
+            }
+            if (!ports.includes('6006:6006')) {
+                ports.push('6006:6006');
+            }
         }
-        
+
         return ports;
     }
 
-    async studioCreate(name: string, options: {
-        mode?: string;
-        image?: string;
-        gpuUrl?: string;
-        ports?: string[];
-        volumes?: string[];
-        envs?: string[];
-    }): Promise<StudioEnv | null> {
+    async studioCreate(name: string, options: StudioCreateOptions): Promise<StudioEnv | null> {
         const args = ['studio', 'create', name];
-        
+
         if (options.mode) {
             args.push('--mode', options.mode);
         }
@@ -419,63 +465,35 @@ export class CLI {
         if (options.gpuUrl) {
             args.push('--gpu-url', options.gpuUrl);
         }
-        if (options.ports) {
-            for (const port of options.ports) {
-                args.push('-p', port);
-            }
-        }
-        if (options.volumes) {
-            for (const vol of options.volumes) {
-                args.push('--volume', vol);
-            }
-        }
-        if (options.envs) {
-            for (const env of options.envs) {
-                args.push('-e', env);
-            }
-        }
+        options.ports?.forEach(p => args.push('-p', p));
+        options.volumes?.forEach(v => args.push('--volume', v));
+        options.envs?.forEach(e => args.push('-e', e));
 
         try {
-            const result = await this.execCommandJSON<StudioEnvJSON>(args);
-            return this.convertStudioEnv(result);
+            const res = await this.execCommandJSON<StudioEnvJSON>(args);
+            return this.convertStudioEnv(res);
         } catch {
-            // Fallback to non-JSON for backward compatibility
-        await this.execCommand(args);
+            await this.execCommand(args);
             return null;
         }
     }
 
     async studioStart(name: string): Promise<ActionResponse> {
-        try {
-            return await this.execCommandJSON<ActionResponse>(['studio', 'start', name]);
-        } catch {
-        await this.execCommand(['studio', 'start', name]);
-            return { success: true, message: 'Environment started', id: name };
-        }
+        return this.execAction(['studio', 'start', name], 'Environment started', name);
     }
 
     async studioStop(name: string): Promise<ActionResponse> {
-        try {
-            return await this.execCommandJSON<ActionResponse>(['studio', 'stop', name]);
-        } catch {
-        await this.execCommand(['studio', 'stop', name]);
-            return { success: true, message: 'Environment stopped', id: name };
-        }
+        return this.execAction(['studio', 'stop', name], 'Environment stopped', name);
     }
 
     async studioRemove(name: string): Promise<ActionResponse> {
-        try {
-            return await this.execCommandJSON<ActionResponse>(['studio', 'rm', name, '--force']);
-        } catch {
-            await this.execCommand(['studio', 'rm', name, '--force']);
-            return { success: true, message: 'Environment removed', id: name };
-        }
+        return this.execAction(['studio', 'rm', name, '--force'], 'Environment removed', name);
     }
 
     async studioBackends(): Promise<string[]> {
         try {
-            const result = await this.execCommandJSON<ListResponse<StudioBackendJSON>>(['studio', 'backends']);
-            return result.items.map(b => b.name);
+            const res = await this.execCommandJSON<ListResponse<{ name: string }>>(['studio', 'backends']);
+            return res.items.map(b => b.name);
         } catch {
             return [];
         }
@@ -483,8 +501,13 @@ export class CLI {
 
     async studioImages(): Promise<{ name: string; tag: string; description: string; features: string[] }[]> {
         try {
-            const result = await this.execCommandJSON<ListResponse<StudioImageJSON>>(['studio', 'images']);
-            return result.items.map(img => ({
+            const res = await this.execCommandJSON<ListResponse<{
+                name: string;
+                tag: string;
+                description: string;
+                features?: string[];
+            }>>(['studio', 'images']);
+            return res.items.map(img => ({
                 name: img.name,
                 tag: img.tag,
                 description: img.description,
@@ -495,14 +518,17 @@ export class CLI {
         }
     }
 
-    // ==================== Worker commands ====================
+    // -------------------------------------------------------------------------
+    // Worker Commands
+    // -------------------------------------------------------------------------
 
     async workerList(): Promise<Worker[]> {
         try {
-            const result = await this.execCommandJSON<ListResponse<WorkerJSON>>(['worker', 'list']);
-            return result.items.map(w => this.convertWorker(w));
+            const res = await this.execCommandJSON<ListResponse<WorkerJSON>>(['worker', 'list']);
+            return res.items.map(w => this.convertWorker(w));
         } catch (error) {
-            console.error('Failed to list workers:', error);
+            Logger.error('Failed to list workers', error);
+            vscode.window.showErrorMessage(`Failed to list workers: ${error instanceof Error ? error.message : error}`);
             return [];
         }
     }
@@ -527,26 +553,21 @@ export class CLI {
 
     async workerGet(workerId: string): Promise<Worker | null> {
         try {
-            const result = await this.execCommandJSON<DetailResponse<WorkerJSON>>(['worker', 'get', workerId]);
-            return this.convertWorker(result.item);
+            const res = await this.execCommandJSON<DetailResponse<WorkerJSON>>(['worker', 'get', workerId]);
+            return this.convertWorker(res.item);
         } catch {
             return null;
         }
     }
 
-    async workerCreate(options: {
-        agentId: string;
-        name: string;
-        gpuIds: string[];
-        port?: number;
-        enabled?: boolean;
-    }): Promise<ActionResponse> {
-        const args = ['worker', 'create', 
+    async workerCreate(options: WorkerCreateOptions): Promise<ActionResponse> {
+        const args = [
+            'worker', 'create',
             '--agent-id', options.agentId,
             '--name', options.name,
             '--gpu-ids', options.gpuIds.join(',')
         ];
-        
+
         if (options.port) {
             args.push('--port', String(options.port));
         }
@@ -554,17 +575,12 @@ export class CLI {
             args.push(options.enabled ? '--enabled' : '--disabled');
         }
 
-        return await this.execCommandJSON<ActionResponse>(args);
+        return this.execCommandJSON<ActionResponse>(args);
     }
 
-    async workerUpdate(workerId: string, options: {
-        name?: string;
-        gpuIds?: string[];
-        port?: number;
-        enabled?: boolean;
-    }): Promise<ActionResponse> {
+    async workerUpdate(workerId: string, options: WorkerUpdateOptions): Promise<ActionResponse> {
         const args = ['worker', 'update', workerId];
-        
+
         if (options.name) {
             args.push('--name', options.name);
         }
@@ -578,21 +594,22 @@ export class CLI {
             args.push(options.enabled ? '--enabled' : '--disabled');
         }
 
-        return await this.execCommandJSON<ActionResponse>(args);
+        return this.execCommandJSON<ActionResponse>(args);
     }
 
     async workerDelete(workerId: string): Promise<ActionResponse> {
-        return await this.execCommandJSON<ActionResponse>(['worker', 'delete', workerId, '--force']);
+        return this.execCommandJSON<ActionResponse>(['worker', 'delete', workerId, '--force']);
     }
 
-    // ==================== Share commands ====================
+    // -------------------------------------------------------------------------
+    // Share Commands
+    // -------------------------------------------------------------------------
 
     async shareList(): Promise<Share[]> {
         try {
-            const result = await this.execCommandJSON<ListResponse<ShareJSON>>(['share', 'list']);
-            return result.items.map(s => this.convertShare(s));
-        } catch (error) {
-            console.error('Failed to list shares:', error);
+            const res = await this.execCommandJSON<ListResponse<ShareJSON>>(['share', 'list']);
+            return res.items.map(s => this.convertShare(s));
+        } catch {
             return [];
         }
     }
@@ -612,12 +629,9 @@ export class CLI {
         };
     }
 
-    async shareCreate(workerId: string, options?: {
-        expiresIn?: string;
-        maxUses?: number;
-    }): Promise<Share | null> {
+    async shareCreate(workerId: string, options?: ShareCreateOptions): Promise<Share | null> {
         const args = ['share', 'create', '--worker-id', workerId];
-        
+
         if (options?.expiresIn) {
             args.push('--expires-in', options.expiresIn);
         }
@@ -626,37 +640,35 @@ export class CLI {
         }
 
         try {
-            const result = await this.execCommandJSON<ShareJSON>(args);
-            return this.convertShare(result);
-        } catch (error) {
-            console.error('Failed to create share:', error);
+            const res = await this.execCommandJSON<ShareJSON>(args);
+            return this.convertShare(res);
+        } catch {
             return null;
         }
     }
 
     async shareDelete(shareId: string): Promise<ActionResponse> {
-        return await this.execCommandJSON<ActionResponse>(['share', 'delete', shareId, '--force']);
+        return this.execCommandJSON<ActionResponse>(['share', 'delete', shareId, '--force']);
     }
 
-    // ==================== Agent/Device commands ====================
+    // -------------------------------------------------------------------------
+    // Agent Commands
+    // -------------------------------------------------------------------------
 
     async agentList(): Promise<Agent[]> {
-        // Note: This requires server-side support for listing agents
-        // For now, we try to get agent info through the worker list
-        // which includes agent information
         try {
+            // Aggregate agents from worker list
             const workers = await this.workerList();
-            
-            // Group workers by agent ID
             const agentMap = new Map<string, Agent>();
-            
+
             for (const worker of workers) {
-                if (!worker.agentId) { continue; }
-                
+                if (!worker.agentId) {
+                    continue;
+                }
                 if (!agentMap.has(worker.agentId)) {
                     agentMap.set(worker.agentId, {
                         agentId: worker.agentId,
-                        hostname: worker.agentId, // Will be updated if we get more info
+                        hostname: worker.agentId,
                         status: 'online',
                         os: '',
                         arch: '',
@@ -666,42 +678,24 @@ export class CLI {
                         lastSeenAt: ''
                     });
                 }
-                
-                const agent = agentMap.get(worker.agentId)!;
-                agent.workers.push(worker);
+                agentMap.get(worker.agentId)!.workers.push(worker);
             }
-            
+
             return Array.from(agentMap.values());
-        } catch (error) {
-            console.error('Failed to list agents:', error);
+        } catch {
             return [];
         }
     }
 
-    async agentStatus(): Promise<{
-        registered: boolean;
-        agentId?: string;
-        configVersion?: number;
-        serverUrl?: string;
-        gpus?: GPU[];
-        workers?: Worker[];
-    }> {
+    async agentStatus(): Promise<AgentStatus> {
         try {
-            const result = await this.execCommandJSON<{
-                registered: boolean;
-                agent_id?: string;
-                config_version?: number;
-                server_url?: string;
-                gpus?: GPUJSON[];
-                workers?: WorkerJSON[];
-            }>(['agent', 'status']);
-            
+            const res = await this.execCommandJSON<AgentStatusJSON>(['agent', 'status']);
             return {
-                registered: result.registered,
-                agentId: result.agent_id,
-                configVersion: result.config_version,
-                serverUrl: result.server_url,
-                gpus: result.gpus?.map(g => ({
+                registered: res.registered,
+                agentId: res.agent_id,
+                configVersion: res.config_version,
+                serverUrl: res.server_url,
+                gpus: res.gpus?.map(g => ({
                     gpuId: g.gpu_id,
                     vendor: g.vendor,
                     model: g.model,
@@ -709,38 +703,10 @@ export class CLI {
                     driverVersion: g.driver_version,
                     cudaVersion: g.cuda_version
                 })),
-                workers: result.workers?.map(w => this.convertWorker(w))
+                workers: res.workers?.map(w => this.convertWorker(w))
             };
         } catch {
             return { registered: false };
         }
-    }
-
-    // ==================== Helper methods ====================
-
-    // Helper to check CLI availability
-    async checkCliAvailable(): Promise<boolean> {
-        try {
-            await this.execCommand(['--version']);
-            return true;
-        } catch {
-            return false;
-        }
-    }
-
-    // Helper to get server URL from config
-    getServerUrl(): string {
-        // Check environment variable first (useful for debugging/testing)
-        const envEndpoint = process.env.GPU_GO_ENDPOINT;
-        if (envEndpoint) {
-            return envEndpoint;
-        }
-        const config = vscode.workspace.getConfiguration('gpugo');
-        return config.get<string>('serverUrl', 'https://tensor-fusion.ai');
-    }
-
-    getDashboardUrl(): string {
-        const config = vscode.workspace.getConfiguration('gpugo');
-        return config.get<string>('dashboardUrl', 'https://go.tensor-fusion.ai');
     }
 }

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { CLI, Worker } from '../cli/cli';
 import { AuthManager } from '../auth/authManager';
 import { PropertyItem, createLoginItem, createEmptyItem, createErrorItem, getStatusIcon, getStatusContext } from './treeUtils';
+import { Logger } from '../logger';
 
 export class WorkerTreeItem extends vscode.TreeItem {
     constructor(
@@ -71,7 +72,9 @@ export class WorkersTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
         if (!element) {
             // Root level - show workers
             try {
+                Logger.log('Fetching workers...');
                 this.workers = await this.cli.workerList();
+                Logger.log(`Found ${this.workers.length} workers`);
                 
                 if (this.workers.length === 0) {
                     return [createEmptyItem('No workers found', 'Create one from your GPU server')];
@@ -81,6 +84,7 @@ export class WorkersTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
                     new WorkerTreeItem(worker, vscode.TreeItemCollapsibleState.Collapsed)
                 );
             } catch (error) {
+                Logger.error('Error fetching workers:', error);
                 return [createErrorItem('Error loading workers', error)];
             }
         }
