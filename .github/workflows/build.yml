@@ -156,8 +156,8 @@ jobs:
       - name: Prepare install scripts
         run: |
           mkdir -p cdn-scripts
-          cp install.sh install.ps1 install.bat cdn-scripts/
-          cp uninstall.sh uninstall.ps1 uninstall.bat cdn-scripts/
+          cp scripts/install.sh scripts/install.ps1 scripts/install.bat cdn-scripts/
+          cp scripts/uninstall.sh scripts/uninstall.ps1 scripts/uninstall.bat cdn-scripts/
 
       - name: Upload to R2 (latest)
         uses: ryand56/r2-upload-action@latest

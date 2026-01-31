@@ -1,6 +1,6 @@
 #!/bin/sh
 # GPU Go (ggo) Installation Script
-# Usage: GPU_GO_TOKEN="xxx" curl -sfL https://cdn.tensor-fusion.ai/archive/gpugo/install.sh | sh
+# Usage: curl -sfL https://cdn.tensor-fusion.ai/archive/gpugo/install.sh | GPU_GO_TOKEN="xxx" sh
 #
 # Environment variables:
 #   - GPU_GO_VERSION: Specific version to install (default: latest)
@@ -15,16 +15,16 @@
 #   curl -sfL https://cdn.tensor-fusion.ai/archive/gpugo/install.sh | sh
 #
 #   # Install specific version
-#   GPU_GO_VERSION=v1.0.0 curl -sfL https://cdn.tensor-fusion.ai/archive/gpugo/install.sh | sh
+#   curl -sfL https://cdn.tensor-fusion.ai/archive/gpugo/install.sh | GPU_GO_VERSION=v1.0.0 sh
 #
 #   # Install to custom directory
 #   curl -sfL https://cdn.tensor-fusion.ai/archive/gpugo/install.sh | GGO_INSTALL_DIR=/opt/bin sh
 #
 #   # Agent mode (Linux only): install, register agent, and setup systemd service
-#   GPU_GO_TOKEN="your-token" curl -sfL https://cdn.tensor-fusion.ai/archive/gpugo/install.sh | sh
+#   curl -sfL https://cdn.tensor-fusion.ai/archive/gpugo/install.sh | GPU_GO_TOKEN="your-token" sh
 #
 #   # Agent mode with custom endpoint
-#   GPU_GO_TOKEN="your-token" GPU_GO_ENDPOINT="https://api.example.com" curl -sfL https://cdn.tensor-fusion.ai/archive/gpugo/install.sh | sh
+#   curl -sfL https://cdn.tensor-fusion.ai/archive/gpugo/install.sh | GPU_GO_TOKEN="your-token" GPU_GO_ENDPOINT="https://api.example.com" sh
 
 set -e
 
