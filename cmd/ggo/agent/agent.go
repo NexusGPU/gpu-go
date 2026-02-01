@@ -305,19 +305,35 @@ func newStatusCmd() *cobra.Command {
 				return nil
 			}
 
-			// Load GPUs and workers for status
-			gpus, _ := configMgr.LoadGPUs()
-			workers, _ := configMgr.LoadWorkers()
+			// Create API client with agent secret
+			client := api.NewClient(
+				api.WithBaseURL(serverURL),
+				api.WithAgentSecret(cfg.AgentSecret),
+			)
+
+			// Fetch workers from server via API
+			ctx := context.Background()
+			agentConfig, err := client.GetAgentConfig(ctx, cfg.AgentID)
+			if err != nil {
+				klog.Warningf("Failed to fetch workers from server: error=%v", err)
+			}
+
+			// Get GPUs from hypervisor (real-time discovery)
+			gpus := discoverGPUs()
 
 			if out.IsJSON() {
-				return out.PrintJSON(map[string]any{
+				result := map[string]any{
 					"registered":     true,
 					"agent_id":       cfg.AgentID,
 					"config_version": cfg.ConfigVersion,
 					"server_url":     cfg.ServerURL,
 					"gpus":           gpus,
-					"workers":        workers,
-				})
+				}
+				if agentConfig != nil {
+					result["config_version"] = agentConfig.ConfigVersion
+					result["workers"] = agentConfig.Workers
+				}
+				return out.PrintJSON(result)
 			}
 
 			// Styled output
@@ -327,9 +343,14 @@ func newStatusCmd() *cobra.Command {
 			fmt.Println(styles.Title.Render("Agent Status"))
 			fmt.Println()
 
+			configVersion := cfg.ConfigVersion
+			if agentConfig != nil {
+				configVersion = agentConfig.ConfigVersion
+			}
+
 			status := tui.NewStatusTable().
 				Add("Agent ID", cfg.AgentID).
-				Add("Config Version", fmt.Sprintf("%d", cfg.ConfigVersion)).
+				Add("Config Version", fmt.Sprintf("%d", configVersion)).
 				Add("Server URL", cfg.ServerURL)
 
 			fmt.Println(status.String())
@@ -357,20 +378,13 @@ func newStatusCmd() *cobra.Command {
 				fmt.Println(table.String())
 			}
 
-			if len(workers) > 0 {
+			if agentConfig != nil && len(agentConfig.Workers) > 0 {
 				fmt.Println()
-				fmt.Println(styles.Subtitle.Render(fmt.Sprintf("Workers (%d)", len(workers))))
+				fmt.Println(styles.Subtitle.Render(fmt.Sprintf("Workers (%d)", len(agentConfig.Workers))))
 				fmt.Println()
 
 				var rows [][]string
-				for _, w := range workers {
-					status := w.Status
-					if status == "" {
-						status = "unknown"
-					}
-					statusIcon := tui.StatusIcon(status)
-					statusStyled := styles.StatusStyle(status).Render(statusIcon + " " + status)
-
+				for _, w := range agentConfig.Workers {
 					enabledIcon := tui.StatusIcon(boolToYesNo(w.Enabled))
 					enabledStyled := styles.StatusStyle(boolToYesNo(w.Enabled)).Render(enabledIcon)
 
@@ -378,12 +392,12 @@ func newStatusCmd() *cobra.Command {
 						w.WorkerID,
 						fmt.Sprintf("%d", w.ListenPort),
 						enabledStyled,
-						statusStyled,
+						w.IsolationMode,
 					})
 				}
 
 				table := tui.NewTable().
-					Headers("ID", "PORT", "ENABLED", "STATUS").
+					Headers("ID", "PORT", "ENABLED", "ISOLATION").
 					Rows(rows)
 
 				fmt.Println(table.String())

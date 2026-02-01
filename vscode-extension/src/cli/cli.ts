@@ -263,6 +263,10 @@ export class CLI {
         return vscode.workspace.getConfiguration('gpugo').get<string>('serverUrl', 'https://go.gpu.tf');
     }
 
+    getDashboardUrl(): string {
+        return this.getServerUrl();
+    }
+
     getTokenPath(): string {
         return path.join(os.homedir(), '.gpugo', 'token.json');
     }

@@ -3,6 +3,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 import { CLI } from '../cli/cli';
+import { Logger } from '../logger';
 
 const LOGIN_URL = 'https://go.tensor-fusion.ai/settings/security#ide-extension';
 
@@ -22,7 +23,24 @@ export class AuthManager {
         return this._isLoggedIn;
     }
 
+    /**
+     * Check login status using CLI command first, then fallback to token file check
+     */
     async checkLoginStatus(): Promise<boolean> {
+        // First try CLI auth status (more reliable)
+        try {
+            const authStatus = await this.cli.authStatus();
+            if (authStatus.loggedIn) {
+                Logger.log('Auth check via CLI: logged in');
+                this._isLoggedIn = true;
+                this._onAuthStateChanged.fire(true);
+                return true;
+            }
+        } catch (error) {
+            Logger.log('CLI auth status check failed, falling back to token file check');
+        }
+
+        // Fallback: check token file directly
         try {
             const tokenPath = this.getTokenPath();
             await fs.access(tokenPath);
@@ -36,12 +54,14 @@ export class AuthManager {
                 if (tokenConfig.expires_at) {
                     const expiresAt = new Date(tokenConfig.expires_at);
                     if (expiresAt < new Date()) {
+                        Logger.log('Token expired');
                         this._isLoggedIn = false;
                         this._onAuthStateChanged.fire(false);
                         return false;
                     }
                 }
                 
+                Logger.log('Token file check: logged in');
                 this._isLoggedIn = true;
                 this._onAuthStateChanged.fire(true);
                 return true;
@@ -50,12 +70,15 @@ export class AuthManager {
             // Token file doesn't exist or is invalid
         }
         
+        Logger.log('Auth check: not logged in');
         this._isLoggedIn = false;
         this._onAuthStateChanged.fire(false);
         return false;
     }
 
     async login(): Promise<boolean> {
+        Logger.log('Starting login flow');
+        
         // First, open browser to generate PAT
         const openBrowser = await vscode.window.showInformationMessage(
             'To login, you need to generate a Personal Access Token (PAT) from the GPU Go dashboard.',
@@ -64,6 +87,7 @@ export class AuthManager {
         );
 
         if (openBrowser === 'Open Dashboard') {
+            Logger.log('Opening dashboard for PAT generation');
             await vscode.env.openExternal(vscode.Uri.parse(LOGIN_URL));
             
             // Show message to wait for token
@@ -71,6 +95,10 @@ export class AuthManager {
                 'After generating your PAT, click "Enter Token" to continue.',
                 'Enter Token'
             );
+        } else if (!openBrowser) {
+            // User cancelled
+            Logger.log('User cancelled login');
+            return false;
         }
 
         // Prompt for token input
@@ -90,19 +118,31 @@ export class AuthManager {
         });
 
         if (!token) {
+            Logger.log('User cancelled token input');
             return false;
         }
 
         try {
-            // Save token using CLI or directly to file
-            await this.saveToken(token.trim());
+            Logger.log('Saving token...');
+            
+            // Try CLI login first (this also saves the token)
+            try {
+                await this.cli.login(token.trim());
+                Logger.log('Token saved via CLI');
+            } catch {
+                // Fallback: save token directly to file
+                Logger.log('CLI login failed, saving token directly');
+                await this.saveToken(token.trim());
+            }
             
             this._isLoggedIn = true;
             this._onAuthStateChanged.fire(true);
             
+            Logger.log('Login successful');
             vscode.window.showInformationMessage('Successfully logged in to GPU Go!');
             return true;
         } catch (error) {
+            Logger.error('Login failed:', error);
             vscode.window.showErrorMessage(`Login failed: ${error}`);
             return false;
         }

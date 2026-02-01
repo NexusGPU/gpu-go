@@ -34,6 +34,20 @@
                 "agent", "start"
             ],
             "program": "${workspaceFolder}/cmd/ggo/main.go",
+        },
+        {
+            "name": "Debug GPU Go Status",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "console": "integratedTerminal",
+            "env": {
+                "GPU_GO_HEARTBEAT_MODE": "polling"
+            },
+            "args": [
+                "agent", "status"
+            ],
+            "program": "${workspaceFolder}/cmd/ggo/main.go",
         }
     ]
 }

@@ -8,7 +8,6 @@ import (
 
 	"github.com/NexusGPU/gpu-go/cmd/ggo/auth"
 	"github.com/NexusGPU/gpu-go/internal/api"
-	"github.com/NexusGPU/gpu-go/internal/config"
 	"github.com/NexusGPU/gpu-go/internal/tui"
 	"github.com/spf13/cobra"
 	"k8s.io/klog/v2"
@@ -384,12 +383,6 @@ func newWorkerDeleteCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Skip confirmation")
 
 	return cmd
-}
-
-// For local worker status (used by agent)
-func LoadLocalWorkers(configDir string) ([]config.WorkerConfig, error) {
-	configMgr := config.NewManager(configDir, "")
-	return configMgr.LoadWorkers()
 }
 
 func boolToYesNo(b bool) string {

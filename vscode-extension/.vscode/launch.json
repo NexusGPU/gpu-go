@@ -15,7 +15,7 @@
       "sourceMaps": true,
       "env": {
         "GPUGO_CLI_PATH": "${workspaceFolder}/../ggo",
-        "GPU_GO_ENDPOINT": "http://localhost:8787"
+        // "GPU_GO_ENDPOINT": "http://localhost:8787"
       }
     },
     {

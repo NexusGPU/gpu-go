@@ -25,8 +25,11 @@ export async function activate(context: vscode.ExtensionContext) {
     const cli = new CLI(context);
 
     // Ensure CLI is available (auto-download if needed)
+    let cliInitialized = false;
     try {
         await cli.initialize();
+        cliInitialized = true;
+        Logger.log('CLI initialized successfully');
     } catch (error) {
         Logger.error('Failed to initialize CLI:', error);
         vscode.window.showWarningMessage(
@@ -57,20 +60,10 @@ export async function activate(context: vscode.ExtensionContext) {
     // Register commands
     registerCommands(context, cli);
 
-    // Check authentication status on startup (non-blocking)
-    authManager.checkLoginStatus().then(isLoggedIn => {
-        if (!isLoggedIn) {
-            // Show login prompt (non-blocking)
-            vscode.window.showInformationMessage(
-                'Welcome to GPU Go! Please login to access your remote GPUs.',
-                'Login'
-            ).then(action => {
-                if (action === 'Login') {
-                    vscode.commands.executeCommand('gpugo.login');
-                }
-            });
-        }
-    });
+    // Check authentication status after CLI is initialized
+    if (cliInitialized) {
+        checkAndPromptLogin(authManager);
+    }
 
     // Setup auto-refresh
     setupAutoRefresh(context);
@@ -305,6 +298,38 @@ function setupAutoRefresh(context: vscode.ExtensionContext) {
 export function deactivate() {
     if (refreshInterval) {
         clearInterval(refreshInterval);
+    }
+}
+
+/**
+ * Check login status and automatically prompt user to login if not logged in
+ */
+async function checkAndPromptLogin(authManager: AuthManager): Promise<void> {
+    try {
+        const isLoggedIn = await authManager.checkLoginStatus();
+        
+        if (!isLoggedIn) {
+            Logger.log('User not logged in, prompting for login');
+            
+            // Show login prompt with auto-login option
+            const action = await vscode.window.showInformationMessage(
+                'Welcome to GPU Go! You need to login to access your remote GPUs.',
+                'Login Now',
+                'Later'
+            );
+
+            if (action === 'Login Now') {
+                // Auto-execute login command
+                Logger.log('User chose to login, starting login flow');
+                vscode.commands.executeCommand('gpugo.login');
+            } else {
+                Logger.log('User deferred login');
+            }
+        } else {
+            Logger.log('User already logged in');
+        }
+    } catch (error) {
+        Logger.error('Failed to check login status:', error);
     }
 }
 
