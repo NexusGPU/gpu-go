@@ -141,7 +141,14 @@ func newRegisterCmd() *cobra.Command {
 			configMgr := config.NewManager(configDir, stateDir)
 			client := api.NewClient(api.WithBaseURL(serverURL))
 
-			gpus := discoverGPUs()
+			gpus, err := discoverGPUs()
+			if err != nil {
+				cmd.SilenceUsage = true
+				if !out.IsJSON() {
+					out.Error(fmt.Sprintf("Failed to discover GPUs: %v", err))
+				}
+				return err
+			}
 			if len(gpus) == 0 {
 				cmd.SilenceUsage = true
 				if !out.IsJSON() {
@@ -202,7 +209,11 @@ func newStartCmd() *cobra.Command {
 
 			hvMgr, err := getHypervisorManager()
 			if err != nil {
-				klog.Fatalf("Failed to initialize hypervisor manager, worker management will be limited: error=%v", err)
+				cmd.SilenceUsage = true
+				if !out.IsJSON() {
+					out.Error(fmt.Sprintf("Failed to initialize hypervisor manager: %v", err))
+				}
+				return err
 			}
 
 			var workerBinaryPath string
@@ -215,10 +226,10 @@ func newStartCmd() *cobra.Command {
 				if err != nil {
 					cmd.SilenceUsage = true
 					if !out.IsJSON() {
-						out.Error(fmt.Sprintf("Fatal: Failed to get remote-gpu-worker binary: %v", err))
+						out.Error(fmt.Sprintf("Failed to get remote-gpu-worker binary: %v", err))
 						out.Println(tui.Muted("The agent requires remote-gpu-worker to manage workers. Please ensure the binary is available for your platform."))
 					}
-					klog.Fatalf("Fatal: Failed to get remote-gpu-worker path: error=%v", err)
+					return err
 				}
 				klog.V(4).Infof("Using remote-gpu-worker binary: path=%s", workerBinaryPath)
 			}
@@ -294,10 +305,21 @@ func newStatusCmd() *cobra.Command {
 			ctx := context.Background()
 			agentConfig, err := client.GetAgentConfig(ctx, cfg.AgentID)
 			if err != nil {
-				klog.Warningf("Failed to fetch workers from server: error=%v", err)
+				cmd.SilenceUsage = true
+				if !out.IsJSON() {
+					out.Error(fmt.Sprintf("Failed to fetch workers from server: %v", err))
+				}
+				return err
 			}
 
-			gpus := discoverGPUs()
+			gpus, err := discoverGPUs()
+			if err != nil {
+				cmd.SilenceUsage = true
+				if !out.IsJSON() {
+					out.Error(fmt.Sprintf("Failed to discover GPUs: %v", err))
+				}
+				return err
+			}
 
 			return out.Render(&agentStatusResult{
 				registered:  true,
@@ -415,29 +437,27 @@ func (r *agentStatusResult) RenderTUI(out *tui.Output) {
 }
 
 // discoverGPUs discovers GPUs using hypervisor or returns mock GPUs
-func discoverGPUs() []api.GPUInfo {
+func discoverGPUs() ([]api.GPUInfo, error) {
 	if mockCount := os.Getenv("GPU_GO_MOCK_GPUS"); mockCount != "" {
 		count, err := strconv.Atoi(mockCount)
 		if err != nil || count <= 0 {
 			count = 1
 		}
 		klog.Infof("Using mock GPUs for testing: count=%d", count)
-		return agent.CreateMockGPUs(count)
+		return agent.CreateMockGPUs(count), nil
 	}
 
 	hvMgr, err := getHypervisorManager()
 	if err != nil {
-		klog.Warningf("Failed to get hypervisor manager: error=%v", err)
-		return nil
+		return nil, err
 	}
 
 	devices, err := hvMgr.ListDevices()
 	if err != nil {
-		klog.Errorf("Failed to list devices: error=%v", err)
-		return nil
+		return nil, fmt.Errorf("failed to list devices: %w", err)
 	}
 
-	return agent.ConvertDevicesToGPUInfo(devices)
+	return agent.ConvertDevicesToGPUInfo(devices), nil
 }
 
 func boolToYesNo(b bool) string {

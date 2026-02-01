@@ -23,8 +23,8 @@ const (
 type HeartbeatMode string
 
 const (
-	HeartbeatModeWebSocket   HeartbeatMode = "websocket"
-	HeartbeatModeLongPolling HeartbeatMode = "polling"
+	HeartbeatModeWebSocket HeartbeatMode = "websocket"
+	HeartbeatModePolling   HeartbeatMode = "polling"
 )
 
 // GetDefaultHeartbeatMode returns the default heartbeat mode from env var or websocket
@@ -32,12 +32,12 @@ func GetDefaultHeartbeatMode() HeartbeatMode {
 	if mode := os.Getenv("GPU_GO_HEARTBEAT_MODE"); mode != "" {
 		switch mode {
 		case "polling", "long_polling":
-			return HeartbeatModeLongPolling
+			return HeartbeatModePolling
 		case "websocket", "ws":
 			return HeartbeatModeWebSocket
 		}
 	}
-	return HeartbeatModeWebSocket
+	return HeartbeatModePolling
 }
 
 // GetDefaultBaseURL returns the default base URL, checking GPU_GO_ENDPOINT env var first
@@ -499,7 +499,7 @@ func (c *Client) StartHeartbeat(ctx context.Context, agentID string, handler Hea
 	}
 
 	switch mode {
-	case HeartbeatModeLongPolling:
+	case HeartbeatModePolling:
 		return c.startPolling(ctx, agentID, handler)
 	case HeartbeatModeWebSocket:
 		fallthrough

@@ -3,6 +3,8 @@
 # Variables
 BINARY_NAME=ggo
 MAIN_PACKAGE=./cmd/ggo
+MOCK_BINARY_NAME=mock-worker
+MOCK_MAIN_PACKAGE=./cmd/mock-worker
 BUILD_DIR=./bin
 COVERAGE_DIR=./coverage
 GO_VERSION=1.25.0
@@ -185,3 +187,26 @@ build-windows: ## Build for Windows
 	@echo "Windows binary: $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe"
 
 build-all: build-linux build-darwin build-windows ## Build for all platforms
+
+# Mock Worker targets
+build-mock: ## Build the mock worker binary
+	@echo "Building $(MOCK_BINARY_NAME)..."
+	@mkdir -p $(BUILD_DIR)
+	@go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(MOCK_BINARY_NAME) $(MOCK_MAIN_PACKAGE)
+	@echo "Binary built: $(BUILD_DIR)/$(MOCK_BINARY_NAME)"
+
+build-mock-linux: ## Build mock worker for Linux (amd64 and arm64)
+	@echo "Building $(MOCK_BINARY_NAME) for Linux..."
+	@mkdir -p $(BUILD_DIR)
+	@GOOS=linux GOARCH=amd64 go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(MOCK_BINARY_NAME)-linux-amd64 $(MOCK_MAIN_PACKAGE)
+	@GOOS=linux GOARCH=arm64 go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(MOCK_BINARY_NAME)-linux-arm64 $(MOCK_MAIN_PACKAGE)
+	@echo "Linux binaries built"
+
+build-mock-darwin: ## Build mock worker for macOS (amd64 and arm64)
+	@echo "Building $(MOCK_BINARY_NAME) for macOS..."
+	@mkdir -p $(BUILD_DIR)
+	@GOOS=darwin GOARCH=amd64 go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(MOCK_BINARY_NAME)-darwin-amd64 $(MOCK_MAIN_PACKAGE)
+	@GOOS=darwin GOARCH=arm64 go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(MOCK_BINARY_NAME)-darwin-arm64 $(MOCK_MAIN_PACKAGE)
+	@echo "macOS binaries built"
+
+build-mock-all: build-mock-linux build-mock-darwin ## Build mock worker for all target platforms

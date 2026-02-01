@@ -40,6 +40,7 @@ node_modules/
 out/
 dist/
 cmd/ggo/ggo
+cmd/ggo/__debug*
 *.vsix
 
 # macOS
@@ -57,3 +58,4 @@ cmd/ggo/ggo
 bin/
 
 *.tmp
+
