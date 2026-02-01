@@ -10,7 +10,7 @@ alwaysApply: false
 - Always be user-centric, think the whole user workflow and scenario
 - Don't abstract too much nor abstract nothing, extract interface based on business understanding, don't extract interface when not needed.
 - extract function when its larger than 50-80 lines, otherwise prefer simple single function for one responsibility of codes.
-- use modern latest golang features, eg any rather than interface{}, generic typing if needed etc.
+- MUST use modern latest golang features, eg `any` rather than `interface{}`, use generic typing if needed etc.
 - Never reinvent wheels, leverage utils and constants packages and introduced dependencies.
 - Always prioritize security, scalability, and maintainability.
 - Never write large task at once, break to smaller ones.
@@ -21,7 +21,7 @@ alwaysApply: false
 - Prioritize elegant and typed error handling, define centralized error definition
 - Rely on github.com/NexusGPU/tensor-fusion to manage workers and GPUs, this repo should be JUST WRAPPER in terms of worker/GPU Mgmt.
 - Don't repeat yourself, think abstraction for similar or duplicated codes
-- Run `golangci-lint run --fix` after each change, MUST fix all lint issues for all go related tasks
+- MUST run `golangci-lint run --fix` after each change, MUST fix all lint issues for all go related tasks
 
 # Reference
 

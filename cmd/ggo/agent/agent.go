@@ -10,6 +10,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/NexusGPU/gpu-go/cmd/ggo/cmdutil"
 	"github.com/NexusGPU/gpu-go/internal/agent"
 	"github.com/NexusGPU/gpu-go/internal/api"
 	"github.com/NexusGPU/gpu-go/internal/config"
@@ -48,7 +49,7 @@ func NewAgentCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVar(&configDir, "config-dir", paths.ConfigDir(), "Configuration directory")
 	cmd.PersistentFlags().StringVar(&stateDir, "state-dir", paths.StateDir(), "State directory for tensor-fusion")
 	cmd.PersistentFlags().StringVar(&serverURL, "server", api.GetDefaultBaseURL(), "Server URL (or set GPU_GO_ENDPOINT env var)")
-	cmd.PersistentFlags().StringVarP(&outputFormat, "output", "o", "table", "Output format (table, json)")
+	cmdutil.AddOutputFlag(cmd, &outputFormat)
 	cmd.PersistentFlags().StringVar(&acceleratorLib, "accelerator-lib", "", "Path to accelerator library (auto-detected if not specified)")
 	cmd.PersistentFlags().StringVar(&isolationMode, "isolation-mode", "shared", "Worker isolation mode (shared, soft, partitioned)")
 
@@ -60,7 +61,7 @@ func NewAgentCmd() *cobra.Command {
 }
 
 func getOutput() *tui.Output {
-	return tui.NewOutputWithFormat(tui.ParseOutputFormat(outputFormat))
+	return cmdutil.NewOutput(outputFormat)
 }
 
 func getIsolationMode() tfv1.IsolationModeType {
@@ -132,7 +133,7 @@ func newRegisterCmd() *cobra.Command {
 			}
 			if token == "" {
 				if !out.IsJSON() {
-					fmt.Println(tui.ErrorMessage("Token is required. Use --token flag or GPU_GO_TOKEN environment variable"))
+					out.Error("Token is required. Use --token flag or GPU_GO_TOKEN environment variable")
 				}
 				return fmt.Errorf("token is required")
 			}
@@ -140,12 +141,11 @@ func newRegisterCmd() *cobra.Command {
 			configMgr := config.NewManager(configDir, stateDir)
 			client := api.NewClient(api.WithBaseURL(serverURL))
 
-			// Discover GPUs using hypervisor or mock
 			gpus := discoverGPUs()
 			if len(gpus) == 0 {
 				cmd.SilenceUsage = true
 				if !out.IsJSON() {
-					fmt.Println(tui.ErrorMessage("No GPUs found. Please check your GPU configuration or use GPU_GO_MOCK_GPUS for testing"))
+					out.Error("No GPUs found. Please check your GPU configuration or use GPU_GO_MOCK_GPUS for testing")
 				}
 				return fmt.Errorf("no GPUs found")
 			}
@@ -157,14 +157,10 @@ func newRegisterCmd() *cobra.Command {
 				return err
 			}
 
-			if out.IsJSON() {
-				return out.PrintJSON(tui.NewActionResult(true, "Agent registered successfully", ""))
-			}
-
-			fmt.Println()
-			fmt.Println(tui.SuccessMessage("Agent registered successfully!"))
-			fmt.Println()
-			return nil
+			return out.Render(&cmdutil.ActionData{
+				Success: true,
+				Message: "Agent registered successfully!",
+			})
 		},
 	}
 
@@ -182,11 +178,10 @@ func newStartCmd() *cobra.Command {
 			out := getOutput()
 			configMgr := config.NewManager(configDir, stateDir)
 
-			// Check if agent is registered
 			if !configMgr.ConfigExists() {
 				cmd.SilenceUsage = true
 				if !out.IsJSON() {
-					fmt.Println(tui.ErrorMessage("Agent is not registered. Please run 'ggo agent register' first"))
+					out.Error("Agent is not registered. Please run 'ggo agent register' first")
 				}
 				return agent.ErrNotRegistered
 			}
@@ -198,7 +193,6 @@ func newStartCmd() *cobra.Command {
 				return err
 			}
 
-			// Set product name environment variable based on license type
 			setProductNameEnv(cfg.License)
 
 			client := api.NewClient(
@@ -206,14 +200,11 @@ func newStartCmd() *cobra.Command {
 				api.WithAgentSecret(cfg.AgentSecret),
 			)
 
-			// Get singleton hypervisor manager
 			hvMgr, err := getHypervisorManager()
 			if err != nil {
-				// Log warning but continue - agent can work without hypervisor for some operations
 				klog.Fatalf("Failed to initialize hypervisor manager, worker management will be limited: error=%v", err)
 			}
 
-			// Get remote-gpu-worker binary path
 			var workerBinaryPath string
 			if hvMgr != nil {
 				depsMgr := deps.NewManager(
@@ -224,15 +215,14 @@ func newStartCmd() *cobra.Command {
 				if err != nil {
 					cmd.SilenceUsage = true
 					if !out.IsJSON() {
-						fmt.Println(tui.ErrorMessage(fmt.Sprintf("Fatal: Failed to get remote-gpu-worker binary: %v", err)))
-						fmt.Println(tui.Muted("The agent requires remote-gpu-worker to manage workers. Please ensure the binary is available for your platform."))
+						out.Error(fmt.Sprintf("Fatal: Failed to get remote-gpu-worker binary: %v", err))
+						out.Println(tui.Muted("The agent requires remote-gpu-worker to manage workers. Please ensure the binary is available for your platform."))
 					}
 					klog.Fatalf("Fatal: Failed to get remote-gpu-worker path: error=%v", err)
 				}
 				klog.V(4).Infof("Using remote-gpu-worker binary: path=%s", workerBinaryPath)
 			}
 
-			// Create agent with hypervisor integration
 			var agentInstance *agent.Agent
 			if hvMgr != nil {
 				agentInstance = agent.NewAgentWithHypervisor(client, configMgr, hvMgr, workerBinaryPath)
@@ -248,25 +238,23 @@ func newStartCmd() *cobra.Command {
 
 			if !out.IsJSON() {
 				styles := tui.DefaultStyles()
-				fmt.Printf("%s Agent started (ID: %s)\n",
+				out.Printf("%s Agent started (ID: %s)\n",
 					styles.Success.Render("●"),
 					styles.Bold.Render(cfg.AgentID))
 				if hvMgr != nil {
-					fmt.Printf("%s Hypervisor integration enabled (vendor: %s)\n",
+					out.Printf("%s Hypervisor integration enabled (vendor: %s)\n",
 						styles.Success.Render("●"),
 						hvMgr.GetVendor())
 				}
-				fmt.Println(tui.Muted("Press Ctrl+C to stop..."))
+				out.Println(tui.Muted("Press Ctrl+C to stop..."))
 			}
 
-			// Wait for interrupt signal
 			sigCh := make(chan os.Signal, 1)
 			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 			<-sigCh
 
 			if !out.IsJSON() {
-				fmt.Println()
-				fmt.Println(tui.InfoMessage("Shutting down..."))
+				out.Info("Shutting down...")
 			}
 
 			agentInstance.Stop()
@@ -295,124 +283,139 @@ func newStatusCmd() *cobra.Command {
 			}
 
 			if cfg == nil {
-				if out.IsJSON() {
-					return out.PrintJSON(map[string]any{
-						"registered": false,
-						"message":    "Agent is not registered",
-					})
-				}
-				fmt.Println(tui.WarningMessage("Agent is not registered"))
-				return nil
+				return out.Render(&agentStatusResult{registered: false})
 			}
 
-			// Create API client with agent secret
 			client := api.NewClient(
 				api.WithBaseURL(serverURL),
 				api.WithAgentSecret(cfg.AgentSecret),
 			)
 
-			// Fetch workers from server via API
 			ctx := context.Background()
 			agentConfig, err := client.GetAgentConfig(ctx, cfg.AgentID)
 			if err != nil {
 				klog.Warningf("Failed to fetch workers from server: error=%v", err)
 			}
 
-			// Get GPUs from hypervisor (real-time discovery)
 			gpus := discoverGPUs()
 
-			if out.IsJSON() {
-				result := map[string]any{
-					"registered":     true,
-					"agent_id":       cfg.AgentID,
-					"config_version": cfg.ConfigVersion,
-					"server_url":     cfg.ServerURL,
-					"gpus":           gpus,
-				}
-				if agentConfig != nil {
-					result["config_version"] = agentConfig.ConfigVersion
-					result["workers"] = agentConfig.Workers
-				}
-				return out.PrintJSON(result)
-			}
-
-			// Styled output
-			styles := tui.DefaultStyles()
-
-			fmt.Println()
-			fmt.Println(styles.Title.Render("Agent Status"))
-			fmt.Println()
-
-			configVersion := cfg.ConfigVersion
-			if agentConfig != nil {
-				configVersion = agentConfig.ConfigVersion
-			}
-
-			status := tui.NewStatusTable().
-				Add("Agent ID", cfg.AgentID).
-				Add("Config Version", fmt.Sprintf("%d", configVersion)).
-				Add("Server URL", cfg.ServerURL)
-
-			fmt.Println(status.String())
-
-			if len(gpus) > 0 {
-				fmt.Println()
-				fmt.Println(styles.Subtitle.Render(fmt.Sprintf("GPUs (%d)", len(gpus))))
-				fmt.Println()
-
-				var rows [][]string
-				for _, gpu := range gpus {
-					vram := fmt.Sprintf("%.1f GB", float64(gpu.VRAMMb)/1024)
-					rows = append(rows, []string{
-						gpu.GPUID,
-						gpu.Vendor,
-						gpu.Model,
-						vram,
-					})
-				}
-
-				table := tui.NewTable().
-					Headers("ID", "VENDOR", "MODEL", "VRAM").
-					Rows(rows)
-
-				fmt.Println(table.String())
-			}
-
-			if agentConfig != nil && len(agentConfig.Workers) > 0 {
-				fmt.Println()
-				fmt.Println(styles.Subtitle.Render(fmt.Sprintf("Workers (%d)", len(agentConfig.Workers))))
-				fmt.Println()
-
-				var rows [][]string
-				for _, w := range agentConfig.Workers {
-					enabledIcon := tui.StatusIcon(boolToYesNo(w.Enabled))
-					enabledStyled := styles.StatusStyle(boolToYesNo(w.Enabled)).Render(enabledIcon)
-
-					rows = append(rows, []string{
-						w.WorkerID,
-						fmt.Sprintf("%d", w.ListenPort),
-						enabledStyled,
-						w.IsolationMode,
-					})
-				}
-
-				table := tui.NewTable().
-					Headers("ID", "PORT", "ENABLED", "ISOLATION").
-					Rows(rows)
-
-				fmt.Println(table.String())
-			}
-
-			return nil
+			return out.Render(&agentStatusResult{
+				registered:  true,
+				cfg:         cfg,
+				agentConfig: agentConfig,
+				gpus:        gpus,
+			})
 		},
 	}
 
 	return cmd
 }
 
+// agentStatusResult implements Renderable for agent status
+type agentStatusResult struct {
+	registered  bool
+	cfg         *config.Config
+	agentConfig *api.AgentConfigResponse
+	gpus        []api.GPUInfo
+}
+
+func (r *agentStatusResult) RenderJSON() any {
+	if !r.registered {
+		return map[string]any{
+			"registered": false,
+			"message":    "Agent is not registered",
+		}
+	}
+
+	result := map[string]any{
+		"registered":     true,
+		"agent_id":       r.cfg.AgentID,
+		"config_version": r.cfg.ConfigVersion,
+		"server_url":     r.cfg.ServerURL,
+		"gpus":           r.gpus,
+	}
+	if r.agentConfig != nil {
+		result["config_version"] = r.agentConfig.ConfigVersion
+		result["workers"] = r.agentConfig.Workers
+	}
+	return result
+}
+
+func (r *agentStatusResult) RenderTUI(out *tui.Output) {
+	styles := tui.DefaultStyles()
+
+	if !r.registered {
+		out.Warning("Agent is not registered")
+		return
+	}
+
+	out.Println()
+	out.Println(styles.Title.Render("Agent Status"))
+	out.Println()
+
+	configVersion := r.cfg.ConfigVersion
+	if r.agentConfig != nil {
+		configVersion = r.agentConfig.ConfigVersion
+	}
+
+	status := tui.NewStatusTable().
+		Add("Agent ID", r.cfg.AgentID).
+		Add("Config Version", fmt.Sprintf("%d", configVersion)).
+		Add("Server URL", r.cfg.ServerURL)
+
+	out.Println(status.String())
+
+	if len(r.gpus) > 0 {
+		out.Println()
+		out.Println(styles.Subtitle.Render(fmt.Sprintf("GPUs (%d)", len(r.gpus))))
+		out.Println()
+
+		var rows [][]string
+		for _, gpu := range r.gpus {
+			vram := fmt.Sprintf("%.1f GB", float64(gpu.VRAMMb)/1024)
+			rows = append(rows, []string{
+				gpu.GPUID,
+				gpu.Vendor,
+				gpu.Model,
+				vram,
+			})
+		}
+
+		table := tui.NewTable().
+			Headers("ID", "VENDOR", "MODEL", "VRAM").
+			Rows(rows)
+
+		out.Println(table.String())
+	}
+
+	if r.agentConfig != nil && len(r.agentConfig.Workers) > 0 {
+		out.Println()
+		out.Println(styles.Subtitle.Render(fmt.Sprintf("Workers (%d)", len(r.agentConfig.Workers))))
+		out.Println()
+
+		var rows [][]string
+		for _, w := range r.agentConfig.Workers {
+			enabledIcon := tui.StatusIcon(boolToYesNo(w.Enabled))
+			enabledStyled := styles.StatusStyle(boolToYesNo(w.Enabled)).Render(enabledIcon)
+
+			rows = append(rows, []string{
+				w.WorkerID,
+				fmt.Sprintf("%d", w.ListenPort),
+				enabledStyled,
+				w.IsolationMode,
+			})
+		}
+
+		table := tui.NewTable().
+			Headers("ID", "PORT", "ENABLED", "ISOLATION").
+			Rows(rows)
+
+		out.Println(table.String())
+	}
+}
+
 // discoverGPUs discovers GPUs using hypervisor or returns mock GPUs
 func discoverGPUs() []api.GPUInfo {
-	// Check for mock GPUs environment variable
 	if mockCount := os.Getenv("GPU_GO_MOCK_GPUS"); mockCount != "" {
 		count, err := strconv.Atoi(mockCount)
 		if err != nil || count <= 0 {
@@ -422,7 +425,6 @@ func discoverGPUs() []api.GPUInfo {
 		return agent.CreateMockGPUs(count)
 	}
 
-	// Use singleton hypervisor manager
 	hvMgr, err := getHypervisorManager()
 	if err != nil {
 		klog.Warningf("Failed to get hypervisor manager: error=%v", err)
@@ -446,26 +448,20 @@ func boolToYesNo(b bool) string {
 }
 
 // parseLicenseType parses the license type from the license plain text
-// Returns "free", "paid", or empty string if unknown
 func parseLicenseType(license api.License) string {
 	if license.Plain == "" {
 		return ""
 	}
 
-	// Try to parse license.plain as JSON
 	var licenseData map[string]any
 	if err := json.Unmarshal([]byte(license.Plain), &licenseData); err != nil {
-		// If not JSON, try to check if it contains type information in other formats
-		// For now, we'll return empty if it's not valid JSON
 		return ""
 	}
 
-	// Check for type field
 	if licenseType, ok := licenseData["type"].(string); ok {
 		return licenseType
 	}
 
-	// Check for license_type field
 	if licenseType, ok := licenseData["license_type"].(string); ok {
 		return licenseType
 	}
@@ -480,17 +476,13 @@ func setProductNameEnv(license api.License) {
 	var productName string
 	switch licenseType {
 	case "free":
-		// ProductNameGpuGoFree = "gpu-go-free" from github.com/NexusGPU/tensor-fusion/pkg/constants
 		productName = "gpu-go-free"
 	case "paid":
-		// ProductNameGpuGoPaid = "gpu-go-paid" from github.com/NexusGPU/tensor-fusion/pkg/constants
 		productName = "gpu-go-paid"
 	default:
-		// Unknown license type, don't set environment variable
 		return
 	}
 
-	// Set environment variable
 	if err := os.Setenv("GPU_GO_PRODUCT_NAME", productName); err != nil {
 		klog.Warningf("Failed to set GPU_GO_PRODUCT_NAME environment variable: error=%v", err)
 		return

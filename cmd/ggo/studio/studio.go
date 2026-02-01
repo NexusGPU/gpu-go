@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/NexusGPU/gpu-go/cmd/ggo/cmdutil"
 	"github.com/NexusGPU/gpu-go/internal/studio"
 	"github.com/NexusGPU/gpu-go/internal/tui"
 	"github.com/spf13/cobra"
@@ -71,10 +72,8 @@ Examples:
   ggo studio rm my-studio`,
 	}
 
-	// Add persistent output flag
-	cmd.PersistentFlags().StringVarP(&outputFormat, "output", "o", "table", "Output format (table, json)")
+	cmdutil.AddOutputFlag(cmd, &outputFormat)
 
-	// Add subcommands
 	cmd.AddCommand(newCreateCmd())
 	cmd.AddCommand(newListCmd())
 	cmd.AddCommand(newStartCmd())
@@ -91,14 +90,12 @@ Examples:
 func getManager() *studio.Manager {
 	mgr := studio.NewManager()
 
-	// Register Docker backend
 	dockerBackend := studio.NewDockerBackend()
 	if dockerHost != "" {
 		dockerBackend = studio.NewDockerBackendWithHost(dockerHost)
 	}
 	mgr.RegisterBackend(dockerBackend)
 
-	// Register Colima backend with custom profile if specified
 	colimaBackend := studio.NewColimaBackend()
 	if colimaProfile != "" {
 		colimaBackend = studio.NewColimaBackendWithProfile(colimaProfile)
@@ -108,21 +105,19 @@ func getManager() *studio.Manager {
 	}
 	mgr.RegisterBackend(colimaBackend)
 
-	// Register WSL backend with custom distro if specified
 	wslBackend := studio.NewWSLBackend()
 	if wslDistro != "" {
 		wslBackend = studio.NewWSLBackendWithDistro(wslDistro)
 	}
 	mgr.RegisterBackend(wslBackend)
 
-	// Register Apple Container backend
 	mgr.RegisterBackend(studio.NewAppleContainerBackend())
 
 	return mgr
 }
 
 func getOutput() *tui.Output {
-	return tui.NewOutputWithFormat(tui.ParseOutputFormat(outputFormat))
+	return cmdutil.NewOutput(outputFormat)
 }
 
 func newCreateCmd() *cobra.Command {
@@ -155,145 +150,7 @@ Examples:
   # Create with custom ports and volumes
   ggo studio create my-env --gpu-url "..." -p 8888:8888 -v ~/projects:/workspace`,
 		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			name := args[0]
-			ctx := context.Background()
-			mgr := getManager()
-			out := getOutput()
-
-			// Parse mode
-			studioMode := studio.ModeAuto
-			if mode != "" {
-				studioMode = studio.Mode(mode)
-			}
-
-			// Parse ports
-			var portMappings []studio.PortMapping
-			for _, p := range ports {
-				parts := strings.Split(p, ":")
-				if len(parts) != 2 {
-					return fmt.Errorf("invalid port format: %s (expected host:container)", p)
-				}
-				var hostPort, containerPort int
-				if _, err := fmt.Sscanf(parts[0], "%d", &hostPort); err != nil {
-					return fmt.Errorf("invalid host port: %s", parts[0])
-				}
-				if _, err := fmt.Sscanf(parts[1], "%d", &containerPort); err != nil {
-					return fmt.Errorf("invalid container port: %s", parts[1])
-				}
-				portMappings = append(portMappings, studio.PortMapping{
-					HostPort:      hostPort,
-					ContainerPort: containerPort,
-				})
-			}
-
-			// Parse volumes
-			var volumeMounts []studio.VolumeMount
-			for _, v := range volumes {
-				parts := strings.Split(v, ":")
-				if len(parts) < 2 {
-					return fmt.Errorf("invalid volume format: %s (expected host:container[:ro])", v)
-				}
-				mount := studio.VolumeMount{
-					HostPath:      parts[0],
-					ContainerPath: parts[1],
-				}
-				if len(parts) > 2 && parts[2] == "ro" {
-					mount.ReadOnly = true
-				}
-				volumeMounts = append(volumeMounts, mount)
-			}
-
-			// Parse env vars
-			envMap := make(map[string]string)
-			for _, e := range envVars {
-				parts := strings.SplitN(e, "=", 2)
-				if len(parts) != 2 {
-					return fmt.Errorf("invalid env var format: %s (expected KEY=VALUE)", e)
-				}
-				envMap[parts[0]] = parts[1]
-			}
-
-			opts := &studio.CreateOptions{
-				Name:         name,
-				Mode:         studioMode,
-				Image:        image,
-				GPUWorkerURL: gpuURL,
-				SSHPublicKey: sshKey,
-				Ports:        portMappings,
-				Volumes:      volumeMounts,
-				Envs:         envMap,
-				Resources: studio.ResourceSpec{
-					CPUs:   cpus,
-					Memory: memory,
-				},
-			}
-
-			if !out.IsJSON() {
-				styles := tui.DefaultStyles()
-				fmt.Printf("%s Creating studio environment '%s'...\n",
-					styles.Info.Render("◐"),
-					styles.Bold.Render(name))
-			}
-
-			env, err := mgr.Create(ctx, opts)
-			if err != nil {
-				cmd.SilenceUsage = true
-				return err
-			}
-
-			if out.IsJSON() {
-				return out.PrintJSON(env)
-			}
-
-			// Styled output
-			styles := tui.DefaultStyles()
-
-			fmt.Println()
-			fmt.Println(tui.SuccessMessage("Studio environment created successfully!"))
-			fmt.Println()
-
-			status := tui.NewStatusTable().
-				Add("Name", styles.Bold.Render(env.Name)).
-				Add("ID", env.ID).
-				Add("Mode", string(env.Mode)).
-				Add("Image", env.Image).
-				AddWithStatus("Status", string(env.Status), string(env.Status))
-
-			fmt.Println(status.String())
-
-			if env.SSHPort > 0 && !noSSH {
-				// Add SSH config
-				if err := mgr.AddSSHConfig(env); err != nil {
-					klog.Warningf("Failed to add SSH config: error=%v", err)
-				} else {
-					fmt.Println()
-					fmt.Println(styles.Subtitle.Render("SSH Configuration"))
-					fmt.Println()
-
-					sshStatus := tui.NewStatusTable().
-						Add("Host", fmt.Sprintf("ggo-%s", env.Name)).
-						Add("Port", fmt.Sprintf("%d", env.SSHPort)).
-						Add("User", env.SSHUser)
-
-					fmt.Println(sshStatus.String())
-
-					fmt.Println()
-					fmt.Println(styles.Subtitle.Render("Connect with:"))
-					fmt.Println()
-					fmt.Println("  " + tui.Code(fmt.Sprintf("ssh ggo-%s", env.Name)))
-					fmt.Println()
-					fmt.Println(styles.Subtitle.Render("Or in VS Code:"))
-					fmt.Println()
-					fmt.Println("  1. Install 'Remote - SSH' extension")
-					fmt.Println("  2. Press F1 → 'Remote-SSH: Connect to Host...'")
-					fmt.Printf("  3. Select '%s'\n", styles.Bold.Render(fmt.Sprintf("ggo-%s", env.Name)))
-				}
-			}
-			fmt.Println()
-
-			return nil
-		},
+		RunE: runCreate,
 	}
 
 	cmd.Flags().StringVarP(&mode, "mode", "m", "", "Container/VM mode (wsl, colima, docker, k8s, auto)")
@@ -313,6 +170,181 @@ Examples:
 	return cmd
 }
 
+func runCreate(cmd *cobra.Command, args []string) error {
+	name := args[0]
+	ctx := context.Background()
+	mgr := getManager()
+	out := getOutput()
+
+	opts, err := buildCreateOptions(name)
+	if err != nil {
+		return err
+	}
+
+	if !out.IsJSON() {
+		styles := tui.DefaultStyles()
+		out.Printf("%s Creating studio environment '%s'...\n",
+			styles.Info.Render("◐"),
+			styles.Bold.Render(name))
+	}
+
+	env, err := mgr.Create(ctx, opts)
+	if err != nil {
+		cmd.SilenceUsage = true
+		return err
+	}
+
+	return out.Render(&createResult{env: env, mgr: mgr, noSSH: noSSH})
+}
+
+func buildCreateOptions(name string) (*studio.CreateOptions, error) {
+	studioMode := studio.ModeAuto
+	if mode != "" {
+		studioMode = studio.Mode(mode)
+	}
+
+	portMappings, err := parsePorts(ports)
+	if err != nil {
+		return nil, err
+	}
+
+	volumeMounts, err := parseVolumes(volumes)
+	if err != nil {
+		return nil, err
+	}
+
+	envMap, err := parseEnvVars(envVars)
+	if err != nil {
+		return nil, err
+	}
+
+	return &studio.CreateOptions{
+		Name:         name,
+		Mode:         studioMode,
+		Image:        image,
+		GPUWorkerURL: gpuURL,
+		SSHPublicKey: sshKey,
+		Ports:        portMappings,
+		Volumes:      volumeMounts,
+		Envs:         envMap,
+		Resources: studio.ResourceSpec{
+			CPUs:   cpus,
+			Memory: memory,
+		},
+	}, nil
+}
+
+func parsePorts(ports []string) ([]studio.PortMapping, error) {
+	var mappings []studio.PortMapping
+	for _, p := range ports {
+		parts := strings.Split(p, ":")
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid port format: %s (expected host:container)", p)
+		}
+		var hostPort, containerPort int
+		if _, err := fmt.Sscanf(parts[0], "%d", &hostPort); err != nil {
+			return nil, fmt.Errorf("invalid host port: %s", parts[0])
+		}
+		if _, err := fmt.Sscanf(parts[1], "%d", &containerPort); err != nil {
+			return nil, fmt.Errorf("invalid container port: %s", parts[1])
+		}
+		mappings = append(mappings, studio.PortMapping{
+			HostPort:      hostPort,
+			ContainerPort: containerPort,
+		})
+	}
+	return mappings, nil
+}
+
+func parseVolumes(volumes []string) ([]studio.VolumeMount, error) {
+	var mounts []studio.VolumeMount
+	for _, v := range volumes {
+		parts := strings.Split(v, ":")
+		if len(parts) < 2 {
+			return nil, fmt.Errorf("invalid volume format: %s (expected host:container[:ro])", v)
+		}
+		mount := studio.VolumeMount{
+			HostPath:      parts[0],
+			ContainerPath: parts[1],
+		}
+		if len(parts) > 2 && parts[2] == "ro" {
+			mount.ReadOnly = true
+		}
+		mounts = append(mounts, mount)
+	}
+	return mounts, nil
+}
+
+func parseEnvVars(envVars []string) (map[string]string, error) {
+	envMap := make(map[string]string)
+	for _, e := range envVars {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid env var format: %s (expected KEY=VALUE)", e)
+		}
+		envMap[parts[0]] = parts[1]
+	}
+	return envMap, nil
+}
+
+// createResult implements Renderable for create command output
+type createResult struct {
+	env   *studio.Environment
+	mgr   *studio.Manager
+	noSSH bool
+}
+
+func (r *createResult) RenderJSON() any {
+	return r.env
+}
+
+func (r *createResult) RenderTUI(out *tui.Output) {
+	styles := tui.DefaultStyles()
+	env := r.env
+
+	out.Println()
+	out.Success("Studio environment created successfully!")
+	out.Println()
+
+	status := tui.NewStatusTable().
+		Add("Name", styles.Bold.Render(env.Name)).
+		Add("ID", env.ID).
+		Add("Mode", string(env.Mode)).
+		Add("Image", env.Image).
+		AddWithStatus("Status", string(env.Status), string(env.Status))
+
+	out.Println(status.String())
+
+	if env.SSHPort > 0 && !r.noSSH {
+		if err := r.mgr.AddSSHConfig(env); err != nil {
+			klog.Warningf("Failed to add SSH config: error=%v", err)
+		} else {
+			out.Println()
+			out.Println(styles.Subtitle.Render("SSH Configuration"))
+			out.Println()
+
+			sshStatus := tui.NewStatusTable().
+				Add("Host", fmt.Sprintf("ggo-%s", env.Name)).
+				Add("Port", fmt.Sprintf("%d", env.SSHPort)).
+				Add("User", env.SSHUser)
+
+			out.Println(sshStatus.String())
+
+			out.Println()
+			out.Println(styles.Subtitle.Render("Connect with:"))
+			out.Println()
+			out.Println("  " + tui.Code(fmt.Sprintf("ssh ggo-%s", env.Name)))
+			out.Println()
+			out.Println(styles.Subtitle.Render("Or in VS Code:"))
+			out.Println()
+			out.Println("  1. Install 'Remote - SSH' extension")
+			out.Println("  2. Press F1 → 'Remote-SSH: Connect to Host...'")
+			out.Printf("  3. Select '%s'\n", styles.Bold.Render(fmt.Sprintf("ggo-%s", env.Name)))
+		}
+	}
+	out.Println()
+}
+
 func newListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "list",
@@ -329,48 +361,52 @@ func newListCmd() *cobra.Command {
 				return err
 			}
 
-			if len(envs) == 0 {
-				if out.IsJSON() {
-					return out.PrintJSON(tui.NewListResult([]*studio.Environment{}))
-				}
-				out.Info("No studio environments found")
-				return nil
-			}
-
-			if out.IsJSON() {
-				return out.PrintJSON(tui.NewListResult(envs))
-			}
-
-			// Table output
-			styles := tui.DefaultStyles()
-			var rows [][]string
-			for _, env := range envs {
-				statusIcon := tui.StatusIcon(string(env.Status))
-				statusStyled := styles.StatusStyle(string(env.Status)).Render(statusIcon + " " + string(env.Status))
-
-				sshInfo := styles.Muted.Render("-")
-				if env.SSHPort > 0 {
-					sshInfo = fmt.Sprintf("%s:%d", env.SSHHost, env.SSHPort)
-				}
-
-				rows = append(rows, []string{
-					styles.Bold.Render(env.Name),
-					truncate(env.ID, 12),
-					string(env.Mode),
-					statusStyled,
-					truncateImage(env.Image),
-					sshInfo,
-				})
-			}
-
-			table := tui.NewTable().
-				Headers("NAME", "ID", "MODE", "STATUS", "IMAGE", "SSH").
-				Rows(rows)
-
-			fmt.Println(table.String())
-			return nil
+			return out.Render(&envListResult{envs: envs})
 		},
 	}
+}
+
+// envListResult implements Renderable for list command
+type envListResult struct {
+	envs []*studio.Environment
+}
+
+func (r *envListResult) RenderJSON() any {
+	return tui.NewListResult(r.envs)
+}
+
+func (r *envListResult) RenderTUI(out *tui.Output) {
+	if len(r.envs) == 0 {
+		out.Info("No studio environments found")
+		return
+	}
+
+	styles := tui.DefaultStyles()
+	var rows [][]string
+	for _, env := range r.envs {
+		statusIcon := tui.StatusIcon(string(env.Status))
+		statusStyled := styles.StatusStyle(string(env.Status)).Render(statusIcon + " " + string(env.Status))
+
+		sshInfo := styles.Muted.Render("-")
+		if env.SSHPort > 0 {
+			sshInfo = fmt.Sprintf("%s:%d", env.SSHHost, env.SSHPort)
+		}
+
+		rows = append(rows, []string{
+			styles.Bold.Render(env.Name),
+			truncate(env.ID, 12),
+			string(env.Mode),
+			statusStyled,
+			truncateImage(env.Image),
+			sshInfo,
+		})
+	}
+
+	table := tui.NewTable().
+		Headers("NAME", "ID", "MODE", "STATUS", "IMAGE", "SSH").
+		Rows(rows)
+
+	out.Println(table.String())
 }
 
 func newStartCmd() *cobra.Command {
@@ -388,12 +424,11 @@ func newStartCmd() *cobra.Command {
 				return err
 			}
 
-			if out.IsJSON() {
-				return out.PrintJSON(tui.NewActionResult(true, "Environment started", args[0]))
-			}
-
-			fmt.Println(tui.SuccessMessage(fmt.Sprintf("Environment '%s' started", args[0])))
-			return nil
+			return out.Render(&cmdutil.ActionData{
+				Success: true,
+				Message: fmt.Sprintf("Environment '%s' started", args[0]),
+				ID:      args[0],
+			})
 		},
 	}
 }
@@ -413,12 +448,11 @@ func newStopCmd() *cobra.Command {
 				return err
 			}
 
-			if out.IsJSON() {
-				return out.PrintJSON(tui.NewActionResult(true, "Environment stopped", args[0]))
-			}
-
-			fmt.Println(tui.SuccessMessage(fmt.Sprintf("Environment '%s' stopped", args[0])))
-			return nil
+			return out.Render(&cmdutil.ActionData{
+				Success: true,
+				Message: fmt.Sprintf("Environment '%s' stopped", args[0]),
+				ID:      args[0],
+			})
 		},
 	}
 }
@@ -435,7 +469,6 @@ func newRemoveCmd() *cobra.Command {
 			ctx := context.Background()
 			mgr := getManager()
 			out := getOutput()
-
 			name := args[0]
 
 			if !force && !out.IsJSON() {
@@ -456,17 +489,15 @@ func newRemoveCmd() *cobra.Command {
 				return err
 			}
 
-			// Remove SSH config
 			if err := mgr.RemoveSSHConfig(name); err != nil {
 				klog.Warningf("Failed to remove SSH config: error=%v", err)
 			}
 
-			if out.IsJSON() {
-				return out.PrintJSON(tui.NewActionResult(true, "Environment removed", name))
-			}
-
-			fmt.Println(tui.SuccessMessage(fmt.Sprintf("Environment '%s' removed", name)))
-			return nil
+			return out.Render(&cmdutil.ActionData{
+				Success: true,
+				Message: fmt.Sprintf("Environment '%s' removed", name),
+				ID:      name,
+			})
 		},
 	}
 
@@ -491,44 +522,41 @@ func newSSHCmd() *cobra.Command {
 			}
 
 			if env.SSHPort == 0 {
-				// Runtime error - don't show help
 				cmd.SilenceUsage = true
 				return fmt.Errorf("SSH not configured for this environment")
 			}
 
-			if out.IsJSON() {
-				return out.PrintJSON(map[string]interface{}{
-					"host":    env.SSHHost,
-					"port":    env.SSHPort,
-					"user":    env.SSHUser,
-					"command": fmt.Sprintf("ssh -p %d %s@%s", env.SSHPort, env.SSHUser, env.SSHHost),
-				})
-			}
-
-			// Execute SSH
-			styles := tui.DefaultStyles()
-			sshCmd := fmt.Sprintf("ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p %d %s@%s",
-				env.SSHPort, env.SSHUser, env.SSHHost)
-
-			fmt.Printf("%s Connecting to %s...\n",
-				styles.Info.Render("◐"),
-				styles.Bold.Render(env.Name))
-			fmt.Println()
-			fmt.Println("  " + tui.Code(sshCmd))
-			fmt.Println()
-
-			// Use os/exec to run SSH interactively
-			return runInteractiveSSH(env.SSHHost, env.SSHPort, env.SSHUser)
+			return out.Render(&sshResult{env: env})
 		},
 	}
 }
 
-func runInteractiveSSH(host string, port int, user string) error {
-	// This is a placeholder - in a real implementation, we'd use golang.org/x/crypto/ssh
-	// or exec.Command with proper TTY handling
+// sshResult implements Renderable for ssh command
+type sshResult struct {
+	env *studio.Environment
+}
+
+func (r *sshResult) RenderJSON() any {
+	return map[string]any{
+		"host":    r.env.SSHHost,
+		"port":    r.env.SSHPort,
+		"user":    r.env.SSHUser,
+		"command": fmt.Sprintf("ssh -p %d %s@%s", r.env.SSHPort, r.env.SSHUser, r.env.SSHHost),
+	}
+}
+
+func (r *sshResult) RenderTUI(out *tui.Output) {
 	styles := tui.DefaultStyles()
-	fmt.Println(styles.Muted.Render(fmt.Sprintf("Please run: ssh -p %d %s@%s", port, user, host)))
-	return nil
+	sshCmd := fmt.Sprintf("ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p %d %s@%s",
+		r.env.SSHPort, r.env.SSHUser, r.env.SSHHost)
+
+	out.Printf("%s Connecting to %s...\n",
+		styles.Info.Render("◐"),
+		styles.Bold.Render(r.env.Name))
+	out.Println()
+	out.Println("  " + tui.Code(sshCmd))
+	out.Println()
+	out.Println(styles.Muted.Render(fmt.Sprintf("Please run: ssh -p %d %s@%s", r.env.SSHPort, r.env.SSHUser, r.env.SSHHost)))
 }
 
 func newLogsCmd() *cobra.Command {
@@ -550,14 +578,12 @@ func newLogsCmd() *cobra.Command {
 
 			backend, err := mgr.GetBackend(env.Mode)
 			if err != nil {
-				// Runtime error - don't show help
 				cmd.SilenceUsage = true
 				return err
 			}
 
 			logCh, err := backend.Logs(ctx, env.ID, follow)
 			if err != nil {
-				// Runtime error - don't show help
 				cmd.SilenceUsage = true
 				return err
 			}
@@ -581,30 +607,36 @@ func newImagesCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := getOutput()
 			images := studio.DefaultImages()
-
-			if out.IsJSON() {
-				return out.PrintJSON(tui.NewListResult(images))
-			}
-
-			// Table output
-			styles := tui.DefaultStyles()
-			var rows [][]string
-			for _, img := range images {
-				rows = append(rows, []string{
-					styles.Bold.Render(fmt.Sprintf("%s:%s", img.Name, img.Tag)),
-					img.Description,
-					styles.Muted.Render(strings.Join(img.Features, ", ")),
-				})
-			}
-
-			table := tui.NewTable().
-				Headers("IMAGE", "DESCRIPTION", "FEATURES").
-				Rows(rows)
-
-			fmt.Println(table.String())
-			return nil
+			return out.Render(&imagesResult{images: images})
 		},
 	}
+}
+
+// imagesResult implements Renderable for images command
+type imagesResult struct {
+	images []studio.StudioImage
+}
+
+func (r *imagesResult) RenderJSON() any {
+	return tui.NewListResult(r.images)
+}
+
+func (r *imagesResult) RenderTUI(out *tui.Output) {
+	styles := tui.DefaultStyles()
+	var rows [][]string
+	for _, img := range r.images {
+		rows = append(rows, []string{
+			styles.Bold.Render(fmt.Sprintf("%s:%s", img.Name, img.Tag)),
+			img.Description,
+			styles.Muted.Render(strings.Join(img.Features, ", ")),
+		})
+	}
+
+	table := tui.NewTable().
+		Headers("IMAGE", "DESCRIPTION", "FEATURES").
+		Rows(rows)
+
+	out.Println(table.String())
 }
 
 func newBackendsCmd() *cobra.Command {
@@ -617,62 +649,64 @@ func newBackendsCmd() *cobra.Command {
 			out := getOutput()
 
 			backends := mgr.ListAvailableBackends(ctx)
-
-			if len(backends) == 0 {
-				if out.IsJSON() {
-					return out.PrintJSON(tui.NewListResult([]string{}))
-				}
-
-				styles := tui.DefaultStyles()
-				fmt.Println(tui.WarningMessage("No backends available"))
-				fmt.Println()
-				fmt.Println(styles.Subtitle.Render("Install one of the following:"))
-				fmt.Println()
-				fmt.Println("  • " + styles.Bold.Render("Docker:") + " " + tui.URL("https://docs.docker.com/get-docker/"))
-				fmt.Println("  • " + styles.Bold.Render("Colima (macOS):") + " " + tui.Code("brew install colima"))
-				fmt.Println("  • " + styles.Bold.Render("WSL (Windows):") + " " + tui.URL("https://docs.microsoft.com/en-us/windows/wsl/install"))
-				fmt.Println()
-				return nil
-			}
-
-			if out.IsJSON() {
-				type backendInfo struct {
-					Name string `json:"name"`
-					Mode string `json:"mode"`
-				}
-				var result []backendInfo
-				for _, b := range backends {
-					result = append(result, backendInfo{
-						Name: b.Name(),
-						Mode: string(b.Mode()),
-					})
-				}
-				return out.PrintJSON(tui.NewListResult(result))
-			}
-
-			// Table output
-			styles := tui.DefaultStyles()
-			fmt.Println()
-			fmt.Println(styles.Title.Render("Available Backends"))
-			fmt.Println()
-
-			var rows [][]string
-			for _, b := range backends {
-				rows = append(rows, []string{
-					styles.Bold.Render(b.Name()),
-					string(b.Mode()),
-					styles.Success.Render("● available"),
-				})
-			}
-
-			table := tui.NewTable().
-				Headers("NAME", "MODE", "STATUS").
-				Rows(rows)
-
-			fmt.Println(table.String())
-			return nil
+			return out.Render(&backendsResult{backends: backends})
 		},
 	}
+}
+
+// backendsResult implements Renderable for backends command
+type backendsResult struct {
+	backends []studio.Backend
+}
+
+func (r *backendsResult) RenderJSON() any {
+	type backendInfo struct {
+		Name string `json:"name"`
+		Mode string `json:"mode"`
+	}
+	var result []backendInfo
+	for _, b := range r.backends {
+		result = append(result, backendInfo{
+			Name: b.Name(),
+			Mode: string(b.Mode()),
+		})
+	}
+	return tui.NewListResult(result)
+}
+
+func (r *backendsResult) RenderTUI(out *tui.Output) {
+	styles := tui.DefaultStyles()
+
+	if len(r.backends) == 0 {
+		out.Warning("No backends available")
+		out.Println()
+		out.Println(styles.Subtitle.Render("Install one of the following:"))
+		out.Println()
+		out.Println("  • " + styles.Bold.Render("Docker:") + " " + tui.URL("https://docs.docker.com/get-docker/"))
+		out.Println("  • " + styles.Bold.Render("Colima (macOS):") + " " + tui.Code("brew install colima"))
+		out.Println("  • " + styles.Bold.Render("WSL (Windows):") + " " + tui.URL("https://docs.microsoft.com/en-us/windows/wsl/install"))
+		out.Println()
+		return
+	}
+
+	out.Println()
+	out.Println(styles.Title.Render("Available Backends"))
+	out.Println()
+
+	var rows [][]string
+	for _, b := range r.backends {
+		rows = append(rows, []string{
+			styles.Bold.Render(b.Name()),
+			string(b.Mode()),
+			styles.Success.Render("● available"),
+		})
+	}
+
+	table := tui.NewTable().
+		Headers("NAME", "MODE", "STATUS").
+		Rows(rows)
+
+	out.Println(table.String())
 }
 
 // Helper functions
@@ -685,7 +719,6 @@ func truncate(s string, maxLen int) string {
 }
 
 func truncateImage(image string) string {
-	// Remove registry prefix if present
 	parts := strings.Split(image, "/")
 	if len(parts) > 2 {
 		image = strings.Join(parts[len(parts)-2:], "/")

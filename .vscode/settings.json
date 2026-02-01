@@ -1,7 +1,9 @@
 {
     "cSpell.words": [
+        "cmdutil",
         "fsnotify",
         "Infof",
-        "klog"
+        "klog",
+        "Renderable"
     ]
 }

@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"runtime"
 
+	"github.com/NexusGPU/gpu-go/cmd/ggo/cmdutil"
 	"github.com/NexusGPU/gpu-go/internal/api"
 	"github.com/NexusGPU/gpu-go/internal/platform"
+	"github.com/NexusGPU/gpu-go/internal/tui"
 	"github.com/spf13/cobra"
 	"k8s.io/klog/v2"
 )
@@ -16,7 +18,8 @@ import (
 var paths = platform.DefaultPaths()
 
 var (
-	serverURL string
+	serverURL    string
+	outputFormat string
 )
 
 // NewUseCmd creates the use command
@@ -43,11 +46,10 @@ Examples:
 			shortCode := args[0]
 			client := api.NewClient(api.WithBaseURL(serverURL))
 			ctx := context.Background()
+			out := getOutput()
 
-			// Get share info
 			shareInfo, err := client.GetSharePublic(ctx, shortCode)
 			if err != nil {
-				// Runtime error - don't show help
 				cmd.SilenceUsage = true
 				klog.Errorf("Failed to get share info: error=%v", err)
 				return err
@@ -55,19 +57,23 @@ Examples:
 
 			klog.Infof("Found GPU worker: worker_id=%s vendor=%s connection_url=%s", shareInfo.WorkerID, shareInfo.HardwareVendor, shareInfo.ConnectionURL)
 
-			// Set up the environment
 			if longTerm {
-				return setupLongTermEnv(shareInfo, outputDir)
+				return setupLongTermEnv(shareInfo, outputDir, out)
 			}
-			return setupTemporaryEnv(shareInfo)
+			return setupTemporaryEnv(shareInfo, out)
 		},
 	}
 
+	cmdutil.AddOutputFlag(cmd, &outputFormat)
 	cmd.Flags().StringVar(&serverURL, "server", api.GetDefaultBaseURL(), "Server URL (or set GPU_GO_ENDPOINT env var)")
 	cmd.Flags().BoolVar(&longTerm, "long-term", false, "Set up a long-term connection")
-	cmd.Flags().StringVar(&outputDir, "output", "", "Output directory for configuration files")
+	cmd.Flags().StringVar(&outputDir, "output-dir", "", "Output directory for configuration files")
 
 	return cmd
+}
+
+func getOutput() *tui.Output {
+	return cmdutil.NewOutput(outputFormat)
 }
 
 // NewCleanCmd creates the clean command
@@ -87,8 +93,9 @@ Examples:
   ggo clean --all`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			out := getOutput()
 			if all {
-				return cleanAllEnv()
+				return cleanAllEnv(out)
 			}
 
 			if len(args) == 0 {
@@ -96,7 +103,7 @@ Examples:
 			}
 
 			shortCode := args[0]
-			return cleanEnv(shortCode)
+			return cleanEnv(shortCode, out)
 		},
 	}
 
@@ -106,31 +113,41 @@ Examples:
 }
 
 // setupTemporaryEnv sets up a temporary GPU environment
-func setupTemporaryEnv(shareInfo *api.SharePublicInfo) error {
+func setupTemporaryEnv(shareInfo *api.SharePublicInfo, out *tui.Output) error {
 	klog.Info("Setting up temporary GPU environment...")
 
-	// Create temporary directory
 	tmpDir, err := os.MkdirTemp("", "gpugo-*")
 	if err != nil {
 		return fmt.Errorf("failed to create temp directory: %w", err)
 	}
 
-	// Write connection info
 	connFile := filepath.Join(tmpDir, "connection.txt")
 	if err := os.WriteFile(connFile, []byte(shareInfo.ConnectionURL), 0644); err != nil {
 		return fmt.Errorf("failed to write connection file: %w", err)
 	}
 
 	if platform.IsWindows() {
-		return setupTemporaryEnvWindows(shareInfo, tmpDir)
+		return out.Render(&tempEnvResultWindows{shareInfo: shareInfo, tmpDir: tmpDir})
 	}
-	return setupTemporaryEnvUnix(shareInfo, tmpDir)
+	return out.Render(&tempEnvResultUnix{shareInfo: shareInfo, tmpDir: tmpDir})
 }
 
-// setupTemporaryEnvUnix sets up temporary environment on Unix systems
-func setupTemporaryEnvUnix(shareInfo *api.SharePublicInfo, tmpDir string) error {
-	// Set up environment variables
-	envFile := filepath.Join(tmpDir, "env.sh")
+// tempEnvResultUnix implements Renderable for Unix temporary env setup
+type tempEnvResultUnix struct {
+	shareInfo *api.SharePublicInfo
+	tmpDir    string
+}
+
+func (r *tempEnvResultUnix) RenderJSON() any {
+	return map[string]any{
+		"success": true,
+		"tmp_dir": r.tmpDir,
+		"share":   r.shareInfo,
+	}
+}
+
+func (r *tempEnvResultUnix) RenderTUI(out *tui.Output) {
+	envFile := filepath.Join(r.tmpDir, "env.sh")
 	envContent := fmt.Sprintf(`#!/bin/bash
 # GPU Go temporary environment
 export GPU_GO_CONNECTION_URL="%s"
@@ -147,38 +164,49 @@ echo "GPU Go environment activated!"
 echo "Connection URL: %s"
 echo ""
 echo "To deactivate, run: ggo clean"
-`, shareInfo.ConnectionURL, shareInfo.WorkerID, shareInfo.HardwareVendor, tmpDir,
-		shareInfo.HardwareVendor, shareInfo.ConnectionURL)
+`, r.shareInfo.ConnectionURL, r.shareInfo.WorkerID, r.shareInfo.HardwareVendor, r.tmpDir,
+		r.shareInfo.HardwareVendor, r.shareInfo.ConnectionURL)
 
 	if err := os.WriteFile(envFile, []byte(envContent), 0755); err != nil {
-		return fmt.Errorf("failed to write env file: %w", err)
+		out.Error(fmt.Sprintf("Failed to write env file: %v", err))
+		return
 	}
 
-	// Create activation script
-	activateScript := filepath.Join(tmpDir, "activate")
+	activateScript := filepath.Join(r.tmpDir, "activate")
 	if err := os.WriteFile(activateScript, []byte("source "+envFile), 0755); err != nil {
-		return fmt.Errorf("failed to write activate script: %w", err)
+		out.Error(fmt.Sprintf("Failed to write activate script: %v", err))
+		return
 	}
 
-	fmt.Println()
-	fmt.Println("Temporary GPU environment set up successfully!")
-	fmt.Println()
-	fmt.Printf("   Connection URL: %s\n", shareInfo.ConnectionURL)
-	fmt.Printf("   Hardware:       %s\n", shareInfo.HardwareVendor)
-	fmt.Println()
-	fmt.Println("To activate the environment, run:")
-	fmt.Printf("\n   source %s\n\n", envFile)
-	fmt.Println("To clean up, run:")
-	fmt.Println("\n   ggo clean")
-	fmt.Println()
-
-	return nil
+	out.Println()
+	out.Println("Temporary GPU environment set up successfully!")
+	out.Println()
+	out.Printf("   Connection URL: %s\n", r.shareInfo.ConnectionURL)
+	out.Printf("   Hardware:       %s\n", r.shareInfo.HardwareVendor)
+	out.Println()
+	out.Println("To activate the environment, run:")
+	out.Printf("\n   source %s\n\n", envFile)
+	out.Println("To clean up, run:")
+	out.Println("\n   ggo clean")
+	out.Println()
 }
 
-// setupTemporaryEnvWindows sets up temporary environment on Windows
-func setupTemporaryEnvWindows(shareInfo *api.SharePublicInfo, tmpDir string) error {
-	// PowerShell activation script
-	psFile := filepath.Join(tmpDir, "env.ps1")
+// tempEnvResultWindows implements Renderable for Windows temporary env setup
+type tempEnvResultWindows struct {
+	shareInfo *api.SharePublicInfo
+	tmpDir    string
+}
+
+func (r *tempEnvResultWindows) RenderJSON() any {
+	return map[string]any{
+		"success": true,
+		"tmp_dir": r.tmpDir,
+		"share":   r.shareInfo,
+	}
+}
+
+func (r *tempEnvResultWindows) RenderTUI(out *tui.Output) {
+	psFile := filepath.Join(r.tmpDir, "env.ps1")
 	psContent := fmt.Sprintf(`# GPU Go temporary environment (PowerShell)
 $env:GPU_GO_CONNECTION_URL = "%s"
 $env:GPU_GO_WORKER_ID = "%s"
@@ -194,15 +222,15 @@ Write-Host "GPU Go environment activated!"
 Write-Host "Connection URL: %s"
 Write-Host ""
 Write-Host "To deactivate, run: ggo clean"
-`, shareInfo.ConnectionURL, shareInfo.WorkerID, shareInfo.HardwareVendor, tmpDir,
-		shareInfo.ConnectionURL)
+`, r.shareInfo.ConnectionURL, r.shareInfo.WorkerID, r.shareInfo.HardwareVendor, r.tmpDir,
+		r.shareInfo.ConnectionURL)
 
 	if err := os.WriteFile(psFile, []byte(psContent), 0644); err != nil {
-		return fmt.Errorf("failed to write PowerShell env file: %w", err)
+		out.Error(fmt.Sprintf("Failed to write PowerShell env file: %v", err))
+		return
 	}
 
-	// CMD batch file
-	batFile := filepath.Join(tmpDir, "env.bat")
+	batFile := filepath.Join(r.tmpDir, "env.bat")
 	batContent := fmt.Sprintf(`@echo off
 REM GPU Go temporary environment (CMD)
 set GPU_GO_CONNECTION_URL=%s
@@ -217,34 +245,33 @@ echo GPU Go environment activated!
 echo Connection URL: %s
 echo.
 echo To deactivate, run: ggo clean
-`, shareInfo.ConnectionURL, shareInfo.WorkerID, shareInfo.HardwareVendor, tmpDir,
-		shareInfo.ConnectionURL)
+`, r.shareInfo.ConnectionURL, r.shareInfo.WorkerID, r.shareInfo.HardwareVendor, r.tmpDir,
+		r.shareInfo.ConnectionURL)
 
 	if err := os.WriteFile(batFile, []byte(batContent), 0644); err != nil {
-		return fmt.Errorf("failed to write batch env file: %w", err)
+		out.Error(fmt.Sprintf("Failed to write batch env file: %v", err))
+		return
 	}
 
-	fmt.Println()
-	fmt.Println("Temporary GPU environment set up successfully!")
-	fmt.Println()
-	fmt.Printf("   Connection URL: %s\n", shareInfo.ConnectionURL)
-	fmt.Printf("   Hardware:       %s\n", shareInfo.HardwareVendor)
-	fmt.Println()
-	fmt.Println("To activate the environment:")
-	fmt.Println()
-	fmt.Println("  PowerShell:")
-	fmt.Printf("    . %s\n\n", psFile)
-	fmt.Println("  CMD:")
-	fmt.Printf("    %s\n\n", batFile)
-	fmt.Println("To clean up, run:")
-	fmt.Println("\n   ggo clean")
-	fmt.Println()
-
-	return nil
+	out.Println()
+	out.Println("Temporary GPU environment set up successfully!")
+	out.Println()
+	out.Printf("   Connection URL: %s\n", r.shareInfo.ConnectionURL)
+	out.Printf("   Hardware:       %s\n", r.shareInfo.HardwareVendor)
+	out.Println()
+	out.Println("To activate the environment:")
+	out.Println()
+	out.Println("  PowerShell:")
+	out.Printf("    . %s\n\n", psFile)
+	out.Println("  CMD:")
+	out.Printf("    %s\n\n", batFile)
+	out.Println("To clean up, run:")
+	out.Println("\n   ggo clean")
+	out.Println()
 }
 
 // setupLongTermEnv sets up a long-term GPU environment
-func setupLongTermEnv(shareInfo *api.SharePublicInfo, outputDir string) error {
+func setupLongTermEnv(shareInfo *api.SharePublicInfo, outputDir string, out *tui.Output) error {
 	klog.Info("Setting up long-term GPU environment...")
 
 	if outputDir == "" {
@@ -255,7 +282,6 @@ func setupLongTermEnv(shareInfo *api.SharePublicInfo, outputDir string) error {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	// Write connection configuration
 	configFile := filepath.Join(outputDir, "config.json")
 	configContent := fmt.Sprintf(`{
   "connection_url": "%s",
@@ -270,15 +296,27 @@ func setupLongTermEnv(shareInfo *api.SharePublicInfo, outputDir string) error {
 	}
 
 	if platform.IsWindows() {
-		return setupLongTermEnvWindows(shareInfo, outputDir)
+		return out.Render(&longTermEnvResultWindows{shareInfo: shareInfo, outputDir: outputDir})
 	}
-	return setupLongTermEnvUnix(shareInfo, outputDir)
+	return out.Render(&longTermEnvResultUnix{shareInfo: shareInfo, outputDir: outputDir})
 }
 
-// setupLongTermEnvUnix sets up long-term environment on Unix
-func setupLongTermEnvUnix(shareInfo *api.SharePublicInfo, outputDir string) error {
-	// Write shell profile snippet
-	profileSnippet := filepath.Join(outputDir, "profile.sh")
+// longTermEnvResultUnix implements Renderable for Unix long-term env setup
+type longTermEnvResultUnix struct {
+	shareInfo *api.SharePublicInfo
+	outputDir string
+}
+
+func (r *longTermEnvResultUnix) RenderJSON() any {
+	return map[string]any{
+		"success":    true,
+		"config_dir": r.outputDir,
+		"share":      r.shareInfo,
+	}
+}
+
+func (r *longTermEnvResultUnix) RenderTUI(out *tui.Output) {
+	profileSnippet := filepath.Join(r.outputDir, "profile.sh")
 	profileContent := fmt.Sprintf(`# GPU Go long-term environment
 # Add this to your ~/.bashrc or ~/.zshrc:
 # source %s
@@ -287,32 +325,43 @@ export GPU_GO_CONNECTION_URL="%s"
 export GPU_GO_WORKER_ID="%s"
 export GPU_GO_VENDOR="%s"
 export GPU_GO_CONFIG_DIR="%s"
-`, profileSnippet, shareInfo.ConnectionURL, shareInfo.WorkerID, shareInfo.HardwareVendor, outputDir)
+`, profileSnippet, r.shareInfo.ConnectionURL, r.shareInfo.WorkerID, r.shareInfo.HardwareVendor, r.outputDir)
 
 	if err := os.WriteFile(profileSnippet, []byte(profileContent), 0644); err != nil {
-		return fmt.Errorf("failed to write profile snippet: %w", err)
+		out.Error(fmt.Sprintf("Failed to write profile snippet: %v", err))
+		return
 	}
 
-	fmt.Println()
-	fmt.Println("Long-term GPU environment set up successfully!")
-	fmt.Println()
-	fmt.Printf("   Config directory: %s\n", outputDir)
-	fmt.Printf("   Connection URL:   %s\n", shareInfo.ConnectionURL)
-	fmt.Printf("   Hardware:         %s\n", shareInfo.HardwareVendor)
-	fmt.Println()
-	fmt.Println("To activate in all new shells, add this to your ~/.bashrc or ~/.zshrc:")
-	fmt.Printf("\n   source %s\n\n", profileSnippet)
-	fmt.Println("To clean up, run:")
-	fmt.Println("\n   ggo clean --all")
-	fmt.Println()
-
-	return nil
+	out.Println()
+	out.Println("Long-term GPU environment set up successfully!")
+	out.Println()
+	out.Printf("   Config directory: %s\n", r.outputDir)
+	out.Printf("   Connection URL:   %s\n", r.shareInfo.ConnectionURL)
+	out.Printf("   Hardware:         %s\n", r.shareInfo.HardwareVendor)
+	out.Println()
+	out.Println("To activate in all new shells, add this to your ~/.bashrc or ~/.zshrc:")
+	out.Printf("\n   source %s\n\n", profileSnippet)
+	out.Println("To clean up, run:")
+	out.Println("\n   ggo clean --all")
+	out.Println()
 }
 
-// setupLongTermEnvWindows sets up long-term environment on Windows
-func setupLongTermEnvWindows(shareInfo *api.SharePublicInfo, outputDir string) error {
-	// Write PowerShell profile snippet
-	psProfile := filepath.Join(outputDir, "profile.ps1")
+// longTermEnvResultWindows implements Renderable for Windows long-term env setup
+type longTermEnvResultWindows struct {
+	shareInfo *api.SharePublicInfo
+	outputDir string
+}
+
+func (r *longTermEnvResultWindows) RenderJSON() any {
+	return map[string]any{
+		"success":    true,
+		"config_dir": r.outputDir,
+		"share":      r.shareInfo,
+	}
+}
+
+func (r *longTermEnvResultWindows) RenderTUI(out *tui.Output) {
+	psProfile := filepath.Join(r.outputDir, "profile.ps1")
 	psContent := fmt.Sprintf(`# GPU Go long-term environment (PowerShell)
 # Add this to your PowerShell profile ($PROFILE):
 # . "%s"
@@ -321,14 +370,14 @@ $env:GPU_GO_CONNECTION_URL = "%s"
 $env:GPU_GO_WORKER_ID = "%s"
 $env:GPU_GO_VENDOR = "%s"
 $env:GPU_GO_CONFIG_DIR = "%s"
-`, psProfile, shareInfo.ConnectionURL, shareInfo.WorkerID, shareInfo.HardwareVendor, outputDir)
+`, psProfile, r.shareInfo.ConnectionURL, r.shareInfo.WorkerID, r.shareInfo.HardwareVendor, r.outputDir)
 
 	if err := os.WriteFile(psProfile, []byte(psContent), 0644); err != nil {
-		return fmt.Errorf("failed to write PowerShell profile: %w", err)
+		out.Error(fmt.Sprintf("Failed to write PowerShell profile: %v", err))
+		return
 	}
 
-	// Write CMD environment setup script
-	batFile := filepath.Join(outputDir, "env.bat")
+	batFile := filepath.Join(r.outputDir, "env.bat")
 	batContent := fmt.Sprintf(`@echo off
 REM GPU Go long-term environment (CMD)
 setx GPU_GO_CONNECTION_URL "%s"
@@ -336,36 +385,34 @@ setx GPU_GO_WORKER_ID "%s"
 setx GPU_GO_VENDOR "%s"
 setx GPU_GO_CONFIG_DIR "%s"
 echo Environment variables set. Please restart your terminal.
-`, shareInfo.ConnectionURL, shareInfo.WorkerID, shareInfo.HardwareVendor, outputDir)
+`, r.shareInfo.ConnectionURL, r.shareInfo.WorkerID, r.shareInfo.HardwareVendor, r.outputDir)
 
 	if err := os.WriteFile(batFile, []byte(batContent), 0644); err != nil {
-		return fmt.Errorf("failed to write batch file: %w", err)
+		out.Error(fmt.Sprintf("Failed to write batch file: %v", err))
+		return
 	}
 
-	fmt.Println()
-	fmt.Println("Long-term GPU environment set up successfully!")
-	fmt.Println()
-	fmt.Printf("   Config directory: %s\n", outputDir)
-	fmt.Printf("   Connection URL:   %s\n", shareInfo.ConnectionURL)
-	fmt.Printf("   Hardware:         %s\n", shareInfo.HardwareVendor)
-	fmt.Println()
-	fmt.Println("To activate in all new PowerShell sessions, add this to your profile:")
-	fmt.Println("  Run: notepad $PROFILE")
-	fmt.Printf("  Add: . \"%s\"\n\n", psProfile)
-	fmt.Println("Or run the batch file to set permanent environment variables:")
-	fmt.Printf("  %s\n\n", batFile)
-	fmt.Println("To clean up, run:")
-	fmt.Println("\n   ggo clean --all")
-	fmt.Println()
-
-	return nil
+	out.Println()
+	out.Println("Long-term GPU environment set up successfully!")
+	out.Println()
+	out.Printf("   Config directory: %s\n", r.outputDir)
+	out.Printf("   Connection URL:   %s\n", r.shareInfo.ConnectionURL)
+	out.Printf("   Hardware:         %s\n", r.shareInfo.HardwareVendor)
+	out.Println()
+	out.Println("To activate in all new PowerShell sessions, add this to your profile:")
+	out.Println("  Run: notepad $PROFILE")
+	out.Printf("  Add: . \"%s\"\n\n", psProfile)
+	out.Println("Or run the batch file to set permanent environment variables:")
+	out.Printf("  %s\n\n", batFile)
+	out.Println("To clean up, run:")
+	out.Println("\n   ggo clean --all")
+	out.Println()
 }
 
 // cleanEnv cleans up a specific GPU environment
-func cleanEnv(shortCode string) error {
+func cleanEnv(shortCode string, out *tui.Output) error {
 	klog.Infof("Cleaning up GPU environment: short_code=%s", shortCode)
 
-	// Clean temporary directories using platform-appropriate glob
 	tmpDirs, _ := filepath.Glob(paths.GlobPattern("gpugo-"))
 	for _, dir := range tmpDirs {
 		if err := os.RemoveAll(dir); err != nil {
@@ -373,15 +420,17 @@ func cleanEnv(shortCode string) error {
 		}
 	}
 
-	fmt.Println("GPU environment cleaned up successfully!")
-	return nil
+	return out.Render(&cmdutil.ActionData{
+		Success: true,
+		Message: "GPU environment cleaned up successfully",
+		ID:      shortCode,
+	})
 }
 
 // cleanAllEnv cleans up all GPU environments
-func cleanAllEnv() error {
+func cleanAllEnv(out *tui.Output) error {
 	klog.Info("Cleaning up all GPU environments...")
 
-	// Clean temporary directories using platform-appropriate glob
 	tmpDirs, _ := filepath.Glob(paths.GlobPattern("gpugo-"))
 	for _, dir := range tmpDirs {
 		if err := os.RemoveAll(dir); err != nil {
@@ -391,7 +440,6 @@ func cleanAllEnv() error {
 		}
 	}
 
-	// Clean long-term config from user directory
 	gpugoDir := paths.UserDir()
 	if _, err := os.Stat(gpugoDir); err == nil {
 		if err := os.RemoveAll(gpugoDir); err != nil {
@@ -401,18 +449,26 @@ func cleanAllEnv() error {
 		}
 	}
 
-	// Unset environment variables (remind user)
-	fmt.Println("All GPU environments cleaned up successfully!")
-	fmt.Println()
-	fmt.Println("Note: Environment variables in your current shell are not affected.")
-	if platform.IsWindows() {
-		fmt.Println("Start a new shell or run in PowerShell:")
-		fmt.Println("  Remove-Item Env:GPU_GO_CONNECTION_URL, Env:GPU_GO_WORKER_ID, Env:GPU_GO_VENDOR")
-	} else {
-		fmt.Println("Start a new shell or run:")
-		fmt.Println("  unset GPU_GO_CONNECTION_URL GPU_GO_WORKER_ID GPU_GO_VENDOR")
-	}
-	fmt.Println()
+	return out.Render(&cleanAllResult{})
+}
 
-	return nil
+// cleanAllResult implements Renderable for clean all command
+type cleanAllResult struct{}
+
+func (r *cleanAllResult) RenderJSON() any {
+	return tui.NewActionResult(true, "All GPU environments cleaned up successfully", "")
+}
+
+func (r *cleanAllResult) RenderTUI(out *tui.Output) {
+	out.Println("All GPU environments cleaned up successfully!")
+	out.Println()
+	out.Println("Note: Environment variables in your current shell are not affected.")
+	if platform.IsWindows() {
+		out.Println("Start a new shell or run in PowerShell:")
+		out.Println("  Remove-Item Env:GPU_GO_CONNECTION_URL, Env:GPU_GO_WORKER_ID, Env:GPU_GO_VENDOR")
+	} else {
+		out.Println("Start a new shell or run:")
+		out.Println("  unset GPU_GO_CONNECTION_URL GPU_GO_WORKER_ID GPU_GO_VENDOR")
+	}
+	out.Println()
 }

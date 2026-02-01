@@ -97,6 +97,21 @@ func (o *Output) Print(data interface{}, tableFunc func()) error {
 	return nil
 }
 
+// Renderable is an interface for types that can render themselves in both JSON and TUI formats
+type Renderable interface {
+	RenderJSON() any
+	RenderTUI(out *Output)
+}
+
+// Render outputs the renderable data based on the configured format
+func (o *Output) Render(r Renderable) error {
+	if o.IsJSON() {
+		return o.PrintJSON(r.RenderJSON())
+	}
+	r.RenderTUI(o)
+	return nil
+}
+
 // Success prints a success message (only in table format)
 func (o *Output) Success(message string) {
 	if !o.IsJSON() {
@@ -133,7 +148,7 @@ func (o *Output) Println(a ...interface{}) {
 }
 
 // Printf prints formatted output (only in table format)
-func (o *Output) Printf(format string, a ...interface{}) {
+func (o *Output) Printf(format string, a ...any) {
 	if !o.IsJSON() {
 		_, _ = fmt.Fprintf(o.config.Writer, format, a...)
 	}

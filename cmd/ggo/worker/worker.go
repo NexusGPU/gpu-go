@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/NexusGPU/gpu-go/cmd/ggo/auth"
+	"github.com/NexusGPU/gpu-go/cmd/ggo/cmdutil"
 	"github.com/NexusGPU/gpu-go/internal/api"
 	"github.com/NexusGPU/gpu-go/internal/tui"
 	"github.com/spf13/cobra"
@@ -29,7 +30,7 @@ func NewWorkerCmd() *cobra.Command {
 
 	cmd.PersistentFlags().StringVar(&serverURL, "server", api.GetDefaultBaseURL(), "Server URL (or set GPU_GO_ENDPOINT env var)")
 	cmd.PersistentFlags().StringVar(&userToken, "token", "", "User authentication token")
-	cmd.PersistentFlags().StringVarP(&outputFormat, "output", "o", "table", "Output format (table, json)")
+	cmdutil.AddOutputFlag(cmd, &outputFormat)
 
 	cmd.AddCommand(newWorkerListCmd())
 	cmd.AddCommand(newWorkerCreateCmd())
@@ -48,7 +49,6 @@ func getClient() *api.Client {
 	if token == "" {
 		token = os.Getenv("GPU_GO_USER_TOKEN")
 	}
-	// Fall back to token from ~/.gpugo/token.json
 	if token == "" {
 		if savedToken, err := auth.GetToken(); err == nil && savedToken != "" {
 			token = savedToken
@@ -61,7 +61,7 @@ func getClient() *api.Client {
 }
 
 func getOutput() *tui.Output {
-	return tui.NewOutputWithFormat(tui.ParseOutputFormat(outputFormat))
+	return cmdutil.NewOutput(outputFormat)
 }
 
 func newWorkerListCmd() *cobra.Command {
@@ -79,50 +79,12 @@ func newWorkerListCmd() *cobra.Command {
 
 			resp, err := client.ListWorkers(ctx, agentID, hostname)
 			if err != nil {
-				// Runtime error - don't show help
 				cmd.SilenceUsage = true
 				klog.Errorf("Failed to list workers: error=%v", err)
 				return err
 			}
 
-			if len(resp.Workers) == 0 {
-				if out.IsJSON() {
-					return out.PrintJSON(tui.NewListResult([]api.WorkerInfo{}))
-				}
-				out.Info("No workers found")
-				return nil
-			}
-
-			// JSON output
-			if out.IsJSON() {
-				return out.PrintJSON(tui.NewListResult(resp.Workers))
-			}
-
-			// Table output
-			styles := tui.DefaultStyles()
-			var rows [][]string
-			for _, w := range resp.Workers {
-				statusIcon := tui.StatusIcon(w.Status)
-				statusStyled := styles.StatusStyle(w.Status).Render(statusIcon + " " + w.Status)
-
-				enabledIcon := tui.StatusIcon(boolToYesNo(w.Enabled))
-				enabledStyled := styles.StatusStyle(boolToYesNo(w.Enabled)).Render(enabledIcon)
-
-				rows = append(rows, []string{
-					w.WorkerID,
-					w.Name,
-					statusStyled,
-					fmt.Sprintf("%d", w.ListenPort),
-					enabledStyled,
-				})
-			}
-
-			table := tui.NewTable().
-				Headers("WORKER ID", "NAME", "STATUS", "PORT", "ENABLED").
-				Rows(rows)
-
-			fmt.Println(table.String())
-			return nil
+			return out.Render(&workerListResult{workers: resp.Workers})
 		},
 	}
 
@@ -130,6 +92,46 @@ func newWorkerListCmd() *cobra.Command {
 	cmd.Flags().StringVar(&hostname, "hostname", "", "Filter by hostname")
 
 	return cmd
+}
+
+// workerListResult implements Renderable for worker list
+type workerListResult struct {
+	workers []api.WorkerInfo
+}
+
+func (r *workerListResult) RenderJSON() any {
+	return tui.NewListResult(r.workers)
+}
+
+func (r *workerListResult) RenderTUI(out *tui.Output) {
+	if len(r.workers) == 0 {
+		out.Info("No workers found")
+		return
+	}
+
+	styles := tui.DefaultStyles()
+	var rows [][]string
+	for _, w := range r.workers {
+		statusIcon := tui.StatusIcon(w.Status)
+		statusStyled := styles.StatusStyle(w.Status).Render(statusIcon + " " + w.Status)
+
+		enabledIcon := tui.StatusIcon(boolToYesNo(w.Enabled))
+		enabledStyled := styles.StatusStyle(boolToYesNo(w.Enabled)).Render(enabledIcon)
+
+		rows = append(rows, []string{
+			w.WorkerID,
+			w.Name,
+			statusStyled,
+			fmt.Sprintf("%d", w.ListenPort),
+			enabledStyled,
+		})
+	}
+
+	table := tui.NewTable().
+		Headers("WORKER ID", "NAME", "STATUS", "PORT", "ENABLED").
+		Rows(rows)
+
+	out.Println(table.String())
 }
 
 func newWorkerCreateCmd() *cobra.Command {
@@ -158,28 +160,12 @@ func newWorkerCreateCmd() *cobra.Command {
 
 			resp, err := client.CreateWorker(ctx, req)
 			if err != nil {
-				// Runtime error - don't show help
 				cmd.SilenceUsage = true
 				klog.Errorf("Failed to create worker: error=%v", err)
 				return err
 			}
 
-			if out.IsJSON() {
-				return out.PrintJSON(tui.NewActionResult(true, "Worker created successfully", resp.WorkerID))
-			}
-
-			// Styled output
-			fmt.Println()
-			fmt.Println(tui.SuccessMessage("Worker created successfully!"))
-			fmt.Println()
-
-			status := tui.NewStatusTable().
-				Add("Worker ID", resp.WorkerID).
-				Add("Name", resp.Name).
-				AddWithStatus("Status", resp.Status, resp.Status)
-
-			fmt.Println(status.String())
-			return nil
+			return out.Render(&workerCreateResult{worker: resp})
 		},
 	}
 
@@ -196,6 +182,28 @@ func newWorkerCreateCmd() *cobra.Command {
 	return cmd
 }
 
+// workerCreateResult implements Renderable for worker create
+type workerCreateResult struct {
+	worker *api.WorkerInfo
+}
+
+func (r *workerCreateResult) RenderJSON() any {
+	return tui.NewActionResult(true, "Worker created successfully", r.worker.WorkerID)
+}
+
+func (r *workerCreateResult) RenderTUI(out *tui.Output) {
+	out.Println()
+	out.Success("Worker created successfully!")
+	out.Println()
+
+	status := tui.NewStatusTable().
+		Add("Worker ID", r.worker.WorkerID).
+		Add("Name", r.worker.Name).
+		AddWithStatus("Status", r.worker.Status, r.worker.Status)
+
+	out.Println(status.String())
+}
+
 func newWorkerGetCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "get <worker-id>",
@@ -210,59 +218,64 @@ func newWorkerGetCmd() *cobra.Command {
 
 			resp, err := client.GetWorker(ctx, workerID)
 			if err != nil {
-				// Runtime error - don't show help
 				cmd.SilenceUsage = true
 				klog.Errorf("Failed to get worker: error=%v", err)
 				return err
 			}
 
-			if out.IsJSON() {
-				return out.PrintJSON(tui.NewDetailResult(resp))
-			}
-
-			// Styled output
-			styles := tui.DefaultStyles()
-
-			fmt.Println()
-			fmt.Println(styles.Title.Render("Worker Details"))
-			fmt.Println()
-
-			status := tui.NewStatusTable().
-				Add("Worker ID", resp.WorkerID).
-				Add("Name", resp.Name).
-				Add("Agent ID", resp.AgentID).
-				AddWithStatus("Status", resp.Status, resp.Status).
-				Add("Listen Port", fmt.Sprintf("%d", resp.ListenPort)).
-				AddWithStatus("Enabled", boolToYesNo(resp.Enabled), boolToYesNo(resp.Enabled)).
-				Add("GPU IDs", strings.Join(resp.GPUIDs, ", "))
-
-			fmt.Println(status.String())
-
-			if len(resp.Connections) > 0 {
-				fmt.Println()
-				fmt.Println(styles.Subtitle.Render("Active Connections"))
-				fmt.Println()
-
-				var rows [][]string
-				for _, conn := range resp.Connections {
-					rows = append(rows, []string{
-						conn.ClientIP,
-						conn.ConnectedAt.Format("2006-01-02 15:04:05"),
-					})
-				}
-
-				connTable := tui.NewTable().
-					Headers("CLIENT IP", "CONNECTED AT").
-					Rows(rows)
-
-				fmt.Println(connTable.String())
-			}
-
-			return nil
+			return out.Render(&workerDetailResult{worker: resp})
 		},
 	}
 
 	return cmd
+}
+
+// workerDetailResult implements Renderable for worker detail
+type workerDetailResult struct {
+	worker *api.WorkerInfo
+}
+
+func (r *workerDetailResult) RenderJSON() any {
+	return tui.NewDetailResult(r.worker)
+}
+
+func (r *workerDetailResult) RenderTUI(out *tui.Output) {
+	styles := tui.DefaultStyles()
+
+	out.Println()
+	out.Println(styles.Title.Render("Worker Details"))
+	out.Println()
+
+	status := tui.NewStatusTable().
+		Add("Worker ID", r.worker.WorkerID).
+		Add("Name", r.worker.Name).
+		Add("Agent ID", r.worker.AgentID).
+		AddWithStatus("Status", r.worker.Status, r.worker.Status).
+		Add("Listen Port", fmt.Sprintf("%d", r.worker.ListenPort)).
+		AddWithStatus("Enabled", boolToYesNo(r.worker.Enabled), boolToYesNo(r.worker.Enabled)).
+		Add("GPU IDs", strings.Join(r.worker.GPUIDs, ", "))
+
+	out.Println(status.String())
+
+	if len(r.worker.Connections) > 0 {
+		out.Println()
+		out.Println(styles.Subtitle.Render("Active Connections"))
+		out.Println()
+
+		var rows [][]string
+		for _, conn := range r.worker.Connections {
+			rows = append(rows, []string{
+				conn.ClientIP,
+				conn.ConnectedAt.Format("2006-01-02 15:04:05"),
+			})
+		}
+
+		connTable := tui.NewTable().
+			Headers("CLIENT IP", "CONNECTED AT").
+			Rows(rows)
+
+		out.Println(connTable.String())
+	}
 }
 
 func newWorkerUpdateCmd() *cobra.Command {
@@ -298,32 +311,18 @@ func newWorkerUpdateCmd() *cobra.Command {
 				req.Enabled = &enabled
 			}
 			if cmd.Flags().Changed("disabled") {
-				disabled := !disabled
-				req.Enabled = &disabled
+				notDisabled := !disabled
+				req.Enabled = &notDisabled
 			}
 
 			resp, err := client.UpdateWorker(ctx, workerID, req)
 			if err != nil {
-				// Runtime error - don't show help
 				cmd.SilenceUsage = true
 				klog.Errorf("Failed to update worker: error=%v", err)
 				return err
 			}
 
-			if out.IsJSON() {
-				return out.PrintJSON(tui.NewActionResult(true, "Worker updated successfully", resp.WorkerID))
-			}
-
-			fmt.Println()
-			fmt.Println(tui.SuccessMessage("Worker updated successfully!"))
-			fmt.Println()
-
-			status := tui.NewStatusTable().
-				Add("Worker ID", resp.WorkerID).
-				AddWithStatus("Status", resp.Status, resp.Status)
-
-			fmt.Println(status.String())
-			return nil
+			return out.Render(&workerUpdateResult{worker: resp})
 		},
 	}
 
@@ -334,6 +333,27 @@ func newWorkerUpdateCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&disabled, "disabled", false, "Disable worker")
 
 	return cmd
+}
+
+// workerUpdateResult implements Renderable for worker update
+type workerUpdateResult struct {
+	worker *api.WorkerInfo
+}
+
+func (r *workerUpdateResult) RenderJSON() any {
+	return tui.NewActionResult(true, "Worker updated successfully", r.worker.WorkerID)
+}
+
+func (r *workerUpdateResult) RenderTUI(out *tui.Output) {
+	out.Println()
+	out.Success("Worker updated successfully!")
+	out.Println()
+
+	status := tui.NewStatusTable().
+		Add("Worker ID", r.worker.WorkerID).
+		AddWithStatus("Status", r.worker.Status, r.worker.Status)
+
+	out.Println(status.String())
 }
 
 func newWorkerDeleteCmd() *cobra.Command {
@@ -364,19 +384,16 @@ func newWorkerDeleteCmd() *cobra.Command {
 			}
 
 			if err := client.DeleteWorker(ctx, workerID); err != nil {
-				// Runtime error - don't show help
 				cmd.SilenceUsage = true
 				klog.Errorf("Failed to delete worker: error=%v", err)
 				return err
 			}
 
-			if out.IsJSON() {
-				return out.PrintJSON(tui.NewActionResult(true, "Worker deleted successfully", workerID))
-			}
-
-			fmt.Println()
-			fmt.Println(tui.SuccessMessage(fmt.Sprintf("Worker %s deleted successfully!", workerID)))
-			return nil
+			return out.Render(&cmdutil.ActionData{
+				Success: true,
+				Message: fmt.Sprintf("Worker %s deleted successfully!", workerID),
+				ID:      workerID,
+			})
 		},
 	}
 
