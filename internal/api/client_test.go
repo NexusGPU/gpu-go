@@ -167,7 +167,7 @@ func TestClient_ReportAgentStatus(t *testing.T) {
 		assert.Len(t, req.GPUs, 2)
 		assert.Len(t, req.Workers, 1)
 
-		resp := SuccessResponse{Success: true}
+		resp := AgentStatusResponse{Success: true, ConfigVersion: 1}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
 	}))
@@ -195,8 +195,10 @@ func TestClient_ReportAgentStatus(t *testing.T) {
 		},
 	}
 
-	err := client.ReportAgentStatus(context.Background(), "agent_xxxxxxxxxxxx", req)
+	resp, err := client.ReportAgentStatus(context.Background(), "agent_xxxxxxxxxxxx", req)
 	require.NoError(t, err)
+	assert.True(t, resp.Success)
+	assert.Equal(t, 1, resp.ConfigVersion)
 }
 
 func TestClient_CreateWorker(t *testing.T) {

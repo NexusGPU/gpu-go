@@ -28,51 +28,13 @@ export class AuthManager {
      */
     async checkLoginStatus(): Promise<boolean> {
         // First try CLI auth status (more reliable)
-        try {
-            const authStatus = await this.cli.authStatus();
-            if (authStatus.loggedIn) {
-                Logger.log('Auth check via CLI: logged in');
-                this._isLoggedIn = true;
-                this._onAuthStateChanged.fire(true);
-                return true;
-            }
-        } catch (error) {
-            Logger.log('CLI auth status check failed, falling back to token file check');
+        const authStatus = await this.cli.authStatus();
+        if (authStatus.loggedIn) {
+            Logger.log('Auth check via CLI: logged in');
+            this._isLoggedIn = true;
+            this._onAuthStateChanged.fire(true);
+            return true;
         }
-
-        // Fallback: check token file directly
-        try {
-            const tokenPath = this.getTokenPath();
-            await fs.access(tokenPath);
-            
-            // Read and validate token
-            const content = await fs.readFile(tokenPath, 'utf-8');
-            const tokenConfig = JSON.parse(content);
-            
-            if (tokenConfig.token) {
-                // Check if expired
-                if (tokenConfig.expires_at) {
-                    const expiresAt = new Date(tokenConfig.expires_at);
-                    if (expiresAt < new Date()) {
-                        Logger.log('Token expired');
-                        this._isLoggedIn = false;
-                        this._onAuthStateChanged.fire(false);
-                        return false;
-                    }
-                }
-                
-                Logger.log('Token file check: logged in');
-                this._isLoggedIn = true;
-                this._onAuthStateChanged.fire(true);
-                return true;
-            }
-        } catch {
-            // Token file doesn't exist or is invalid
-        }
-        
-        Logger.log('Auth check: not logged in');
-        this._isLoggedIn = false;
-        this._onAuthStateChanged.fire(false);
         return false;
     }
 

@@ -71,6 +71,12 @@ func (p *Paths) BinDir() string {
 	return filepath.Join(p.userDir, "bin")
 }
 
+// AgentPIDFile returns the path to the agent PID file
+// All platforms: ~/.gpugo/state/agent.pid (or StateDir/agent.pid)
+func (p *Paths) AgentPIDFile() string {
+	return filepath.Join(p.stateDir, "agent.pid")
+}
+
 // TempDir returns a platform-appropriate temporary directory
 func (p *Paths) TempDir() string {
 	switch runtime.GOOS {

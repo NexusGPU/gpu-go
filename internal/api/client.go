@@ -354,9 +354,9 @@ func (c *Client) GetAgentConfig(ctx context.Context, agentID string) (*AgentConf
 	return doGet[AgentConfigResponse](c, ctx, "/api/v1/agents/"+agentID+"/config", authAgent, "")
 }
 
-// ReportAgentStatus reports the agent status to the server
-func (c *Client) ReportAgentStatus(ctx context.Context, agentID string, req *AgentStatusRequest) error {
-	return doPostNoResponse(c, ctx, "/api/v1/agents/"+agentID+"/status", req, authAgent)
+// ReportAgentStatus reports the agent status to the server and returns the response
+func (c *Client) ReportAgentStatus(ctx context.Context, agentID string, req *AgentStatusRequest) (*AgentStatusResponse, error) {
+	return doPost[AgentStatusResponse](c, ctx, "/api/v1/agents/"+agentID+"/status", req, authAgent, "")
 }
 
 // ReportAgentMetrics reports the agent metrics to the server

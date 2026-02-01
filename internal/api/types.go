@@ -96,15 +96,39 @@ type WorkerStatus struct {
 	WorkerID    string           `json:"worker_id"`
 	Status      string           `json:"status"`
 	PID         int              `json:"pid,omitempty"`
+	Restarts    int              `json:"restarts,omitempty"`
 	GPUIDs      []string         `json:"gpu_ids"`
 	Connections []ConnectionInfo `json:"connections,omitempty"`
+	// Optimization flags - only update DB when these are true
+	WorkerChanged     *bool `json:"worker_changed,omitempty"`     // true if status/pid/restarts/gpu_ids changed
+	ConnectionChanged *bool `json:"connection_changed,omitempty"` // true if connections changed
+	GPUChanged        *bool `json:"gpu_changed,omitempty"`        // true if vendor/model/vram/driver/cuda changed
 }
+
+// AgentStatusEvent represents special events in status report
+type AgentStatusEvent string
+
+const (
+	// AgentStatusEventShutdown indicates the agent is shutting down
+	AgentStatusEventShutdown AgentStatusEvent = "shutdown"
+)
 
 // AgentStatusRequest represents the request body for agent status report
 type AgentStatusRequest struct {
-	Timestamp time.Time      `json:"timestamp"`
-	GPUs      []GPUStatus    `json:"gpus"`
-	Workers   []WorkerStatus `json:"workers"`
+	Timestamp time.Time        `json:"timestamp"`
+	GPUs      []GPUStatus      `json:"gpus"`
+	Workers   []WorkerStatus   `json:"workers"`
+	Event     AgentStatusEvent `json:"event,omitempty"`
+	// License optimization - client reports current license expiration
+	// Server only regenerates if < 10 minutes remaining
+	LicenseExpiration *int64 `json:"license_expiration,omitempty"` // Unix timestamp in milliseconds
+}
+
+// AgentStatusResponse represents the response from agent status report
+type AgentStatusResponse struct {
+	Success       bool     `json:"success"`
+	ConfigVersion int      `json:"config_version"`
+	License       *License `json:"license,omitempty"` // null if no regeneration needed
 }
 
 // SuccessResponse represents a simple success response
@@ -122,6 +146,8 @@ type WorkerInfo struct {
 	Enabled     bool             `json:"enabled"`
 	IsDefault   bool             `json:"is_default,omitempty"`
 	Status      string           `json:"status"`
+	PID         int              `json:"pid,omitempty"`
+	Restarts    int              `json:"restarts,omitempty"`
 	Connections []ConnectionInfo `json:"connections,omitempty"`
 	CreatedAt   time.Time        `json:"created_at,omitempty"`
 }

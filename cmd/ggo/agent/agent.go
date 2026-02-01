@@ -23,6 +23,11 @@ import (
 	"k8s.io/klog/v2"
 )
 
+const (
+	stateRunning = "running"
+	stateStopped = "stopped"
+)
+
 var (
 	configDir      string
 	stateDir       string
@@ -281,7 +286,7 @@ func newStatusCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show agent status",
-		Long:  `Show the current status of the GPU agent.`,
+		Long:  `Show the current status of the GPU agent (server-side and local).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := getOutput()
 			configMgr := config.NewManager(configDir, stateDir)
@@ -297,6 +302,10 @@ func newStatusCmd() *cobra.Command {
 				return out.Render(&agentStatusResult{registered: false})
 			}
 
+			// Get local status by checking PID file
+			localStatus := agent.GetLocalStatus(paths)
+
+			// Get server-side status
 			client := api.NewClient(
 				api.WithBaseURL(serverURL),
 				api.WithAgentSecret(cfg.AgentSecret),
@@ -307,16 +316,7 @@ func newStatusCmd() *cobra.Command {
 			if err != nil {
 				cmd.SilenceUsage = true
 				if !out.IsJSON() {
-					out.Error(fmt.Sprintf("Failed to fetch workers from server: %v", err))
-				}
-				return err
-			}
-
-			gpus, err := discoverGPUs()
-			if err != nil {
-				cmd.SilenceUsage = true
-				if !out.IsJSON() {
-					out.Error(fmt.Sprintf("Failed to discover GPUs: %v", err))
+					out.Error(fmt.Sprintf("Failed to fetch config from server: %v", err))
 				}
 				return err
 			}
@@ -325,7 +325,7 @@ func newStatusCmd() *cobra.Command {
 				registered:  true,
 				cfg:         cfg,
 				agentConfig: agentConfig,
-				gpus:        gpus,
+				localStatus: localStatus,
 			})
 		},
 	}
@@ -338,7 +338,7 @@ type agentStatusResult struct {
 	registered  bool
 	cfg         *config.Config
 	agentConfig *api.AgentConfigResponse
-	gpus        []api.GPUInfo
+	localStatus agent.LocalStatus
 }
 
 func (r *agentStatusResult) RenderJSON() any {
@@ -349,16 +349,36 @@ func (r *agentStatusResult) RenderJSON() any {
 		}
 	}
 
+	localState := stateStopped
+	if r.localStatus.Running {
+		localState = stateRunning
+	}
+
 	result := map[string]any{
 		"registered":     true,
 		"agent_id":       r.cfg.AgentID,
 		"config_version": r.cfg.ConfigVersion,
 		"server_url":     r.cfg.ServerURL,
-		"gpus":           r.gpus,
+		"local_status": map[string]any{
+			"state": localState,
+			"pid":   r.localStatus.PID,
+		},
 	}
+
 	if r.agentConfig != nil {
 		result["config_version"] = r.agentConfig.ConfigVersion
-		result["workers"] = r.agentConfig.Workers
+
+		workers := make([]map[string]any, len(r.agentConfig.Workers))
+		for i, w := range r.agentConfig.Workers {
+			workers[i] = map[string]any{
+				"worker_id":      w.WorkerID,
+				"gpu_ids":        w.GPUIDs,
+				"listen_port":    w.ListenPort,
+				"enabled":        w.Enabled,
+				"isolation_mode": w.IsolationMode,
+			}
+		}
+		result["workers"] = workers
 	}
 	return result
 }
@@ -380,35 +400,26 @@ func (r *agentStatusResult) RenderTUI(out *tui.Output) {
 		configVersion = r.agentConfig.ConfigVersion
 	}
 
+	// Local status
+	localState := stateStopped
+	localPID := "-"
+	if r.localStatus.Running {
+		localState = stateRunning
+		localPID = strconv.Itoa(r.localStatus.PID)
+	} else if r.localStatus.PID > 0 {
+		localPID = fmt.Sprintf("%d (not running)", r.localStatus.PID)
+	}
+
+	localStateStyled := styles.StatusStyle(localState).Render(tui.StatusIcon(localState) + " " + localState)
+
 	status := tui.NewStatusTable().
 		Add("Agent ID", r.cfg.AgentID).
 		Add("Config Version", fmt.Sprintf("%d", configVersion)).
-		Add("Server URL", r.cfg.ServerURL)
+		Add("Server URL", r.cfg.ServerURL).
+		Add("Local Status", localStateStyled).
+		Add("Local PID", localPID)
 
 	out.Println(status.String())
-
-	if len(r.gpus) > 0 {
-		out.Println()
-		out.Println(styles.Subtitle.Render(fmt.Sprintf("GPUs (%d)", len(r.gpus))))
-		out.Println()
-
-		var rows [][]string
-		for _, gpu := range r.gpus {
-			vram := fmt.Sprintf("%.1f GB", float64(gpu.VRAMMb)/1024)
-			rows = append(rows, []string{
-				gpu.GPUID,
-				gpu.Vendor,
-				gpu.Model,
-				vram,
-			})
-		}
-
-		table := tui.NewTable().
-			Headers("ID", "VENDOR", "MODEL", "VRAM").
-			Rows(rows)
-
-		out.Println(table.String())
-	}
 
 	if r.agentConfig != nil && len(r.agentConfig.Workers) > 0 {
 		out.Println()

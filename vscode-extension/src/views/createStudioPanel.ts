@@ -152,8 +152,8 @@ export class CreateStudioPanel {
         
         // Sort: auto first, then alphabetically
         uniqueBackends.sort((a, b) => {
-            if (a === 'auto') return -1;
-            if (b === 'auto') return 1;
+            if (a === 'auto') {return -1;}
+            if (b === 'auto') {return 1;}
             return a.localeCompare(b);
         });
         

@@ -118,17 +118,25 @@ func (r *workerListResult) RenderTUI(out *tui.Output) {
 		enabledIcon := tui.StatusIcon(boolToYesNo(w.Enabled))
 		enabledStyled := styles.StatusStyle(boolToYesNo(w.Enabled)).Render(enabledIcon)
 
+		// Format PID
+		pid := "-"
+		if w.PID > 0 {
+			pid = fmt.Sprintf("%d", w.PID)
+		}
+
 		rows = append(rows, []string{
 			w.WorkerID,
 			w.Name,
 			statusStyled,
 			fmt.Sprintf("%d", w.ListenPort),
 			enabledStyled,
+			pid,
+			fmt.Sprintf("%d", w.Restarts),
 		})
 	}
 
 	table := tui.NewTable().
-		Headers("WORKER ID", "NAME", "STATUS", "PORT", "ENABLED").
+		Headers("WORKER ID", "NAME", "STATUS", "PORT", "ENABLED", "PID", "RESTARTS").
 		Rows(rows)
 
 	out.Println(table.String())
@@ -246,6 +254,12 @@ func (r *workerDetailResult) RenderTUI(out *tui.Output) {
 	out.Println(styles.Title.Render("Worker Details"))
 	out.Println()
 
+	// Format PID
+	pid := "-"
+	if r.worker.PID > 0 {
+		pid = fmt.Sprintf("%d", r.worker.PID)
+	}
+
 	status := tui.NewStatusTable().
 		Add("Worker ID", r.worker.WorkerID).
 		Add("Name", r.worker.Name).
@@ -253,6 +267,8 @@ func (r *workerDetailResult) RenderTUI(out *tui.Output) {
 		AddWithStatus("Status", r.worker.Status, r.worker.Status).
 		Add("Listen Port", fmt.Sprintf("%d", r.worker.ListenPort)).
 		AddWithStatus("Enabled", boolToYesNo(r.worker.Enabled), boolToYesNo(r.worker.Enabled)).
+		Add("PID", pid).
+		Add("Restarts", fmt.Sprintf("%d", r.worker.Restarts)).
 		Add("GPU IDs", strings.Join(r.worker.GPUIDs, ", "))
 
 	out.Println(status.String())
