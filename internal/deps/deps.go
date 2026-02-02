@@ -239,6 +239,8 @@ func (m *Manager) SyncReleases(ctx context.Context, osStr, arch string) (*Manife
 		return nil, err
 	}
 
+	klog.Infof("Synced %d libraries for platform %s/%s", len(manifest.Libraries), targetOS, targetArch)
+
 	return manifest, nil
 }
 
@@ -475,6 +477,13 @@ func (m *Manager) DownloadLibrary(ctx context.Context, lib Library, progressFn f
 	// Move to final destination
 	if err := os.Rename(tmpPath, destPath); err != nil {
 		return fmt.Errorf("failed to move file: %w", err)
+	}
+
+	// Set executable permission on Unix
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(destPath, 0755); err != nil {
+			return fmt.Errorf("failed to set permissions: %w", err)
+		}
 	}
 
 	// Update size if it was zero (discovered during download)

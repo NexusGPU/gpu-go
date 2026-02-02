@@ -132,6 +132,16 @@ func newRegisterCmd() *cobra.Command {
 		Long:  `Register this GPU server as an agent with the GPU Go platform.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := getOutput()
+			client := api.NewClient(api.WithBaseURL(serverURL))
+
+			// Sync deps manifest before registration
+			depsMgr := deps.NewManager(
+				deps.WithPaths(paths),
+				deps.WithAPIClient(client),
+			)
+			if _, err := depsMgr.SyncReleases(context.Background(), "", ""); err != nil {
+				klog.Fatalf("Failed to sync deps manifest: error=%v", err)
+			}
 
 			if token == "" {
 				token = os.Getenv("GPU_GO_TOKEN")
@@ -144,7 +154,6 @@ func newRegisterCmd() *cobra.Command {
 			}
 
 			configMgr := config.NewManager(configDir, stateDir)
-			client := api.NewClient(api.WithBaseURL(serverURL))
 
 			gpus, err := discoverGPUs()
 			if err != nil {
