@@ -12,7 +12,6 @@
             "mode": "auto",
             "console": "integratedTerminal",
             "env": {
-                "GPU_GO_HEARTBEAT_MODE": "polling",
                 "GPU_GO_ENDPOINT": "http://127.0.0.1:8787"
             },
             "args": [
@@ -27,7 +26,6 @@
             "mode": "auto",
             "console": "integratedTerminal",
             "env": {
-                "GPU_GO_HEARTBEAT_MODE": "polling",
             },
             "args": [
                 "agent", "start"
@@ -41,7 +39,6 @@
             "mode": "auto",
             "console": "integratedTerminal",
             "env": {
-                "GPU_GO_HEARTBEAT_MODE": "polling"
             },
             "args": [
                 "agent", "status"

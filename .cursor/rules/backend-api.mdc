@@ -1,6 +1,6 @@
 ---
 description: Backend API schema and type definition
-alwaysApply: false
+alwaysApply: true
 ---
 
-- Check docs/API_SCHEMA.md if you are not sure the API definition
+- Grep related API definition detail from docs/api.yaml, NEVER imagine API definition, use server side generated api schema as SSoT

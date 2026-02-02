@@ -225,11 +225,6 @@ func (a *Agent) Start() error {
 	a.wg.Add(1)
 	go a.statusReportLoop()
 
-	// Start WebSocket heartbeat
-	if err := a.client.StartHeartbeat(a.ctx, a.agentID, a.handleHeartbeatResponse); err != nil {
-		klog.Warningf("Failed to start heartbeat, will retry: error=%v", err)
-	}
-
 	klog.Infof("Agent started: agent_id=%s pid=%d", a.agentID, os.Getpid())
 
 	return nil
@@ -245,7 +240,6 @@ func (a *Agent) Stop() {
 	}
 
 	a.cancel()
-	a.client.StopHeartbeat()
 
 	// Stop reconciler
 	if a.reconciler != nil {

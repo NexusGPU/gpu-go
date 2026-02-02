@@ -1,0 +1,1200 @@
+# generated from tensor-fusion-website project with `pnpm generate:openapi`
+openapi: 3.0.0
+info:
+  version: 1.0.0
+  title: Tensor Fusion API
+  description: API for Tensor Fusion Platform
+servers:
+  - url: /api/v1
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    GenerateTokenRequest:
+      type: object
+      properties:
+        type:
+          type: string
+          enum:
+            - agent_install
+      required:
+        - type
+    GenerateTokenResponse:
+      type: object
+      properties:
+        token_id:
+          type: string
+        token:
+          type: string
+        expires_at:
+          type: string
+        install_command:
+          type: string
+      required:
+        - token_id
+        - token
+        - expires_at
+        - install_command
+    CreatePatRequest:
+      type: object
+      properties:
+        expires_in_days:
+          type: integer
+          nullable: true
+          minimum: 0
+          exclusiveMinimum: true
+      required:
+        - expires_in_days
+    PatResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        expires_at:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+      required:
+        - token
+        - expires_at
+        - created_at
+    PatInfo:
+      type: object
+      properties:
+        exists:
+          type: boolean
+        expires_at:
+          type: string
+          nullable: true
+        last_used_at:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          nullable: true
+      required:
+        - exists
+        - expires_at
+        - last_used_at
+        - created_at
+    GpuInfo:
+      type: object
+      properties:
+        gpu_id:
+          type: string
+        vendor:
+          type: string
+        model:
+          type: string
+        vram_mb:
+          type: integer
+          minimum: 0
+          exclusiveMinimum: true
+        driver_version:
+          type: string
+        cuda_version:
+          type: string
+      required:
+        - gpu_id
+        - vendor
+        - model
+        - vram_mb
+    GpuStatus:
+      type: object
+      properties:
+        gpu_id:
+          type: string
+        used_by_worker:
+          type: string
+          nullable: true
+        vendor:
+          type: string
+        model:
+          type: string
+        vram_mb:
+          type: integer
+          minimum: 0
+          exclusiveMinimum: true
+        driver_version:
+          type: string
+        cuda_version:
+          type: string
+        gpu_changed:
+          type: boolean
+      required:
+        - gpu_id
+        - used_by_worker
+        - vendor
+        - model
+        - vram_mb
+    AgentRegisterRequest:
+      type: object
+      properties:
+        hostname:
+          type: string
+          minLength: 1
+          maxLength: 255
+        os:
+          type: string
+          minLength: 1
+          maxLength: 20
+        arch:
+          type: string
+          minLength: 1
+          maxLength: 20
+        gpus:
+          type: array
+          items:
+            type: object
+            properties:
+              gpu_id:
+                type: string
+              vendor:
+                type: string
+              model:
+                type: string
+              vram_mb:
+                type: integer
+                minimum: 0
+                exclusiveMinimum: true
+              driver_version:
+                type: string
+              cuda_version:
+                type: string
+            required:
+              - gpu_id
+              - vendor
+              - model
+              - vram_mb
+          minItems: 1
+        network_ips:
+          type: array
+          items:
+            type: string
+      required:
+        - hostname
+        - os
+        - arch
+        - gpus
+    AgentRegisterResponse:
+      type: object
+      properties:
+        agent_id:
+          type: string
+        agent_secret:
+          type: string
+      required:
+        - agent_id
+        - agent_secret
+    AgentListItem:
+      type: object
+      properties:
+        agent_id:
+          type: string
+        hostname:
+          type: string
+        status:
+          type: string
+          enum:
+            - pending
+            - online
+            - offline
+        os:
+          type: string
+        arch:
+          type: string
+        gpuCount:
+          type: number
+        last_seen_at:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+      required:
+        - agent_id
+        - hostname
+        - status
+        - os
+        - arch
+        - gpuCount
+        - last_seen_at
+        - created_at
+    AgentConfigResponse:
+      type: object
+      properties:
+        config_version:
+          type: integer
+        workers:
+          type: array
+          items:
+            type: object
+            properties:
+              worker_id:
+                type: string
+              gpu_ids:
+                type: array
+                items:
+                  type: string
+              vram_mb:
+                type: integer
+              compute_percent:
+                type: integer
+                minimum: 1
+                maximum: 100
+              isolation_mode:
+                type: string
+                enum:
+                  - soft
+                  - hard
+              listen_port:
+                type: integer
+              enabled:
+                type: boolean
+            required:
+              - worker_id
+              - gpu_ids
+              - listen_port
+              - enabled
+        license:
+          type: object
+          properties:
+            plain:
+              type: string
+            encrypted:
+              type: string
+          required:
+            - plain
+            - encrypted
+      required:
+        - config_version
+        - workers
+        - license
+    AgentStatusReportRequest:
+      type: object
+      properties:
+        timestamp:
+          type: string
+        gpus:
+          type: array
+          items:
+            type: object
+            properties:
+              gpu_id:
+                type: string
+              used_by_worker:
+                type: string
+                nullable: true
+              vendor:
+                type: string
+              model:
+                type: string
+              vram_mb:
+                type: integer
+                minimum: 0
+                exclusiveMinimum: true
+              driver_version:
+                type: string
+              cuda_version:
+                type: string
+              gpu_changed:
+                type: boolean
+            required:
+              - gpu_id
+              - used_by_worker
+              - vendor
+              - model
+              - vram_mb
+        workers:
+          type: array
+          items:
+            type: object
+            properties:
+              worker_id:
+                type: string
+              status:
+                type: string
+                enum:
+                  - pending
+                  - running
+                  - stopping
+                  - stopped
+              pid:
+                type: integer
+              restarts:
+                type: integer
+              gpu_ids:
+                type: array
+                items:
+                  type: string
+              connections:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    client_ip:
+                      type: string
+                    connected_at:
+                      type: string
+                  required:
+                    - client_ip
+                    - connected_at
+              worker_changed:
+                type: boolean
+              connection_changed:
+                type: boolean
+            required:
+              - worker_id
+              - status
+              - gpu_ids
+        event:
+          type: string
+          enum:
+            - shutdown
+        license_expiration:
+          type: integer
+      required:
+        - timestamp
+        - gpus
+        - workers
+    AgentMetricsRequest:
+      type: object
+      properties:
+        timestamp:
+          type: string
+        system:
+          type: object
+          properties:
+            cpu_usage:
+              type: number
+            memory_used_mb:
+              type: integer
+            memory_total_mb:
+              type: integer
+          required:
+            - cpu_usage
+            - memory_used_mb
+            - memory_total_mb
+        gpus:
+          type: array
+          items:
+            type: object
+            properties:
+              gpu_id:
+                type: string
+              utilization:
+                type: number
+              vram_used_mb:
+                type: integer
+              vram_total_mb:
+                type: integer
+              temperature:
+                type: integer
+              power_usage_w:
+                type: number
+            required:
+              - gpu_id
+              - utilization
+              - vram_used_mb
+              - vram_total_mb
+              - temperature
+              - power_usage_w
+      required:
+        - timestamp
+        - system
+        - gpus
+    WorkerListItem:
+      type: object
+      properties:
+        worker_id:
+          type: string
+        agent_id:
+          type: string
+        name:
+          type: string
+        gpu_ids:
+          type: array
+          items:
+            type: string
+        listen_port:
+          type: number
+        enabled:
+          type: boolean
+        status:
+          type: string
+          enum:
+            - pending
+            - running
+            - stopping
+            - stopped
+        created_at:
+          type: string
+      required:
+        - worker_id
+        - agent_id
+        - name
+        - gpu_ids
+        - listen_port
+        - enabled
+        - status
+        - created_at
+    CreateWorkerRequest:
+      type: object
+      properties:
+        agent_id:
+          type: string
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        gpu_ids:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        listen_port:
+          type: integer
+          minimum: 1024
+          maximum: 65535
+        enabled:
+          type: boolean
+          default: true
+      required:
+        - agent_id
+        - name
+        - gpu_ids
+        - listen_port
+    UpdateWorkerRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        gpu_ids:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        listen_port:
+          type: integer
+          minimum: 1024
+          maximum: 65535
+        enabled:
+          type: boolean
+    CreateShareRequest:
+      type: object
+      properties:
+        worker_id:
+          type: string
+        connection_ip:
+          type: string
+          minLength: 1
+        protocol:
+          type: string
+          enum:
+            - native
+            - rdma
+            - shmem
+          default: native
+        expires_at:
+          type: string
+        max_uses:
+          type: integer
+          minimum: 0
+          exclusiveMinimum: true
+      required:
+        - worker_id
+        - connection_ip
+    ShareListItem:
+      type: object
+      properties:
+        share_id:
+          type: string
+        short_code:
+          type: string
+        short_link:
+          type: string
+        worker_id:
+          type: string
+        hardware_vendor:
+          type: string
+        connection_url:
+          type: string
+        expires_at:
+          type: string
+          nullable: true
+        max_uses:
+          type: number
+          nullable: true
+        used_count:
+          type: number
+        created_at:
+          type: string
+      required:
+        - share_id
+        - short_code
+        - short_link
+        - worker_id
+        - hardware_vendor
+        - connection_url
+        - expires_at
+        - max_uses
+        - used_count
+        - created_at
+    PublicShareInfo:
+      type: object
+      properties:
+        worker_id:
+          type: string
+        hardware_vendor:
+          type: string
+        connection_url:
+          type: string
+      required:
+        - worker_id
+        - hardware_vendor
+        - connection_url
+  parameters: {}
+paths:
+  /api/v1/agents:
+    get:
+      summary: List all agents
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: List of agents
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agents:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        agent_id:
+                          type: string
+                        hostname:
+                          type: string
+                        status:
+                          type: string
+                          enum:
+                            - pending
+                            - online
+                            - offline
+                        os:
+                          type: string
+                        arch:
+                          type: string
+                        gpuCount:
+                          type: number
+                        last_seen_at:
+                          type: string
+                          nullable: true
+                        created_at:
+                          type: string
+                      required:
+                        - agent_id
+                        - hostname
+                        - status
+                        - os
+                        - arch
+                        - gpuCount
+                        - last_seen_at
+                        - created_at
+                required:
+                  - agents
+  /api/v1/agents/register:
+    post:
+      summary: Register a new agent
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                hostname:
+                  type: string
+                  minLength: 1
+                  maxLength: 255
+                os:
+                  type: string
+                  minLength: 1
+                  maxLength: 20
+                arch:
+                  type: string
+                  minLength: 1
+                  maxLength: 20
+                gpus:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      gpu_id:
+                        type: string
+                      vendor:
+                        type: string
+                      model:
+                        type: string
+                      vram_mb:
+                        type: integer
+                        minimum: 0
+                        exclusiveMinimum: true
+                      driver_version:
+                        type: string
+                      cuda_version:
+                        type: string
+                    required:
+                      - gpu_id
+                      - vendor
+                      - model
+                      - vram_mb
+                  minItems: 1
+                network_ips:
+                  type: array
+                  items:
+                    type: string
+              required:
+                - hostname
+                - os
+                - arch
+                - gpus
+      responses:
+        "200":
+          description: Agent registered successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agent_id:
+                    type: string
+                  agent_secret:
+                    type: string
+                required:
+                  - agent_id
+                  - agent_secret
+  /api/v1/agents/{agent_id}/config:
+    get:
+      summary: Get agent configuration
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: agent_id
+          in: path
+      responses:
+        "200":
+          description: Agent configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  config_version:
+                    type: integer
+                  workers:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        worker_id:
+                          type: string
+                        gpu_ids:
+                          type: array
+                          items:
+                            type: string
+                        vram_mb:
+                          type: integer
+                        compute_percent:
+                          type: integer
+                          minimum: 1
+                          maximum: 100
+                        isolation_mode:
+                          type: string
+                          enum:
+                            - soft
+                            - hard
+                        listen_port:
+                          type: integer
+                        enabled:
+                          type: boolean
+                      required:
+                        - worker_id
+                        - gpu_ids
+                        - listen_port
+                        - enabled
+                  license:
+                    type: object
+                    properties:
+                      plain:
+                        type: string
+                      encrypted:
+                        type: string
+                    required:
+                      - plain
+                      - encrypted
+                required:
+                  - config_version
+                  - workers
+                  - license
+  /api/v1/agents/{agent_id}/status:
+    post:
+      summary: Report agent status
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: agent_id
+          in: path
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                timestamp:
+                  type: string
+                gpus:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      gpu_id:
+                        type: string
+                      used_by_worker:
+                        type: string
+                        nullable: true
+                      vendor:
+                        type: string
+                      model:
+                        type: string
+                      vram_mb:
+                        type: integer
+                        minimum: 0
+                        exclusiveMinimum: true
+                      driver_version:
+                        type: string
+                      cuda_version:
+                        type: string
+                      gpu_changed:
+                        type: boolean
+                    required:
+                      - gpu_id
+                      - used_by_worker
+                      - vendor
+                      - model
+                      - vram_mb
+                workers:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      worker_id:
+                        type: string
+                      status:
+                        type: string
+                        enum:
+                          - pending
+                          - running
+                          - stopping
+                          - stopped
+                      pid:
+                        type: integer
+                      restarts:
+                        type: integer
+                      gpu_ids:
+                        type: array
+                        items:
+                          type: string
+                      connections:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            client_ip:
+                              type: string
+                            connected_at:
+                              type: string
+                          required:
+                            - client_ip
+                            - connected_at
+                      worker_changed:
+                        type: boolean
+                      connection_changed:
+                        type: boolean
+                    required:
+                      - worker_id
+                      - status
+                      - gpu_ids
+                event:
+                  type: string
+                  enum:
+                    - shutdown
+                license_expiration:
+                  type: integer
+              required:
+                - timestamp
+                - gpus
+                - workers
+      responses:
+        "200":
+          description: Status updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                required:
+                  - success
+  /api/v1/agents/{agent_id}/metrics:
+    post:
+      summary: Report agent metrics
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: agent_id
+          in: path
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                timestamp:
+                  type: string
+                system:
+                  type: object
+                  properties:
+                    cpu_usage:
+                      type: number
+                    memory_used_mb:
+                      type: integer
+                    memory_total_mb:
+                      type: integer
+                  required:
+                    - cpu_usage
+                    - memory_used_mb
+                    - memory_total_mb
+                gpus:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      gpu_id:
+                        type: string
+                      utilization:
+                        type: number
+                      vram_used_mb:
+                        type: integer
+                      vram_total_mb:
+                        type: integer
+                      temperature:
+                        type: integer
+                      power_usage_w:
+                        type: number
+                    required:
+                      - gpu_id
+                      - utilization
+                      - vram_used_mb
+                      - vram_total_mb
+                      - temperature
+                      - power_usage_w
+              required:
+                - timestamp
+                - system
+                - gpus
+      responses:
+        "200":
+          description: Metrics received
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                required:
+                  - success
+  /api/v1/workers:
+    get:
+      summary: List all workers
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: List of workers
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  workers:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        worker_id:
+                          type: string
+                        agent_id:
+                          type: string
+                        name:
+                          type: string
+                        gpu_ids:
+                          type: array
+                          items:
+                            type: string
+                        listen_port:
+                          type: number
+                        enabled:
+                          type: boolean
+                        status:
+                          type: string
+                          enum:
+                            - pending
+                            - running
+                            - stopping
+                            - stopped
+                        created_at:
+                          type: string
+                      required:
+                        - worker_id
+                        - agent_id
+                        - name
+                        - gpu_ids
+                        - listen_port
+                        - enabled
+                        - status
+                        - created_at
+                required:
+                  - workers
+    post:
+      summary: Create a new worker
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                agent_id:
+                  type: string
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 100
+                gpu_ids:
+                  type: array
+                  items:
+                    type: string
+                  minItems: 1
+                listen_port:
+                  type: integer
+                  minimum: 1024
+                  maximum: 65535
+                enabled:
+                  type: boolean
+                  default: true
+              required:
+                - agent_id
+                - name
+                - gpu_ids
+                - listen_port
+      responses:
+        "201":
+          description: Worker created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  worker_id:
+                    type: string
+                  agent_id:
+                    type: string
+                  name:
+                    type: string
+                  gpu_ids:
+                    type: array
+                    items:
+                      type: string
+                  listen_port:
+                    type: number
+                  enabled:
+                    type: boolean
+                  status:
+                    type: string
+                    enum:
+                      - pending
+                      - running
+                      - stopping
+                      - stopped
+                  created_at:
+                    type: string
+                required:
+                  - worker_id
+                  - agent_id
+                  - name
+                  - gpu_ids
+                  - listen_port
+                  - enabled
+                  - status
+                  - created_at
+  /api/v1/tokens/generate:
+    post:
+      summary: Generate installation token
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                type:
+                  type: string
+                  enum:
+                    - agent_install
+              required:
+                - type
+      responses:
+        "201":
+          description: Token generated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token_id:
+                    type: string
+                  token:
+                    type: string
+                  expires_at:
+                    type: string
+                  install_command:
+                    type: string
+                required:
+                  - token_id
+                  - token
+                  - expires_at
+                  - install_command
+  /api/v1/tokens/pat:
+    post:
+      summary: Create Personal Access Token
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expires_in_days:
+                  type: integer
+                  nullable: true
+                  minimum: 0
+                  exclusiveMinimum: true
+              required:
+                - expires_in_days
+      responses:
+        "201":
+          description: PAT created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                  expires_at:
+                    type: string
+                    nullable: true
+                  created_at:
+                    type: string
+                required:
+                  - token
+                  - expires_at
+                  - created_at
+  /api/v1/shares:
+    post:
+      summary: Create a share
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                worker_id:
+                  type: string
+                connection_ip:
+                  type: string
+                  minLength: 1
+                protocol:
+                  type: string
+                  enum:
+                    - native
+                    - rdma
+                    - shmem
+                  default: native
+                expires_at:
+                  type: string
+                max_uses:
+                  type: integer
+                  minimum: 0
+                  exclusiveMinimum: true
+              required:
+                - worker_id
+                - connection_ip
+      responses:
+        "201":
+          description: Share created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  share_id:
+                    type: string
+                  short_code:
+                    type: string
+                  short_link:
+                    type: string
+                  worker_id:
+                    type: string
+                  hardware_vendor:
+                    type: string
+                  connection_url:
+                    type: string
+                  expires_at:
+                    type: string
+                    nullable: true
+                  max_uses:
+                    type: number
+                    nullable: true
+                  used_count:
+                    type: number
+                  created_at:
+                    type: string
+                required:
+                  - share_id
+                  - short_code
+                  - short_link
+                  - worker_id
+                  - hardware_vendor
+                  - connection_url
+                  - expires_at
+                  - max_uses
+                  - used_count
+                  - created_at
