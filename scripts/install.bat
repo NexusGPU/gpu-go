@@ -255,7 +255,7 @@ echo   # Register as agent ^(on GPU server^)
 echo   ggo agent register --token ^<your-token^>
 echo.
 echo   # Use a shared GPU
-echo   ggo use ^<short-code^>
+echo   ggo use ^<short-link^>
 echo.
 
 :cleanup

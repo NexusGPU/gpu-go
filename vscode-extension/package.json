@@ -71,8 +71,8 @@
       "activitybar": [
         {
           "id": "gpu-go",
-          "title": "GPU Go",
-          "icon": "$(circuit-board)"
+          "title": "GPUGo",
+          "icon": "images/icon.png"
         }
       ]
     },
@@ -81,134 +81,134 @@
         {
           "id": "gpugo.studio",
           "name": "Studio",
-          "contextualTitle": "GPU Go Studio"
+          "contextualTitle": "GPUGo Studio"
         },
         {
           "id": "gpugo.workers",
           "name": "Workers",
-          "contextualTitle": "GPU Go Workers"
+          "contextualTitle": "GPUGo Workers"
         },
         {
           "id": "gpugo.devices",
           "name": "Devices",
-          "contextualTitle": "GPU Go Devices"
+          "contextualTitle": "GPUGo Devices"
         }
       ]
     },
     "commands": [
       {
         "command": "gpugo.login",
-        "title": "Login to GPU Go",
-        "category": "GPU Go"
+        "title": "Login to GPUGo",
+        "category": "GPUGo"
       },
       {
         "command": "gpugo.logout",
-        "title": "Logout from GPU Go",
-        "category": "GPU Go"
+        "title": "Logout from GPUGo",
+        "category": "GPUGo"
       },
       {
         "command": "gpugo.refreshStudio",
         "title": "Refresh Studio",
         "icon": "$(refresh)",
-        "category": "GPU Go"
+        "category": "GPUGo"
       },
       {
         "command": "gpugo.refreshWorkers",
         "title": "Refresh Workers",
         "icon": "$(refresh)",
-        "category": "GPU Go"
+        "category": "GPUGo"
       },
       {
         "command": "gpugo.refreshDevices",
         "title": "Refresh Devices",
         "icon": "$(refresh)",
-        "category": "GPU Go"
+        "category": "GPUGo"
       },
       {
         "command": "gpugo.createStudio",
         "title": "Create Studio Environment",
         "icon": "$(add)",
-        "category": "GPU Go"
+        "category": "GPUGo"
       },
       {
         "command": "gpugo.startStudio",
         "title": "Start Studio",
         "icon": "$(play)",
-        "category": "GPU Go"
+        "category": "GPUGo"
       },
       {
         "command": "gpugo.stopStudio",
         "title": "Stop Studio",
         "icon": "$(debug-stop)",
-        "category": "GPU Go"
+        "category": "GPUGo"
       },
       {
         "command": "gpugo.removeStudio",
         "title": "Remove Studio",
         "icon": "$(trash)",
-        "category": "GPU Go"
+        "category": "GPUGo"
       },
       {
         "command": "gpugo.connectStudio",
         "title": "Connect to Studio via SSH",
         "icon": "$(terminal)",
-        "category": "GPU Go"
+        "category": "GPUGo"
       },
       {
         "command": "gpugo.showStudioLogs",
         "title": "Show Studio Logs",
         "icon": "$(output)",
-        "category": "GPU Go"
+        "category": "GPUGo"
       },
       {
         "command": "gpugo.openJupyter",
         "title": "Open Jupyter Lab",
         "icon": "$(notebook)",
-        "category": "GPU Go"
+        "category": "GPUGo"
       },
       {
         "command": "gpugo.openTensorBoard",
         "title": "Open TensorBoard",
         "icon": "$(graph)",
-        "category": "GPU Go"
+        "category": "GPUGo"
       },
       {
         "command": "gpugo.openWebUI",
         "title": "Open Web Interface",
         "icon": "$(globe)",
-        "category": "GPU Go"
+        "category": "GPUGo"
       },
       {
         "command": "gpugo.openWorkerDetails",
         "title": "Open Worker Details",
-        "category": "GPU Go"
+        "category": "GPUGo"
       },
       {
         "command": "gpugo.openDeviceDetails",
         "title": "Open Device Details",
-        "category": "GPU Go"
+        "category": "GPUGo"
       },
       {
         "command": "gpugo.createWorker",
         "title": "Create Worker",
         "icon": "$(add)",
-        "category": "GPU Go"
+        "category": "GPUGo"
       },
       {
         "command": "gpugo.openDashboard",
-        "title": "Open GPU Go Dashboard",
+        "title": "Open GPUGo Dashboard",
         "icon": "$(link-external)",
-        "category": "GPU Go"
+        "category": "GPUGo"
       },
       {
         "command": "gpugo.copyWorkerCommand",
         "title": "Copy Worker Create Command",
-        "category": "GPU Go"
+        "category": "GPUGo"
       },
       {
         "command": "gpugo.downloadCli",
-        "title": "Download GPU Go CLI",
-        "category": "GPU Go"
+        "title": "Download GPUGo CLI",
+        "category": "GPUGo"
       }
     ],
     "menus": {
@@ -278,17 +278,17 @@
       ]
     },
     "configuration": {
-      "title": "GPU Go",
+      "title": "GPUGo",
       "properties": {
         "gpugo.serverUrl": {
           "type": "string",
           "default": "https://go.gpu.tf",
-          "description": "GPU Go API server URL"
+          "description": "GPUGo API server URL"
         },
         "gpugo.dashboardUrl": {
           "type": "string",
           "default": "https://go.tensor-fusion.ai",
-          "description": "GPU Go dashboard URL"
+          "description": "GPUGo dashboard URL"
         },
         "gpugo.cliPath": {
           "type": "string",
@@ -303,17 +303,17 @@
         "gpugo.autoDownloadCli": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically download the GPU Go CLI binary on first install"
+          "description": "Automatically download the GPUGo CLI binary on first install"
         },
         "gpugo.cliDownloadUrl": {
           "type": "string",
           "default": "https://github.com/NexusGPU/gpu-go/releases/latest/download",
-          "description": "CDN/URL base path for downloading GPU Go CLI binaries"
+          "description": "CDN/URL base path for downloading GPUGo CLI binaries"
         },
         "gpugo.cliVersion": {
           "type": "string",
           "default": "latest",
-          "description": "Version of the GPU Go CLI to download (e.g., 'latest', 'v1.0.0')"
+          "description": "Version of the GPUGo CLI to download (e.g., 'latest', 'v1.0.0')"
         }
       }
     }

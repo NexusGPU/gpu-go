@@ -77,6 +77,13 @@ func (p *Paths) AgentPIDFile() string {
 	return filepath.Join(p.stateDir, "agent.pid")
 }
 
+// ConnectionsDir returns the directory for worker connection files
+// Each worker writes its connections to a separate file: {workerID}.txt
+// All platforms: ~/.gpugo/state/connections (or StateDir/connections)
+func (p *Paths) ConnectionsDir() string {
+	return filepath.Join(p.stateDir, "connections")
+}
+
 // TempDir returns a platform-appropriate temporary directory
 func (p *Paths) TempDir() string {
 	switch runtime.GOOS {

@@ -18,7 +18,7 @@ export function getWebviewContent(
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline' https://cdn.jsdelivr.net; font-src ${webview.cspSource} https://cdn.jsdelivr.net; script-src 'nonce-${nonce}' https://cdn.jsdelivr.net; img-src ${webview.cspSource} https: data:;">
     <link rel="stylesheet" href="${codiconsCSS}">
     <script type="module" src="${elementsScript}" nonce="${nonce}"></script>
-    <title>GPU Go</title>
+    <title>GPUGo</title>
     <style>
         :root {
             --spacing-xs: 4px;

@@ -19,7 +19,7 @@ export abstract class BaseTreeDataProvider<T> implements vscode.TreeDataProvider
  * Creates a standard login prompt tree item
  */
 export function createLoginItem(): vscode.TreeItem {
-    const item = new vscode.TreeItem('Login to GPU Go', vscode.TreeItemCollapsibleState.None);
+    const item = new vscode.TreeItem('Login to GPUGo', vscode.TreeItemCollapsibleState.None);
     item.iconPath = new vscode.ThemeIcon('account');
     item.command = {
         command: 'gpugo.login',

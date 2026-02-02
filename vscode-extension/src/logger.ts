@@ -1,18 +1,18 @@
 import * as vscode from 'vscode';
 
 /**
- * Centralized logging utility for the GPU Go extension.
+ * Centralized logging utility for the GPUGo extension.
  * Outputs to VS Code's Output panel with timestamps.
  */
 export class Logger {
     private static outputChannel: vscode.OutputChannel | null = null;
-    private static channelName: string = 'GPU Go';
+    private static channelName: string = 'GPUGo';
 
     /**
      * Initialize the logger with a VS Code extension context.
      * Must be called during extension activation.
      */
-    public static initialize(context: vscode.ExtensionContext, name: string = 'GPU Go'): void {
+    public static initialize(context: vscode.ExtensionContext, name: string = 'GPUGo'): void {
         this.channelName = name;
         this.outputChannel = vscode.window.createOutputChannel(name);
         context.subscriptions.push(this.outputChannel);

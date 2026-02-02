@@ -18,8 +18,8 @@ let refreshInterval: NodeJS.Timeout | undefined;
 
 export async function activate(context: vscode.ExtensionContext) {
     // Initialize Logger
-    Logger.initialize(context, 'GPU Go');
-    Logger.log('GPU Go extension is now active');
+    Logger.initialize(context, 'GPUGo');
+    Logger.log('GPUGo extension is now active');
 
     // Initialize CLI wrapper
     const cli = new CLI(context);
@@ -33,7 +33,7 @@ export async function activate(context: vscode.ExtensionContext) {
     } catch (error) {
         Logger.error('Failed to initialize CLI:', error);
         vscode.window.showWarningMessage(
-            'GPU Go CLI could not be initialized. Some features may not work.',
+            'GPUGo CLI could not be initialized. Some features may not work.',
             'Open Settings'
         ).then(action => {
             if (action === 'Open Settings') {
@@ -313,7 +313,7 @@ async function checkAndPromptLogin(authManager: AuthManager): Promise<void> {
             
             // Show login prompt with auto-login option
             const action = await vscode.window.showInformationMessage(
-                'Welcome to GPU Go! You need to login to access your remote GPUs.',
+                'Welcome to GPUGo! You need to login to access your remote GPUs.',
                 'Login Now',
                 'Later'
             );

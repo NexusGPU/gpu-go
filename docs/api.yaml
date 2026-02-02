@@ -337,10 +337,16 @@ components:
                   properties:
                     client_ip:
                       type: string
+                    client_port:
+                      type: integer
+                    client_pid:
+                      type: integer
                     connected_at:
                       type: string
                   required:
                     - client_ip
+                    - client_port
+                    - client_pid
                     - connected_at
               worker_changed:
                 type: boolean
@@ -820,10 +826,16 @@ paths:
                           properties:
                             client_ip:
                               type: string
+                            client_port:
+                              type: integer
+                            client_pid:
+                              type: integer
                             connected_at:
                               type: string
                           required:
                             - client_ip
+                            - client_port
+                            - client_pid
                             - connected_at
                       worker_changed:
                         type: boolean

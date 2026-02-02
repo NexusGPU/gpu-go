@@ -58,7 +58,7 @@ export class CreateWorkerPanel {
                         vscode.env.openExternal(vscode.Uri.parse(this._cli.getDashboardUrl() + '/workers/new'));
                         break;
                     case 'openTerminal': {
-                        const terminal = vscode.window.createTerminal('GPU Go Worker');
+                        const terminal = vscode.window.createTerminal('GPUGo Worker');
                         terminal.show();
                         terminal.sendText('# Run this on your GPU server:');
                         terminal.sendText('# ggo worker create --agent-id <agent-id> --name my-worker --gpu-ids 0');

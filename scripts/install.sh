@@ -471,7 +471,7 @@ main() {
     info "  ggo agent register --token <your-token>"
     info ""
     info "  # Use a shared GPU"
-    info "  ggo use <short-code>"
+    info "  ggo use <short-link>"
     info ""
 }
 

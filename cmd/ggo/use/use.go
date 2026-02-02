@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/NexusGPU/gpu-go/cmd/ggo/cmdutil"
 	"github.com/NexusGPU/gpu-go/internal/api"
@@ -22,13 +23,29 @@ var (
 	outputFormat string
 )
 
+// extractShortCode extracts the short code from a short link URL or returns the input as-is if it's already a code.
+// Supports formats: "abc123", "https://go.gpu.tf/s/abc123", "go.gpu.tf/s/abc123"
+func extractShortCode(input string) string {
+	input = strings.TrimSpace(input)
+
+	// If it looks like a URL, extract the last path segment
+	if strings.Contains(input, "/") {
+		parts := strings.Split(strings.TrimSuffix(input, "/"), "/")
+		if len(parts) > 0 {
+			return parts[len(parts)-1]
+		}
+	}
+
+	return input
+}
+
 // NewUseCmd creates the use command
 func NewUseCmd() *cobra.Command {
 	var longTerm bool
 	var outputDir string
 
 	cmd := &cobra.Command{
-		Use:   "use <short-code>",
+		Use:   "use <short-link>",
 		Short: "Set up a remote GPU environment",
 		Long: `Set up a temporary or long-term connection to a remote GPU worker.
 
@@ -36,14 +53,17 @@ This command connects to a shared GPU worker and sets up the environment
 so you can use the remote GPU as if it were local.
 
 Examples:
-  # Connect to a shared GPU (temporary)
+  # Connect using short code
   ggo use abc123
+
+  # Connect using full short link
+  ggo use https://go.gpu.tf/s/abc123
 
   # Set up a long-term GPU connection
   ggo use abc123 --long-term`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			shortCode := args[0]
+			shortCode := extractShortCode(args[0])
 			client := api.NewClient(api.WithBaseURL(serverURL))
 			ctx := context.Background()
 			out := getOutput()
@@ -81,13 +101,14 @@ func NewCleanCmd() *cobra.Command {
 	var all bool
 
 	cmd := &cobra.Command{
-		Use:   "clean [short-code]",
+		Use:   "clean [short-link]",
 		Short: "Clean up remote GPU environment",
 		Long: `Clean up temporary or long-term remote GPU environment setup.
 
 Examples:
-  # Clean up a specific connection
+  # Clean up a specific connection (using code or link)
   ggo clean abc123
+  ggo clean https://go.gpu.tf/s/abc123
 
   # Clean up all GPU Go connections
   ggo clean --all`,
@@ -99,10 +120,10 @@ Examples:
 			}
 
 			if len(args) == 0 {
-				return fmt.Errorf("short-code is required unless --all is specified")
+				return fmt.Errorf("short-link is required unless --all is specified")
 			}
 
-			shortCode := args[0]
+			shortCode := extractShortCode(args[0])
 			return cleanEnv(shortCode, out)
 		},
 	}
@@ -411,7 +432,7 @@ echo Environment variables set. Please restart your terminal.
 
 // cleanEnv cleans up a specific GPU environment
 func cleanEnv(shortCode string, out *tui.Output) error {
-	klog.Infof("Cleaning up GPU environment: short_code=%s", shortCode)
+	klog.Infof("Cleaning up GPU environment: short_link=%s", shortCode)
 
 	tmpDirs, _ := filepath.Glob(paths.GlobPattern("gpugo-"))
 	for _, dir := range tmpDirs {
@@ -427,25 +448,17 @@ func cleanEnv(shortCode string, out *tui.Output) error {
 	})
 }
 
-// cleanAllEnv cleans up all GPU environments
+// cleanAllEnv cleans up all GPU environments (temp directories only, not ~/.gpugo)
 func cleanAllEnv(out *tui.Output) error {
 	klog.Info("Cleaning up all GPU environments...")
 
+	// Only clean temporary directories created by `ggo use`, not the ~/.gpugo config directory
 	tmpDirs, _ := filepath.Glob(paths.GlobPattern("gpugo-"))
 	for _, dir := range tmpDirs {
 		if err := os.RemoveAll(dir); err != nil {
 			klog.Warningf("Failed to remove temp directory: dir=%s error=%v", dir, err)
 		} else {
 			klog.V(4).Infof("Removed temp directory: dir=%s", dir)
-		}
-	}
-
-	gpugoDir := paths.UserDir()
-	if _, err := os.Stat(gpugoDir); err == nil {
-		if err := os.RemoveAll(gpugoDir); err != nil {
-			klog.Warningf("Failed to remove .gpugo directory: error=%v", err)
-		} else {
-			klog.V(4).Infof("Removed .gpugo directory: dir=%s", gpugoDir)
 		}
 	}
 

@@ -155,7 +155,7 @@ export class CLIDownloader {
             // Download with progress notification
             await vscode.window.withProgress({
                 location: vscode.ProgressLocation.Notification,
-                title: 'GPU Go',
+                title: 'GPUGo',
                 cancellable: false
             }, async (progress) => {
                 progress.report({ message: `Downloading CLI (${version})...` });
@@ -172,11 +172,11 @@ export class CLIDownloader {
             await writeFile(this.getVersionPath(), version, 'utf8');
 
             Logger.log(`CLI downloaded successfully to: ${cliPath}`);
-            vscode.window.showInformationMessage('GPU Go CLI downloaded successfully.');
+            vscode.window.showInformationMessage('GPUGo CLI downloaded successfully.');
             return cliPath;
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            const userMessage = `Failed to download GPU Go CLI: ${errorMessage}`;
+            const userMessage = `Failed to download GPUGo CLI: ${errorMessage}`;
             Logger.error('CLI download failed:', error);
 
             vscode.window.showErrorMessage(userMessage, 'Open Settings').then(selection => {
@@ -231,7 +231,7 @@ export class CLIDownloader {
         }
 
         // 5. CLI not available - prompt user
-        const message = 'GPU Go CLI not found. Please download or configure manually.';
+        const message = 'GPUGo CLI not found. Please download or configure manually.';
         Logger.log(message);
 
         vscode.window.showWarningMessage(message, 'Download', 'Open Settings').then(selection => {

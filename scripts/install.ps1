@@ -390,7 +390,7 @@ function Install-Ggo {
         Write-Host "  ggo agent register --token <your-token>" -ForegroundColor White
         Write-Host ""
         Write-Host "  # Use a shared GPU" -ForegroundColor Gray
-        Write-Host "  ggo use <short-code>" -ForegroundColor White
+        Write-Host "  ggo use <short-link>" -ForegroundColor White
         Write-Host ""
     }
     finally {

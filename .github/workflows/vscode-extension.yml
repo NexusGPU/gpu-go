@@ -186,7 +186,7 @@ jobs:
           tag_name: vscode-extension-v${{ steps.version.outputs.version }}
           name: VS Code Extension v${{ steps.version.outputs.version }}
           body: |
-            ## GPU Go VS Code Extension v${{ steps.version.outputs.version }}
+            ## GPUGo VS Code Extension v${{ steps.version.outputs.version }}
 
             ### Installation
             - **VS Code Marketplace**: [gpu-go](https://marketplace.visualstudio.com/items?itemName=nexusgpu.gpu-go)

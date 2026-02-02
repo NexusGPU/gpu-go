@@ -5,6 +5,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+const (
+	statusYes = "yes"
+)
+
 // Theme defines the color palette for the TUI
 type Theme struct {
 	// Primary colors
@@ -197,7 +201,7 @@ func NewStyles(theme *Theme) *Styles {
 // StatusStyle returns the appropriate style for a status string
 func (s *Styles) StatusStyle(status string) lipgloss.Style {
 	switch status {
-	case "running", "active", "online", "connected", "enabled", "yes":
+	case "running", "active", "online", "connected", "enabled", statusYes:
 		return s.Success
 	case "stopped", "inactive", "offline", "disconnected", "disabled", "no":
 		return s.Muted
@@ -223,7 +227,7 @@ func StatusIcon(status string) string {
 		return "✕"
 	case "starting", "stopping", "pending", "initializing":
 		return "◐"
-	case "enabled", "yes":
+	case "enabled", statusYes:
 		return "✓"
 	case "disabled", "no":
 		return "✕"

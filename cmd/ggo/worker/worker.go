@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/NexusGPU/gpu-go/cmd/ggo/auth"
 	"github.com/NexusGPU/gpu-go/cmd/ggo/cmdutil"
@@ -37,6 +38,7 @@ func NewWorkerCmd() *cobra.Command {
 	cmd.AddCommand(newWorkerGetCmd())
 	cmd.AddCommand(newWorkerUpdateCmd())
 	cmd.AddCommand(newWorkerDeleteCmd())
+	cmd.AddCommand(newWorkerShareCmd())
 
 	return cmd
 }
@@ -416,6 +418,230 @@ func newWorkerDeleteCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Skip confirmation")
 
 	return cmd
+}
+
+func newWorkerShareCmd() *cobra.Command {
+	var connectionIP string
+	var expiresIn string
+	var maxUses int
+
+	cmd := &cobra.Command{
+		Use:   "share [worker-name]",
+		Short: "Create a share link for a worker",
+		Long: `Create a shareable link that allows others to connect to your GPU worker.
+
+The command will:
+  1. Select a worker (from argument or interactive selection)
+  2. Select an IP address (from worker's network IPs or custom input)
+  3. Create a share link via the API
+  4. Display the link with usage instructions
+
+Examples:
+  # Interactive selection of worker and IP
+  ggo worker share
+
+  # Share a specific worker with interactive IP selection
+  ggo worker share my-worker
+
+  # Share with specific IP
+  ggo worker share my-worker --connection-ip 192.168.1.100
+
+  # Share with expiration
+  ggo worker share my-worker --expires-in 24h`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client := getClient()
+			ctx := context.Background()
+			out := getOutput()
+
+			// Step 1: Get worker (from arg or selection)
+			workerID, workerName, agentID, err := selectWorker(ctx, client, args, out)
+			if err != nil {
+				cmd.SilenceUsage = true
+				return err
+			}
+
+			// Step 2: Get connection IP (from flag, agent IPs, or manual input)
+			if connectionIP == "" {
+				selectedIP, err := selectConnectionIP(ctx, client, agentID, out)
+				if err != nil {
+					cmd.SilenceUsage = true
+					return err
+				}
+				connectionIP = selectedIP
+			}
+
+			// Step 3: Create share link
+			req := &api.ShareCreateRequest{
+				WorkerID:     workerID,
+				ConnectionIP: connectionIP,
+			}
+
+			if expiresIn != "" {
+				duration, err := time.ParseDuration(expiresIn)
+				if err != nil {
+					return fmt.Errorf("invalid expiration duration: %w", err)
+				}
+				expiresAt := time.Now().Add(duration)
+				req.ExpiresAt = &expiresAt
+			}
+
+			if maxUses > 0 {
+				req.MaxUses = &maxUses
+			}
+
+			resp, err := client.CreateShare(ctx, req)
+			if err != nil {
+				cmd.SilenceUsage = true
+				klog.Errorf("Failed to create share: error=%v", err)
+				return err
+			}
+
+			return out.Render(&workerShareResult{
+				share:      resp,
+				workerName: workerName,
+			})
+		},
+	}
+
+	cmd.Flags().StringVar(&connectionIP, "connection-ip", "", "Connection IP address (skip interactive selection)")
+	cmd.Flags().StringVar(&expiresIn, "expires-in", "", "Expiration duration (e.g., 24h, 7d)")
+	cmd.Flags().IntVar(&maxUses, "max-uses", 0, "Maximum number of uses (0 = unlimited)")
+
+	return cmd
+}
+
+// selectWorker selects a worker from argument or interactive prompt
+func selectWorker(ctx context.Context, client *api.Client, args []string, out *tui.Output) (workerID, workerName, agentID string, err error) {
+	resp, err := client.ListWorkers(ctx, "", "")
+	if err != nil {
+		klog.Errorf("Failed to list workers: error=%v", err)
+		return "", "", "", err
+	}
+
+	if len(resp.Workers) == 0 {
+		return "", "", "", fmt.Errorf("no workers found. Create a worker first with 'ggo worker create'")
+	}
+
+	// If worker name provided as argument, find it
+	if len(args) > 0 {
+		workerNameArg := args[0]
+		for _, w := range resp.Workers {
+			if w.Name == workerNameArg {
+				return w.WorkerID, w.Name, w.AgentID, nil
+			}
+		}
+		return "", "", "", fmt.Errorf("worker '%s' not found", workerNameArg)
+	}
+
+	// Interactive selection if running in TUI mode
+	if out.IsJSON() {
+		return "", "", "", fmt.Errorf("worker name is required in JSON output mode")
+	}
+
+	// Build worker options for selection
+	var workerItems []tui.WorkerSelectItem
+	for _, w := range resp.Workers {
+		workerItems = append(workerItems, tui.WorkerSelectItem{
+			Name:     w.Name,
+			WorkerID: w.WorkerID,
+			Status:   w.Status,
+		})
+	}
+
+	options := tui.FormatWorkerOptions(workerItems)
+	selectedWorkerID, err := tui.SelectPrompt("Select a worker to share:", options)
+	if err != nil {
+		return "", "", "", fmt.Errorf("failed to select worker: %w", err)
+	}
+
+	// Find the selected worker's details
+	for _, w := range resp.Workers {
+		if w.WorkerID == selectedWorkerID {
+			return w.WorkerID, w.Name, w.AgentID, nil
+		}
+	}
+
+	return "", "", "", fmt.Errorf("selected worker not found")
+}
+
+// selectConnectionIP selects an IP from agent's network IPs or manual input
+func selectConnectionIP(ctx context.Context, client *api.Client, agentID string, out *tui.Output) (string, error) {
+	if out.IsJSON() {
+		return "", fmt.Errorf("--connection-ip is required in JSON output mode")
+	}
+
+	// Get agent info to retrieve network IPs
+	var networkIPs []string
+	if agentID != "" {
+		agent, err := client.GetAgent(ctx, agentID)
+		if err != nil {
+			klog.Warningf("Failed to get agent info: error=%v", err)
+		} else if len(agent.NetworkIPs) > 0 {
+			networkIPs = agent.NetworkIPs
+		}
+	}
+
+	if len(networkIPs) == 0 {
+		// No IPs available, ask for manual input
+		return tui.InputPrompt("Enter connection IP address")
+	}
+
+	// Show IP selection
+	options := tui.FormatIPOptions(networkIPs)
+	return tui.SelectPrompt("Select connection IP address:", options)
+}
+
+// workerShareResult implements Renderable for worker share command
+type workerShareResult struct {
+	share      *api.ShareInfo
+	workerName string
+}
+
+func (r *workerShareResult) RenderJSON() any {
+	return r.share
+}
+
+func (r *workerShareResult) RenderTUI(out *tui.Output) {
+	styles := tui.DefaultStyles()
+
+	out.Println()
+	out.Success("Share link created successfully!")
+	out.Println()
+
+	status := tui.NewStatusTable().
+		Add("Worker", styles.Bold.Render(r.workerName)).
+		Add("Short Code", styles.Bold.Render(r.share.ShortCode)).
+		Add("Short Link", tui.URL(r.share.ShortLink)).
+		Add("Connection URL", r.share.ConnectionURL)
+
+	if r.share.ExpiresAt != nil {
+		status.Add("Expires At", r.share.ExpiresAt.Format("2006-01-02 15:04:05"))
+	}
+	if r.share.MaxUses != nil {
+		status.Add("Max Uses", fmt.Sprintf("%d", *r.share.MaxUses))
+	}
+
+	out.Println(status.String())
+
+	out.Println()
+	out.Println(styles.Title.Render("📋 Share this link with others:"))
+	out.Println()
+
+	// Usage instruction box
+	out.Println(styles.Subtitle.Render("Option 1: Update client environment"))
+	out.Println()
+	out.Println("  " + tui.Code(fmt.Sprintf("ggo use %s", r.share.ShortCode)))
+	out.Println()
+	out.Println(styles.Muted.Render("  This sets up the remote GPU environment for the current session."))
+
+	out.Println()
+	out.Println(styles.Subtitle.Render("Option 2: Create an AI Studio with this GPU"))
+	out.Println()
+	out.Println("  " + tui.Code(fmt.Sprintf("ggo studio create <name> --gpu-url %s", r.share.ConnectionURL)))
+	out.Println()
+	out.Println(styles.Muted.Render("  This creates a containerized development environment with remote GPU access."))
+	out.Println()
 }
 
 func boolToYesNo(b bool) string {

@@ -43,7 +43,7 @@ export class AuthManager {
         
         // First, open browser to generate PAT
         const openBrowser = await vscode.window.showInformationMessage(
-            'To login, you need to generate a Personal Access Token (PAT) from the GPU Go dashboard.',
+            'To login, you need to generate a Personal Access Token (PAT) from the GPUGo dashboard.',
             'Open Dashboard',
             'I have a token'
         );
@@ -101,7 +101,7 @@ export class AuthManager {
             this._onAuthStateChanged.fire(true);
             
             Logger.log('Login successful');
-            vscode.window.showInformationMessage('Successfully logged in to GPU Go!');
+            vscode.window.showInformationMessage('Successfully logged in to GPUGo!');
             return true;
         } catch (error) {
             Logger.error('Login failed:', error);
@@ -112,7 +112,7 @@ export class AuthManager {
 
     async logout(): Promise<void> {
         const confirm = await vscode.window.showWarningMessage(
-            'Are you sure you want to logout from GPU Go?',
+            'Are you sure you want to logout from GPUGo?',
             { modal: true },
             'Logout'
         );
@@ -128,7 +128,7 @@ export class AuthManager {
             this._isLoggedIn = false;
             this._onAuthStateChanged.fire(false);
             
-            vscode.window.showInformationMessage('Successfully logged out from GPU Go.');
+            vscode.window.showInformationMessage('Successfully logged out from GPUGo.');
         } catch (error) {
             vscode.window.showErrorMessage(`Logout failed: ${error}`);
         }

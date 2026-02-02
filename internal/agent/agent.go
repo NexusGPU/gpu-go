@@ -25,9 +25,9 @@ import (
 const (
 	statusReportInterval = 1 * time.Minute
 	forceRefreshInterval = 6 * time.Hour
-	connectionsFileName  = "connections.txt"
-	// EnvConnectionInfoPath is the environment variable name for connection info file path
-	EnvConnectionInfoPath = "TF_CONNECTION_INFO_PATH"
+	// EnvConnectionInfoPath is the environment variable name for connection info directory path
+	// Workers should write their connections to: {TF_CLIENT_INFO_PATH}/{workerID}.txt
+	EnvConnectionInfoPath = "TF_CLIENT_INFO_PATH"
 
 	// Worker status constants
 	workerStatusRunning  = "running"
@@ -75,12 +75,12 @@ type Agent struct {
 	workerBinaryPath string
 
 	// Change tracking state
-	mu                  sync.RWMutex
-	lastForceRefresh    time.Time
-	prevWorkers         map[string]*workerSnapshot // workerID -> snapshot
-	prevConnections     map[string][]string        // workerID -> []connectionLine
-	prevGPUs            map[string]*gpuSnapshot    // gpuID -> snapshot
-	connectionsFilePath string
+	mu               sync.RWMutex
+	lastForceRefresh time.Time
+	prevWorkers      map[string]*workerSnapshot // workerID -> snapshot
+	prevConnections  map[string][]string        // workerID -> []connectionLine
+	prevGPUs         map[string]*gpuSnapshot    // gpuID -> snapshot
+	connectionsDir   string                     // directory containing per-worker connection files
 }
 
 // NewAgent creates a new agent
@@ -89,19 +89,18 @@ func NewAgent(client *api.Client, configMgr *config.Manager) *Agent {
 
 	hostname, _ := os.Hostname()
 	paths := platform.DefaultPaths()
-	connectionsPath := filepath.Join(paths.StateDir(), connectionsFileName)
 
 	return &Agent{
-		client:              client,
-		config:              configMgr,
-		paths:               paths,
-		ctx:                 ctx,
-		cancel:              cancel,
-		hostname:            hostname,
-		prevWorkers:         make(map[string]*workerSnapshot),
-		prevConnections:     make(map[string][]string),
-		prevGPUs:            make(map[string]*gpuSnapshot),
-		connectionsFilePath: connectionsPath,
+		client:          client,
+		config:          configMgr,
+		paths:           paths,
+		ctx:             ctx,
+		cancel:          cancel,
+		hostname:        hostname,
+		prevWorkers:     make(map[string]*workerSnapshot),
+		prevConnections: make(map[string][]string),
+		prevGPUs:        make(map[string]*gpuSnapshot),
+		connectionsDir:  paths.ConnectionsDir(),
 	}
 }
 
@@ -198,12 +197,18 @@ func (a *Agent) Start() error {
 	a.configVersion = cfg.ConfigVersion
 	a.client.SetAgentSecret(cfg.AgentSecret)
 
-	// Set TF_CONNECTION_INFO_PATH environment variable for worker processes
-	// Workers will write connection info to this file, agent will read it for status reporting
-	if err := os.Setenv(EnvConnectionInfoPath, a.connectionsFilePath); err != nil {
+	// Ensure connections directory exists for worker processes
+	if err := os.MkdirAll(a.connectionsDir, 0755); err != nil {
+		klog.Warningf("Failed to create connections directory: path=%s error=%v", a.connectionsDir, err)
+	}
+
+	// Set TF_CLIENT_INFO_PATH environment variable for worker processes
+	// Workers will write connection info to: {TF_CLIENT_INFO_PATH}/{workerID}.txt
+	// Each worker has its own file with format: clientIP,clientPort,clientPID (one per line)
+	if err := os.Setenv(EnvConnectionInfoPath, a.connectionsDir); err != nil {
 		klog.Warningf("Failed to set %s env var: error=%v", EnvConnectionInfoPath, err)
 	} else {
-		klog.V(4).Infof("Set %s=%s for worker processes", EnvConnectionInfoPath, a.connectionsFilePath)
+		klog.V(4).Infof("Set %s=%s for worker processes", EnvConnectionInfoPath, a.connectionsDir)
 	}
 
 	// Write PID file
@@ -515,22 +520,60 @@ func (a *Agent) detectWorkerChanges(currentWorkers []*hvApi.WorkerInfo) map[stri
 	return changes
 }
 
-// readConnectionsFile reads the connections file written by worker processes
-// Format: one connection per line: workerID,clientIP,clientPort,clientPID
+// readConnectionsFromDir reads connection files from the connections directory
+// Each worker has its own file: {connectionsDir}/{workerID}.txt
+// File format: one connection per line: clientIP,clientPort,clientPID
 // Returns workerID -> []connectionLine
-func (a *Agent) readConnectionsFile() (connections map[string][]string, err error) {
-	connections = make(map[string][]string)
+func (a *Agent) readConnectionsFromDir() (map[string][]string, error) {
+	connections := make(map[string][]string)
 
-	file, err := os.Open(a.connectionsFilePath)
+	entries, err := os.ReadDir(a.connectionsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return connections, nil // No connections file yet
+			return connections, nil // No connections directory yet
 		}
-		return nil, fmt.Errorf("failed to open connections file: %w", err)
+		return nil, fmt.Errorf("failed to read connections directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".txt") {
+			continue
+		}
+
+		// Extract workerID from filename (remove .txt suffix)
+		workerID := strings.TrimSuffix(entry.Name(), ".txt")
+		if workerID == "" {
+			continue
+		}
+
+		// Read connection lines from worker's file
+		connLines, err := a.readWorkerConnectionFile(filepath.Join(a.connectionsDir, entry.Name()))
+		if err != nil {
+			klog.V(4).Infof("Failed to read connection file for worker %s: %v", workerID, err)
+			continue
+		}
+
+		if len(connLines) > 0 {
+			connections[workerID] = connLines
+		}
+	}
+
+	return connections, nil
+}
+
+// readWorkerConnectionFile reads a single worker's connection file
+// Format: one connection per line: clientIP,clientPort,clientPID
+func (a *Agent) readWorkerConnectionFile(filePath string) (lines []string, err error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to open file: %w", err)
 	}
 	defer func() {
 		if closeErr := file.Close(); closeErr != nil && err == nil {
-			err = fmt.Errorf("failed to close connections file: %w", closeErr)
+			err = fmt.Errorf("failed to close file: %w", closeErr)
 		}
 	}()
 
@@ -540,20 +583,17 @@ func (a *Agent) readConnectionsFile() (connections map[string][]string, err erro
 		if line == "" {
 			continue
 		}
-		// Format: workerID,clientIP,clientPort,clientPID
-		parts := strings.SplitN(line, ",", 2)
-		if len(parts) >= 2 {
-			workerID := parts[0]
-			connectionData := parts[1] // clientIP,clientPort,clientPID
-			connections[workerID] = append(connections[workerID], connectionData)
+		// Validate format: should have at least clientIP
+		if parts := strings.Split(line, ","); len(parts) >= 1 && parts[0] != "" {
+			lines = append(lines, line)
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("failed to read connections file: %w", err)
+		return nil, fmt.Errorf("failed to scan file: %w", err)
 	}
 
-	return connections, nil
+	return lines, nil
 }
 
 // detectConnectionChanges compares current connections with previous state
@@ -561,8 +601,8 @@ func (a *Agent) readConnectionsFile() (connections map[string][]string, err erro
 func (a *Agent) detectConnectionChanges() (map[string]bool, error) {
 	changes := make(map[string]bool)
 
-	// Read current connections from file
-	currentConnections, err := a.readConnectionsFile()
+	// Read current connections from directory
+	currentConnections, err := a.readConnectionsFromDir()
 	if err != nil {
 		return nil, err
 	}
@@ -601,17 +641,20 @@ func (a *Agent) detectConnectionChanges() (map[string]bool, error) {
 }
 
 // parseConnectionsToAPI converts connection strings to API ConnectionInfo
+// Input format per line: clientIP,clientPort,clientPID
 func parseConnectionsToAPI(connectionLines []string) []api.ConnectionInfo {
-	var connections []api.ConnectionInfo
+	connections := make([]api.ConnectionInfo, 0, len(connectionLines))
 	for _, line := range connectionLines {
-		// Format: clientIP,clientPort,clientPID
+		// Parse: clientIP,clientPort,clientPID
 		parts := strings.Split(line, ",")
-		if len(parts) >= 1 {
-			connections = append(connections, api.ConnectionInfo{
-				ClientIP:    parts[0],
-				ConnectedAt: time.Now(), // We don't have exact connect time, use current
-			})
+		if len(parts) < 1 || parts[0] == "" {
+			continue
 		}
+		clientIP := strings.TrimSpace(parts[0])
+		connections = append(connections, api.ConnectionInfo{
+			ClientIP:    clientIP,
+			ConnectedAt: time.Now(), // Worker doesn't track exact connect time
+		})
 	}
 	return connections
 }
@@ -640,7 +683,7 @@ func (a *Agent) reportStatus() error {
 	}
 
 	// 3. Read current connections
-	currentConnections, _ := a.readConnectionsFile()
+	currentConnections, _ := a.readConnectionsFromDir()
 
 	// 4. Collect Worker status
 	workerStatuses, err := a.collectWorkerStatus(forceRefresh, connectionChanges, currentConnections, gpuChanges)

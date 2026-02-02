@@ -231,7 +231,7 @@ export class CLI {
             this.cliPath = null;
 
             vscode.window.showErrorMessage(
-                'GPU Go CLI initialization failed. Please check your settings or install manually.',
+                'GPUGo CLI initialization failed. Please check your settings or install manually.',
                 'Settings',
                 'Retry'
             ).then(selection => {
@@ -323,7 +323,7 @@ export class CLI {
                     // Special handling for CLI not found
                     if (code === 127) {
                         vscode.window.showErrorMessage(
-                            `GPU Go CLI not found at '${cliPath}'. Please check your settings.`,
+                            `GPUGo CLI not found at '${cliPath}'. Please check your settings.`,
                             'Settings'
                         ).then(s => {
                             if (s === 'Settings') {

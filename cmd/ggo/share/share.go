@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/NexusGPU/gpu-go/cmd/ggo/auth"
@@ -19,6 +20,22 @@ var (
 	userToken    string
 	outputFormat string
 )
+
+// extractShortCode extracts the short code from a short link URL or returns the input as-is if it's already a code.
+// Supports formats: "abc123", "https://go.gpu.tf/s/abc123", "go.gpu.tf/s/abc123"
+func extractShortCode(input string) string {
+	input = strings.TrimSpace(input)
+
+	// If it looks like a URL, extract the last path segment
+	if strings.Contains(input, "/") {
+		parts := strings.Split(strings.TrimSuffix(input, "/"), "/")
+		if len(parts) > 0 {
+			return parts[len(parts)-1]
+		}
+	}
+
+	return input
+}
 
 // NewShareCmd creates the share command
 func NewShareCmd() *cobra.Command {
@@ -253,12 +270,12 @@ func (r *shareListResult) RenderTUI(out *tui.Output) {
 
 func newShareGetCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "get <short-code>",
+		Use:   "get <short-link>",
 		Short: "Get share link details",
-		Long:  `Get public information about a share link using its short code.`,
+		Long:  `Get public information about a share link using its short code or full link.`,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			shortCode := args[0]
+			shortCode := extractShortCode(args[0])
 			client := getClient()
 			ctx := context.Background()
 			out := getOutput()
