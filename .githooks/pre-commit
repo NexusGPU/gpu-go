@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+
+repo_root="$(git rev-parse --show-toplevel)"
+
+cd "$repo_root"
+golangci-lint run --fix
+
+cd "$repo_root/vscode-extension"
+pnpm lint
+pnpm compile
