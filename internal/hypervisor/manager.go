@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
+	"github.com/NexusGPU/gpu-go/internal/utils"
 	tfv1 "github.com/NexusGPU/tensor-fusion/api/v1"
 	"github.com/NexusGPU/tensor-fusion/pkg/hypervisor/api"
 	"github.com/NexusGPU/tensor-fusion/pkg/hypervisor/backend/single_node"
@@ -275,6 +277,20 @@ func (m *Manager) StartWorker(workerInfo *api.WorkerInfo) error {
 		return ErrNotStarted
 	}
 
+	// Check port availability if port is specified in args
+	if workerInfo.WorkerRunningInfo != nil {
+		port := getPortFromArgs(workerInfo.WorkerRunningInfo.Args)
+		if port > 0 {
+			pid, err := utils.CheckPortAvailability(port)
+			if err != nil {
+				if pid > 0 {
+					return fmt.Errorf("port %d is already in use by process %d. To release the port, run:\n  kill -9 %d", port, pid, pid)
+				}
+				return fmt.Errorf("port %d is already in use. Please ensure the port is free before starting the worker", port)
+			}
+		}
+	}
+
 	// Allocate devices for the worker
 	if _, err := m.allocationController.AllocateWorkerDevices(workerInfo); err != nil {
 		return fmt.Errorf("allocate devices: %w", err)
@@ -373,4 +389,15 @@ func (m *Manager) DeviceController() framework.DeviceController {
 // Backend returns the underlying backend for advanced use cases
 func (m *Manager) Backend() framework.Backend {
 	return m.backend
+}
+
+func getPortFromArgs(args []string) int {
+	for i, arg := range args {
+		if arg == "-p" && i+1 < len(args) {
+			if p, err := strconv.Atoi(args[i+1]); err == nil {
+				return p
+			}
+		}
+	}
+	return 0
 }

@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/NexusGPU/gpu-go/internal/errors"
+	"github.com/NexusGPU/gpu-go/internal/utils"
 	"k8s.io/klog/v2"
 )
 
@@ -107,6 +109,17 @@ func (m *Manager) Start(config WorkerConfig) error {
 	if state, exists := m.workers[workerID]; exists {
 		if state.Status == WorkerStatusRunning {
 			return errors.Conflict("worker", "already running").WithDetail("worker_id", workerID)
+		}
+	}
+
+	// Check port availability if using TCP mode
+	if (config.Mode == "" || config.Mode == WorkerModeTCP) && config.ListenPort > 0 {
+		pid, err := utils.CheckPortAvailability(config.ListenPort)
+		if err != nil {
+			if pid > 0 {
+				return fmt.Errorf("port %d is already in use by process %d. To release the port, run:\n  kill -9 %d", config.ListenPort, pid, pid)
+			}
+			return fmt.Errorf("port %d is already in use. Please ensure the port is free before starting the worker", config.ListenPort)
 		}
 	}
 

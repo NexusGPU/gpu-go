@@ -627,10 +627,58 @@ func (a *Agent) reportStatus() error {
 		a.updateForceRefreshTime()
 	}
 
-	// Load current GPUs
-	gpuConfigs, err := a.config.LoadGPUs()
+	// 1. Collect GPU status
+	gpuStatuses, gpuChanges, err := a.collectGPUStatus(forceRefresh)
 	if err != nil {
 		return err
+	}
+
+	// 2. Detect connection changes
+	connectionChanges, err := a.detectConnectionChanges()
+	if err != nil {
+		klog.Warningf("Failed to detect connection changes: error=%v", err)
+	}
+
+	// 3. Read current connections
+	currentConnections, _ := a.readConnectionsFile()
+
+	// 4. Collect Worker status
+	workerStatuses, err := a.collectWorkerStatus(forceRefresh, connectionChanges, currentConnections, gpuChanges)
+	if err != nil {
+		return err
+	}
+
+	// 5. Get license expiration
+	licenseExpiration, err := a.getLicenseExpiration()
+	if err != nil {
+		return err
+	}
+
+	// 6. Send request
+	req := &api.AgentStatusRequest{
+		Timestamp:         time.Now(),
+		GPUs:              gpuStatuses,
+		Workers:           workerStatuses,
+		LicenseExpiration: licenseExpiration,
+	}
+
+	resp, err := a.client.ReportAgentStatus(a.ctx, a.agentID, req)
+	if err != nil {
+		return err
+	}
+
+	// 7. Handle response
+	a.handleReportResponse(resp)
+
+	return nil
+}
+
+// collectGPUStatus collects current GPU status and changes
+func (a *Agent) collectGPUStatus(forceRefresh bool) ([]api.GPUStatus, map[string]bool, error) {
+	// Load current GPUs from config
+	gpuConfigs, err := a.config.LoadGPUs()
+	if err != nil {
+		return nil, nil, err
 	}
 
 	// Get current device info from hypervisor if available
@@ -653,6 +701,10 @@ func (a *Agent) reportStatus() error {
 	gpuChanges, err := a.detectGPUChanges(liveDevices)
 	if err != nil {
 		klog.Warningf("Failed to detect GPU changes: error=%v", err)
+		// If detection fails, we can assume no changes or proceed with empty map
+		if gpuChanges == nil {
+			gpuChanges = make(map[string]bool)
+		}
 	}
 
 	// Build GPU status
@@ -684,148 +736,157 @@ func (a *Agent) reportStatus() error {
 		}
 	}
 
-	// Detect connection changes
-	connectionChanges, err := a.detectConnectionChanges()
-	if err != nil {
-		klog.Warningf("Failed to detect connection changes: error=%v", err)
-	}
+	return gpuStatuses, gpuChanges, nil
+}
 
-	// Read current connections for reporting
-	currentConnections, _ := a.readConnectionsFile()
-
-	// Get worker status from hypervisor (SSoT)
-	var workerStatuses []api.WorkerStatus
+// collectWorkerStatus collects current worker status
+func (a *Agent) collectWorkerStatus(
+	forceRefresh bool,
+	connectionChanges map[string]bool,
+	currentConnections map[string][]string,
+	gpuChanges map[string]bool,
+) ([]api.WorkerStatus, error) {
+	// If hypervisor is available, use it as SSoT
 	if a.hypervisorMgr != nil && a.hypervisorMgr.IsStarted() {
-		hvWorkers := a.hypervisorMgr.ListWorkers()
+		return a.collectWorkerStatusFromHypervisor(forceRefresh, connectionChanges, currentConnections, gpuChanges)
+	}
+	// Fallback to config-based status
+	return a.collectWorkerStatusFromConfig(forceRefresh, gpuChanges)
+}
 
-		// Detect worker changes
-		workerChanges := a.detectWorkerChanges(hvWorkers)
+// collectWorkerStatusFromHypervisor gets worker status from hypervisor
+func (a *Agent) collectWorkerStatusFromHypervisor(
+	forceRefresh bool,
+	connectionChanges map[string]bool,
+	currentConnections map[string][]string,
+	gpuChanges map[string]bool,
+) ([]api.WorkerStatus, error) {
+	hvWorkers := a.hypervisorMgr.ListWorkers()
 
-		// Build status and log summary
-		var runningCount, stoppedCount int
-		var summaryParts []string
-		workerStatuses = make([]api.WorkerStatus, 0, len(hvWorkers))
+	// Detect worker changes
+	workerChanges := a.detectWorkerChanges(hvWorkers)
 
-		for _, w := range hvWorkers {
-			// Determine status from WorkerRunningInfo.IsRunning (API: pending|running|stopping|stopped)
-			status := workerStatusStopped
-			var pid int
-			var restarts int
-			if w.WorkerRunningInfo != nil {
-				if w.WorkerRunningInfo.IsRunning {
-					status = workerStatusRunning
-					runningCount++
-				} else {
-					stoppedCount++
-				}
-				pid = int(w.WorkerRunningInfo.PID)
-				restarts = w.WorkerRunningInfo.Restarts
+	// Build status and log summary
+	var runningCount, stoppedCount int
+	var summaryParts []string
+	workerStatuses := make([]api.WorkerStatus, 0, len(hvWorkers))
+
+	for _, w := range hvWorkers {
+		// Determine status from WorkerRunningInfo.IsRunning
+		status := workerStatusStopped
+		var pid int
+		var restarts int
+		if w.WorkerRunningInfo != nil {
+			if w.WorkerRunningInfo.IsRunning {
+				status = workerStatusRunning
+				runningCount++
 			} else {
 				stoppedCount++
 			}
-
-			// Compute change flags
-			workerChanged := forceRefresh || workerChanges[w.WorkerUID]
-			connectionChanged := forceRefresh || connectionChanges[w.WorkerUID]
-			gpuChanged := forceRefresh || a.anyGPUChanged(w.AllocatedDevices, gpuChanges)
-
-			// Get connections for this worker
-			var connections []api.ConnectionInfo
-			if connLines, ok := currentConnections[w.WorkerUID]; ok {
-				connections = parseConnectionsToAPI(connLines)
-			}
-
-			workerStatuses = append(workerStatuses, api.WorkerStatus{
-				WorkerID:          w.WorkerUID,
-				Status:            normalizeWorkerStatus(status),
-				PID:               pid,
-				Restarts:          restarts,
-				GPUIDs:            w.AllocatedDevices,
-				Connections:       connections,
-				WorkerChanged:     &workerChanged,
-				ConnectionChanged: &connectionChanged,
-				GPUChanged:        &gpuChanged,
-			})
-			summaryParts = append(summaryParts, fmt.Sprintf("%s(status=%s,pid=%d,restarts=%d,wc=%v,cc=%v,gc=%v)",
-				w.WorkerUID, status, pid, restarts, workerChanged, connectionChanged, gpuChanged))
+			pid = int(w.WorkerRunningInfo.PID)
+			restarts = w.WorkerRunningInfo.Restarts
+		} else {
+			stoppedCount++
 		}
 
-		if len(hvWorkers) > 0 {
-			klog.V(4).Infof("Workers summary: total=%d running=%d stopped=%d workers=[%s]",
-				len(hvWorkers), runningCount, stoppedCount, strings.Join(summaryParts, ", "))
-		}
-	} else {
-		// Fallback to config-based status if hypervisor not available
-		workerConfigs, err := a.config.LoadWorkers()
-		if err != nil {
-			return err
-		}
-		workerStatuses = make([]api.WorkerStatus, len(workerConfigs))
-		for i, w := range workerConfigs {
-			// In fallback mode, mark all as changed since we can't accurately track
-			workerChanged := true
-			connectionChanged := true
-			gpuChanged := forceRefresh || len(gpuChanges) > 0
+		// Compute change flags
+		workerChanged := forceRefresh || workerChanges[w.WorkerUID]
+		connectionChanged := forceRefresh || connectionChanges[w.WorkerUID]
+		gpuChanged := forceRefresh || a.anyGPUChanged(w.AllocatedDevices, gpuChanges)
 
-			workerStatuses[i] = api.WorkerStatus{
-				WorkerID:          w.WorkerID,
-				Status:            normalizeWorkerStatus(w.Status),
-				PID:               w.PID,
-				GPUIDs:            w.GPUIDs,
-				Connections:       w.Connections,
-				WorkerChanged:     &workerChanged,
-				ConnectionChanged: &connectionChanged,
-				GPUChanged:        &gpuChanged,
-			}
+		// Get connections for this worker
+		var connections []api.ConnectionInfo
+		if connLines, ok := currentConnections[w.WorkerUID]; ok {
+			connections = parseConnectionsToAPI(connLines)
 		}
+
+		workerStatuses = append(workerStatuses, api.WorkerStatus{
+			WorkerID:          w.WorkerUID,
+			Status:            normalizeWorkerStatus(status),
+			PID:               pid,
+			Restarts:          restarts,
+			GPUIDs:            w.AllocatedDevices,
+			Connections:       connections,
+			WorkerChanged:     &workerChanged,
+			ConnectionChanged: &connectionChanged,
+			GPUChanged:        &gpuChanged,
+		})
+		summaryParts = append(summaryParts, fmt.Sprintf("%s(status=%s,pid=%d,restarts=%d,wc=%v,cc=%v,gc=%v)",
+			w.WorkerUID, status, pid, restarts, workerChanged, connectionChanged, gpuChanged))
 	}
 
-	// Load config to get license expiration
+	if len(hvWorkers) > 0 {
+		klog.V(4).Infof("Workers summary: total=%d running=%d stopped=%d workers=[%s]",
+			len(hvWorkers), runningCount, stoppedCount, strings.Join(summaryParts, ", "))
+	}
+
+	return workerStatuses, nil
+}
+
+// collectWorkerStatusFromConfig gets worker status from local config (fallback)
+func (a *Agent) collectWorkerStatusFromConfig(forceRefresh bool, gpuChanges map[string]bool) ([]api.WorkerStatus, error) {
+	workerConfigs, err := a.config.LoadWorkers()
+	if err != nil {
+		return nil, err
+	}
+
+	workerStatuses := make([]api.WorkerStatus, len(workerConfigs))
+	for i, w := range workerConfigs {
+		// In fallback mode, mark all as changed since we can't accurately track
+		workerChanged := true
+		connectionChanged := true
+		gpuChanged := forceRefresh || len(gpuChanges) > 0
+
+		workerStatuses[i] = api.WorkerStatus{
+			WorkerID:          w.WorkerID,
+			Status:            normalizeWorkerStatus(w.Status),
+			PID:               w.PID,
+			GPUIDs:            w.GPUIDs,
+			Connections:       w.Connections,
+			WorkerChanged:     &workerChanged,
+			ConnectionChanged: &connectionChanged,
+			GPUChanged:        &gpuChanged,
+		}
+	}
+	return workerStatuses, nil
+}
+
+// getLicenseExpiration reads config and parses license expiration
+func (a *Agent) getLicenseExpiration() (*int64, error) {
 	cfg, err := a.config.LoadConfig()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	// Parse license expiration from license plain text
-	var licenseExpiration *int64
 	if cfg != nil && cfg.License.Plain != "" {
 		if exp := parseLicenseExpiration(cfg.License.Plain); exp > 0 {
-			licenseExpiration = &exp
+			return &exp, nil
+		}
+	}
+	return nil, nil
+}
+
+// handleReportResponse handles the status report response
+func (a *Agent) handleReportResponse(resp *api.AgentStatusResponse) {
+	if resp == nil {
+		return
+	}
+
+	// Update license if server returned a new one
+	if resp.License != nil {
+		klog.Infof("Server returned new license, updating config")
+		if err := a.config.UpdateConfigVersion(a.configVersion, *resp.License); err != nil {
+			klog.Errorf("Failed to update license: error=%v", err)
 		}
 	}
 
-	req := &api.AgentStatusRequest{
-		Timestamp:         time.Now(),
-		GPUs:              gpuStatuses,
-		Workers:           workerStatuses,
-		LicenseExpiration: licenseExpiration,
-	}
-
-	resp, err := a.client.ReportAgentStatus(a.ctx, a.agentID, req)
-	if err != nil {
-		return err
-	}
-
-	// Handle response
-	if resp != nil {
-		// Update license if server returned a new one
-		if resp.License != nil {
-			klog.Infof("Server returned new license, updating config")
-			if err := a.config.UpdateConfigVersion(a.configVersion, *resp.License); err != nil {
-				klog.Errorf("Failed to update license: error=%v", err)
-			}
-		}
-
-		// Pull new config if version changed
-		if resp.ConfigVersion > a.configVersion {
-			klog.Infof("Config version changed: old=%d new=%d, pulling new config", a.configVersion, resp.ConfigVersion)
-			if err := a.pullConfig(); err != nil {
-				klog.Errorf("Failed to pull config after version change: error=%v", err)
-			}
+	// Pull new config if version changed
+	if resp.ConfigVersion > a.configVersion {
+		klog.Infof("Config version changed: old=%d new=%d, pulling new config", a.configVersion, resp.ConfigVersion)
+		if err := a.pullConfig(); err != nil {
+			klog.Errorf("Failed to pull config after version change: error=%v", err)
 		}
 	}
-
-	return nil
 }
 
 // anyGPUChanged checks if any GPU in the list has changed

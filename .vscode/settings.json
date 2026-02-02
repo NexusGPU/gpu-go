@@ -4,6 +4,7 @@
         "fsnotify",
         "Infof",
         "klog",
-        "Renderable"
+        "Renderable",
+        "Warningf"
     ]
 }
