@@ -81,8 +81,14 @@ type AgentConfigResponse struct {
 
 // GPUStatus represents GPU status for status report
 type GPUStatus struct {
-	GPUID        string  `json:"gpu_id"`
-	UsedByWorker *string `json:"used_by_worker"`
+	GPUID         string  `json:"gpu_id"`
+	UsedByWorker  *string `json:"used_by_worker"`
+	Vendor        string  `json:"vendor"`
+	Model         string  `json:"model"`
+	VRAMMb        int64   `json:"vram_mb"`
+	DriverVersion string  `json:"driver_version,omitempty"`
+	CUDAVersion   string  `json:"cuda_version,omitempty"`
+	GPUChanged    bool    `json:"gpu_changed,omitempty"`
 }
 
 // ConnectionInfo represents client connection information

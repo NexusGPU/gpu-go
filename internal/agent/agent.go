@@ -394,31 +394,25 @@ func (a *Agent) updateForceRefreshTime() {
 
 // detectGPUChanges compares discovered GPUs with previous state
 // Returns a map of gpuID -> changed flag
-func (a *Agent) detectGPUChanges() (map[string]bool, error) {
+func (a *Agent) detectGPUChanges(devices []*hvApi.DeviceInfo) (map[string]bool, error) {
 	changes := make(map[string]bool)
 
 	// Get current discovered GPUs from hypervisor
 	var currentGPUs []*gpuSnapshot
-	if a.hypervisorMgr != nil && a.hypervisorMgr.IsStarted() {
-		devices, err := a.hypervisorMgr.ListDevices()
-		if err != nil {
-			return nil, fmt.Errorf("failed to list devices: %w", err)
+	for _, dev := range devices {
+		driverVersion, cudaVersion := "", ""
+		if dev.Properties != nil {
+			driverVersion = dev.Properties["driverVersion"]
+			cudaVersion = dev.Properties["cudaVersion"]
 		}
-		for _, dev := range devices {
-			driverVersion, cudaVersion := "", ""
-			if dev.Properties != nil {
-				driverVersion = dev.Properties["driverVersion"]
-				cudaVersion = dev.Properties["cudaVersion"]
-			}
-			currentGPUs = append(currentGPUs, &gpuSnapshot{
-				GPUID:         strings.ToLower(dev.UUID),
-				Vendor:        dev.Vendor,
-				Model:         dev.Model,
-				VRAMMb:        int64(dev.TotalMemoryBytes / (1024 * 1024)),
-				DriverVersion: driverVersion,
-				CUDAVersion:   cudaVersion,
-			})
-		}
+		currentGPUs = append(currentGPUs, &gpuSnapshot{
+			GPUID:         strings.ToLower(dev.UUID),
+			Vendor:        dev.Vendor,
+			Model:         dev.Model,
+			VRAMMb:        int64(dev.TotalMemoryBytes / (1024 * 1024)),
+			DriverVersion: driverVersion,
+			CUDAVersion:   cudaVersion,
+		})
 	}
 
 	a.mu.Lock()
@@ -639,19 +633,55 @@ func (a *Agent) reportStatus() error {
 		return err
 	}
 
-	// Build GPU status
-	gpuStatuses := make([]api.GPUStatus, len(gpuConfigs))
-	for i, gpu := range gpuConfigs {
-		gpuStatuses[i] = api.GPUStatus{
-			GPUID:        gpu.GPUID,
-			UsedByWorker: gpu.UsedByWorker,
+	// Get current device info from hypervisor if available
+	var liveDevices []*hvApi.DeviceInfo
+	if a.hypervisorMgr != nil && a.hypervisorMgr.IsStarted() {
+		var err error
+		liveDevices, err = a.hypervisorMgr.ListDevices()
+		if err != nil {
+			klog.Warningf("Failed to list devices from hypervisor: %v", err)
 		}
 	}
 
+	// Create map for live devices
+	liveDeviceMap := make(map[string]*hvApi.DeviceInfo)
+	for _, dev := range liveDevices {
+		liveDeviceMap[strings.ToLower(dev.UUID)] = dev
+	}
+
 	// Detect GPU changes
-	gpuChanges, err := a.detectGPUChanges()
+	gpuChanges, err := a.detectGPUChanges(liveDevices)
 	if err != nil {
 		klog.Warningf("Failed to detect GPU changes: error=%v", err)
+	}
+
+	// Build GPU status
+	gpuStatuses := make([]api.GPUStatus, len(gpuConfigs))
+	for i, gpu := range gpuConfigs {
+		// Default values from config
+		driverVer := ""
+		cudaVer := ""
+
+		// Update with live info if available
+		if liveDev, ok := liveDeviceMap[strings.ToLower(gpu.GPUID)]; ok {
+			if liveDev.Properties != nil {
+				driverVer = liveDev.Properties["driverVersion"]
+				cudaVer = liveDev.Properties["cudaVersion"]
+			}
+		}
+
+		gpuChanged := forceRefresh || gpuChanges[gpu.GPUID]
+
+		gpuStatuses[i] = api.GPUStatus{
+			GPUID:         gpu.GPUID,
+			UsedByWorker:  gpu.UsedByWorker,
+			Vendor:        gpu.Vendor,
+			Model:         gpu.Model,
+			VRAMMb:        gpu.VRAMMb,
+			DriverVersion: driverVer,
+			CUDAVersion:   cudaVer,
+			GPUChanged:    gpuChanged,
+		}
 	}
 
 	// Detect connection changes

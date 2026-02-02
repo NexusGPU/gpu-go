@@ -92,15 +92,15 @@ func NewManager(cfg Config) (*Manager, error) {
 		return nil, fmt.Errorf("failed to get user home directory: %w", err)
 	}
 
-	// Use checkpoint dir for hypervisor backend state persistence
+	// Use given state dir for hypervisor backend state persistence
 	// This is where SingleNodeBackend persists worker state files
-	checkpointDir := filepath.Join(homeDir, ".gpugo", "checkpoint")
-	if err := os.MkdirAll(checkpointDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create checkpoint directory %s: %w", checkpointDir, err)
+	hypervisorStateDir := filepath.Join(homeDir, ".gpugo", "state")
+	if err := os.MkdirAll(hypervisorStateDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create state directory %s for hypervisor backend: %w", hypervisorStateDir, err)
 	}
 
-	// Set TENSOR_FUSION_STATE_DIR to checkpoint dir for SingleNodeBackend
-	if err := os.Setenv("TENSOR_FUSION_STATE_DIR", checkpointDir); err != nil {
+	// Set TENSOR_FUSION_STATE_DIR to hypervisor state dir for SingleNodeBackend
+	if err := os.Setenv("TENSOR_FUSION_STATE_DIR", hypervisorStateDir); err != nil {
 		return nil, fmt.Errorf("failed to set TENSOR_FUSION_STATE_DIR: %w", err)
 	}
 

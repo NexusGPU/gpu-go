@@ -402,12 +402,13 @@ func TestAgent_DetectChanges(t *testing.T) {
 	agent := NewAgentWithHypervisor(client, configMgr, mockHv, "/bin/true")
 
 	// 1. Detect GPU changes (initial - should be true)
-	changes, err := agent.detectGPUChanges()
+	devices, _ := mockHv.ListDevices()
+	changes, err := agent.detectGPUChanges(devices)
 	require.NoError(t, err)
 	assert.True(t, changes["gpu-0"])
 
 	// 2. Detect GPU changes (subsequent - should be false)
-	changes, err = agent.detectGPUChanges()
+	changes, err = agent.detectGPUChanges(devices)
 	require.NoError(t, err)
 	assert.False(t, changes["gpu-0"])
 
