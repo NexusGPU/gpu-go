@@ -68,7 +68,7 @@ type Agent struct {
 	configVersion int
 
 	// Hypervisor integration
-	hypervisorMgr *hypervisor.Manager
+	hypervisorMgr hypervisor.HypervisorManager
 	reconciler    *hypervisor.Reconciler
 
 	// Dependencies for worker binary
@@ -106,7 +106,7 @@ func NewAgent(client *api.Client, configMgr *config.Manager) *Agent {
 }
 
 // NewAgentWithHypervisor creates a new agent with hypervisor manager
-func NewAgentWithHypervisor(client *api.Client, configMgr *config.Manager, hvMgr *hypervisor.Manager, workerBinaryPath string) *Agent {
+func NewAgentWithHypervisor(client *api.Client, configMgr *config.Manager, hvMgr hypervisor.HypervisorManager, workerBinaryPath string) *Agent {
 	agent := NewAgent(client, configMgr)
 	agent.hypervisorMgr = hvMgr
 	agent.workerBinaryPath = workerBinaryPath
@@ -818,22 +818,20 @@ func (a *Agent) anyGPUChanged(gpuIDs []string, gpuChanges map[string]bool) bool 
 // License plain text format is expected to contain expiration info
 // Returns Unix timestamp in milliseconds, or 0 if parsing fails
 func parseLicenseExpiration(licensePlain string) int64 {
-	// License plain format example: "exp:1706745600000,..."
-	// Try to parse expiration from various formats
-	for _, part := range strings.Split(licensePlain, ",") {
-		part = strings.TrimSpace(part)
-		if strings.HasPrefix(part, "exp:") {
-			expStr := strings.TrimPrefix(part, "exp:")
-			if exp, err := strconv.ParseInt(expStr, 10, 64); err == nil {
-				return exp
-			}
+	// Try pipe format first: gpuIDs|plan|expiry
+	parts := strings.Split(licensePlain, "|")
+	if len(parts) >= 3 {
+		// Clean up potential trailing info or spaces
+		expStr := strings.TrimSpace(parts[2])
+		if exp, err := strconv.ParseInt(expStr, 10, 64); err == nil {
+			return exp
 		}
 	}
 	return 0
 }
 
 // GetHypervisorManager returns the hypervisor manager if available
-func (a *Agent) GetHypervisorManager() *hypervisor.Manager {
+func (a *Agent) GetHypervisorManager() hypervisor.HypervisorManager {
 	return a.hypervisorMgr
 }
 

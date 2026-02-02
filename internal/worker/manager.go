@@ -29,6 +29,7 @@ type WorkerStatus string
 const (
 	WorkerStatusPending    WorkerStatus = "Pending"
 	WorkerStatusRunning    WorkerStatus = "Running"
+	WorkerStatusStopping   WorkerStatus = "Stopping"
 	WorkerStatusStopped    WorkerStatus = "Stopped"
 	WorkerStatusTerminated WorkerStatus = "Terminated"
 	WorkerStatusError      WorkerStatus = "Error"
@@ -69,6 +70,7 @@ type Manager struct {
 	mu           sync.RWMutex
 	workers      map[string]*WorkerState
 	processes    map[string]*exec.Cmd
+	exitChannels map[string]chan struct{}
 	stateDir     string
 	workerBinary string
 	ctx          context.Context
@@ -86,6 +88,7 @@ func NewManager(stateDir, workerBinary string) *Manager {
 	return &Manager{
 		workers:      make(map[string]*WorkerState),
 		processes:    make(map[string]*exec.Cmd),
+		exitChannels: make(map[string]chan struct{}),
 		stateDir:     stateDir,
 		workerBinary: workerBinary,
 		ctx:          ctx,
@@ -154,6 +157,7 @@ func (m *Manager) Start(config WorkerConfig) error {
 
 	m.workers[workerID] = state
 	m.processes[workerID] = cmd
+	m.exitChannels[workerID] = make(chan struct{})
 
 	// Start goroutine to monitor process
 	go m.monitorProcess(workerID, cmd)
@@ -166,17 +170,22 @@ func (m *Manager) Start(config WorkerConfig) error {
 // Stop stops a worker process
 func (m *Manager) Stop(workerID string) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	cmd, exists := m.processes[workerID]
 	if !exists {
+		m.mu.Unlock()
 		return errors.NotFound("worker", workerID)
 	}
 
 	state := m.workers[workerID]
 	if state.Status != WorkerStatusRunning {
+		m.mu.Unlock()
 		return nil // Already stopped
 	}
+
+	// Mark as stopping so monitorProcess knows
+	state.Status = WorkerStatusStopping
+	exitCh := m.exitChannels[workerID]
+	m.mu.Unlock()
 
 	// Send SIGTERM first for graceful shutdown
 	if cmd.Process != nil {
@@ -185,14 +194,9 @@ func (m *Manager) Stop(workerID string) error {
 		}
 	}
 
-	// Wait for graceful shutdown with timeout
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Wait()
-	}()
-
+	// Wait for exit using the channel closed by monitorProcess
 	select {
-	case <-done:
+	case <-exitCh:
 		klog.Infof("Worker stopped gracefully: worker_id=%s", workerID)
 	case <-time.After(10 * time.Second):
 		// Force kill if graceful shutdown fails
@@ -201,11 +205,27 @@ func (m *Manager) Stop(workerID string) error {
 				klog.Warningf("Failed to kill worker process: worker_id=%s error=%v", workerID, err)
 			}
 		}
-		klog.Warningf("Worker force killed after timeout: worker_id=%s", workerID)
+		// Wait again for exit after kill
+		select {
+		case <-exitCh:
+			klog.Infof("Worker force killed: worker_id=%s", workerID)
+		case <-time.After(1 * time.Second):
+			klog.Errorf("Worker did not exit after force kill: worker_id=%s", workerID)
+		}
 	}
 
-	state.Status = WorkerStatusStopped
-	delete(m.processes, workerID)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Update status to Stopped if it's not already
+	// monitorProcess might have set it to Error or Terminated
+	if state, ok := m.workers[workerID]; ok {
+		state.Status = WorkerStatusStopped
+	}
+
+	// Cleanup happens in monitorProcess (delete from processes map)
+	// But we might want to ensure it's removed here if monitorProcess failed?
+	// monitorProcess always runs cleanup.
 
 	return nil
 }
@@ -413,12 +433,21 @@ func (m *Manager) monitorProcess(workerID string, cmd *exec.Cmd) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// Close exit channel to signal Stop()
+	if ch, ok := m.exitChannels[workerID]; ok {
+		close(ch)
+		delete(m.exitChannels, workerID)
+	}
+
 	state, exists := m.workers[workerID]
 	if !exists {
 		return
 	}
 
-	if err != nil {
+	// If status was stopping, we expected this exit
+	if state.Status == WorkerStatusStopping {
+		state.Status = WorkerStatusStopped
+	} else if err != nil {
 		state.Status = WorkerStatusError
 		state.Error = err.Error()
 		klog.Errorf("Worker process exited with error: worker_id=%s error=%v", workerID, err)

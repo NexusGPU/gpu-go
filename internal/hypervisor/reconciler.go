@@ -13,7 +13,7 @@ import (
 
 // Reconciler reconciles cloud-desired workers with hypervisor-actual workers
 type Reconciler struct {
-	manager *Manager
+	manager HypervisorManager
 
 	mu              sync.RWMutex
 	ctx             context.Context
@@ -29,7 +29,7 @@ type Reconciler struct {
 
 // ReconcilerConfig holds configuration for the reconciler
 type ReconcilerConfig struct {
-	Manager *Manager
+	Manager HypervisorManager
 
 	// Optional callbacks
 	OnWorkerStarted     func(workerID string)

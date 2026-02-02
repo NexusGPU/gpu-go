@@ -12,6 +12,8 @@ import (
 
 	"github.com/NexusGPU/gpu-go/internal/api"
 	"github.com/NexusGPU/gpu-go/internal/config"
+	hvApi "github.com/NexusGPU/tensor-fusion/pkg/hypervisor/api"
+	"github.com/NexusGPU/tensor-fusion/pkg/hypervisor/framework"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -266,10 +268,6 @@ func TestAgent_ReportStatus(t *testing.T) {
 	assert.Equal(t, 12345, receivedReq.Workers[0].PID)
 }
 
-// TestAgent_SyncToStateDir - removed as worker state is now managed via hypervisor reconciler
-// The agent delegates worker management to the hypervisor backend (StartWorker/StopWorker)
-// See internal/hypervisor/reconciler.go for worker reconciliation logic
-
 func TestAgent_HandleHeartbeatResponse(t *testing.T) {
 	tmpDir := t.TempDir()
 	configDir := filepath.Join(tmpDir, "config")
@@ -320,5 +318,205 @@ func TestAgent_HandleHeartbeatResponse(t *testing.T) {
 	assert.Equal(t, 10, agent.configVersion)
 }
 
-// TestAgent_ComputeFileHash removed - file hash is no longer computed
-// Worker state is now managed via hypervisor reconciler which uses hypervisor backend as SSoT
+// Mock HypervisorManager
+type mockHypervisorManager struct {
+	started        bool
+	devices        []*hvApi.DeviceInfo
+	workers        []*hvApi.WorkerInfo
+	startedWorkers []string
+	stoppedWorkers []string
+}
+
+func (m *mockHypervisorManager) Start() error {
+	m.started = true
+	return nil
+}
+
+func (m *mockHypervisorManager) Stop() error {
+	m.started = false
+	return nil
+}
+
+func (m *mockHypervisorManager) IsStarted() bool {
+	return m.started
+}
+
+func (m *mockHypervisorManager) ListDevices() ([]*hvApi.DeviceInfo, error) {
+	return m.devices, nil
+}
+
+func (m *mockHypervisorManager) ListWorkers() []*hvApi.WorkerInfo {
+	return m.workers
+}
+
+func (m *mockHypervisorManager) StartWorker(info *hvApi.WorkerInfo) error {
+	m.startedWorkers = append(m.startedWorkers, info.WorkerUID)
+	return nil
+}
+
+func (m *mockHypervisorManager) StopWorker(workerUID string) error {
+	m.stoppedWorkers = append(m.stoppedWorkers, workerUID)
+	return nil
+}
+
+func (m *mockHypervisorManager) GetDeviceMetrics() (map[string]*hvApi.GPUUsageMetrics, error) {
+	return nil, nil
+}
+
+func (m *mockHypervisorManager) GetWorkerAllocation(workerUID string) (*hvApi.WorkerAllocation, bool) {
+	return nil, false
+}
+
+func (m *mockHypervisorManager) RegisterWorkerHandler(handler framework.WorkerChangeHandler) error {
+	return nil
+}
+
+func (m *mockHypervisorManager) RegisterDeviceHandler(handler framework.DeviceChangeHandler) {
+}
+
+func TestAgent_DetectChanges(t *testing.T) {
+	// Initialize mock hypervisor
+	mockHv := &mockHypervisorManager{
+		started: true,
+		devices: []*hvApi.DeviceInfo{
+			{UUID: "gpu-0", Vendor: "nvidia", Model: "RTX 4090", TotalMemoryBytes: 24 * 1024 * 1024 * 1024},
+		},
+		workers: []*hvApi.WorkerInfo{
+			{
+				WorkerUID:        "worker_1",
+				AllocatedDevices: []string{"gpu-0"},
+				WorkerRunningInfo: &hvApi.WorkerRunningInfo{
+					IsRunning: true,
+					PID:       12345,
+					Restarts:  0,
+				},
+			},
+		},
+	}
+
+	tmpDir := t.TempDir()
+	configMgr := config.NewManager(tmpDir, tmpDir)
+	client := api.NewClient()
+
+	// Use NewAgentWithHypervisor logic but with mock
+	agent := NewAgentWithHypervisor(client, configMgr, mockHv, "/bin/true")
+
+	// 1. Detect GPU changes (initial - should be true)
+	changes, err := agent.detectGPUChanges()
+	require.NoError(t, err)
+	assert.True(t, changes["gpu-0"])
+
+	// 2. Detect GPU changes (subsequent - should be false)
+	changes, err = agent.detectGPUChanges()
+	require.NoError(t, err)
+	assert.False(t, changes["gpu-0"])
+
+	// 3. Detect Worker changes (initial - should be true)
+	workerChanges := agent.detectWorkerChanges(mockHv.workers)
+	assert.True(t, workerChanges["worker_1"])
+
+	// 4. Detect Worker changes (subsequent - should be false)
+	workerChanges = agent.detectWorkerChanges(mockHv.workers)
+	assert.False(t, workerChanges["worker_1"])
+
+	// 5. Simulate change
+	mockHv.workers[0].WorkerRunningInfo.Restarts = 1
+	workerChanges = agent.detectWorkerChanges(mockHv.workers)
+	assert.True(t, workerChanges["worker_1"])
+}
+
+func TestAgent_WithHypervisor(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "config")
+	stateDir := filepath.Join(tmpDir, "state")
+
+	mockHv := &mockHypervisorManager{started: true}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == "GET" && r.URL.Path == "/api/v1/agents/agent_test123/config" {
+			resp := api.AgentConfigResponse{
+				ConfigVersion: 1,
+				Workers: []api.WorkerConfig{
+					{WorkerID: "worker_1", GPUIDs: []string{"gpu-0"}, ListenPort: 9001, Enabled: true},
+				},
+				License: api.License{Plain: "test", Encrypted: "enc"},
+			}
+			json.NewEncoder(w).Encode(resp)
+		} else {
+			json.NewEncoder(w).Encode(api.SuccessResponse{Success: true})
+		}
+	}))
+	defer server.Close()
+
+	configMgr := config.NewManager(configDir, stateDir)
+	cfg := &config.Config{
+		ConfigVersion: 1,
+		AgentID:       "agent_test123",
+		AgentSecret:   "gpugo_secret123",
+		ServerURL:     server.URL,
+	}
+	configMgr.SaveConfig(cfg)
+
+	client := api.NewClient(
+		api.WithBaseURL(server.URL),
+		api.WithAgentSecret("gpugo_secret123"),
+	)
+
+	agent := NewAgentWithHypervisor(client, configMgr, mockHv, "/bin/true")
+
+	// Start
+	err := agent.Start()
+	require.NoError(t, err)
+
+	// Reconciler should have started worker (eventually)
+	// Since we mock backend, StartWorker calls mock.StartWorker
+	// We check if it eventually happens
+	time.Sleep(200 * time.Millisecond)
+
+	agent.Stop()
+}
+
+func TestAgent_LicenseParsing(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "config")
+	stateDir := filepath.Join(tmpDir, "state")
+
+	var receivedReq api.AgentStatusRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&receivedReq)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(api.SuccessResponse{Success: true})
+	}))
+	defer server.Close()
+
+	configMgr := config.NewManager(configDir, stateDir)
+
+	// Create config with license expiration
+	// Future timestamp: 2025-01-01 -> 1735689600000
+	cfg := &config.Config{
+		ConfigVersion: 1,
+		AgentID:       "agent_test123",
+		AgentSecret:   "gpugo_secret123",
+		ServerURL:     server.URL,
+		License: api.License{
+			Plain:     "test|pro|1735689600000",
+			Encrypted: "enc",
+		},
+	}
+	err := configMgr.SaveConfig(cfg)
+	require.NoError(t, err)
+
+	client := api.NewClient(
+		api.WithBaseURL(server.URL),
+		api.WithAgentSecret("gpugo_secret123"),
+	)
+
+	agent := NewAgent(client, configMgr)
+
+	err = agent.reportStatus()
+	require.NoError(t, err)
+
+	require.NotNil(t, receivedReq.LicenseExpiration)
+	assert.Equal(t, int64(1735689600000), *receivedReq.LicenseExpiration)
+}

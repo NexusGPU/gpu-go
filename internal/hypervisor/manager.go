@@ -18,6 +18,21 @@ import (
 	"k8s.io/klog/v2"
 )
 
+// HypervisorManager defines the interface for hypervisor operations
+type HypervisorManager interface {
+	Start() error
+	Stop() error
+	IsStarted() bool
+	ListDevices() ([]*api.DeviceInfo, error)
+	ListWorkers() []*api.WorkerInfo
+	StartWorker(workerInfo *api.WorkerInfo) error
+	StopWorker(workerUID string) error
+	GetDeviceMetrics() (map[string]*api.GPUUsageMetrics, error)
+	GetWorkerAllocation(workerUID string) (*api.WorkerAllocation, bool)
+	RegisterWorkerHandler(handler framework.WorkerChangeHandler) error
+	RegisterDeviceHandler(handler framework.DeviceChangeHandler)
+}
+
 // ErrNotStarted is returned when the manager is not started
 var ErrNotStarted = errors.New("hypervisor manager not started")
 

@@ -470,7 +470,7 @@ func (c *Client) GetReleases(ctx context.Context, vendor string, size int) (*Rel
 // --- WebSocket APIs ---
 
 // WebSocket backoff constants
-const (
+var (
 	wsInitialBackoff         = 1 * time.Minute
 	wsMaxBackoff             = 60 * time.Minute
 	wsHeartbeatInterval      = 2 * time.Minute
@@ -480,7 +480,7 @@ const (
 )
 
 // Long polling constants
-const (
+var (
 	lpInitialBackoff         = 1 * time.Minute
 	lpMaxBackoff             = 60 * time.Minute
 	lpPollTimeout            = 90 * time.Second // Server-side timeout, client should reconnect before this
