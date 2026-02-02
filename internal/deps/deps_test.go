@@ -17,12 +17,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Test constants for platform strings
-const (
-	testOSLinux   = "linux"
-	testOSWindows = "windows"
-)
-
 func TestFetchManifest(t *testing.T) {
 	// Use temp directory to avoid cached manifests
 	tmpDir := t.TempDir()
@@ -132,19 +126,4 @@ func TestCleanCache(t *testing.T) {
 	// Cache should be empty
 	entries, _ := os.ReadDir(cacheDir)
 	assert.Empty(t, entries)
-}
-
-func TestVGPULibraries(t *testing.T) {
-	libs := VGPULibraries()
-
-	switch runtime.GOOS {
-	case testOSLinux:
-		assert.Contains(t, libs, "libcuda.so.1")
-		assert.Contains(t, libs, "libnvidia-ml.so.1")
-	case testOSWindows:
-		assert.Contains(t, libs, "nvcuda.dll")
-		assert.Contains(t, libs, "nvml.dll")
-	default:
-		assert.Nil(t, libs)
-	}
 }

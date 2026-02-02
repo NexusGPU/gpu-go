@@ -480,7 +480,7 @@ func (m *Manager) DownloadLibrary(ctx context.Context, lib Library, progressFn f
 	}
 
 	// Set executable permission on Unix
-	if runtime.GOOS != "windows" {
+	if !platform.IsWindows() {
 		if err := os.Chmod(destPath, 0755); err != nil {
 			return fmt.Errorf("failed to set permissions: %w", err)
 		}
@@ -513,7 +513,7 @@ func (m *Manager) InstallLibrary(lib Library) error {
 	}
 
 	// Make executable on Unix (in cache directly)
-	if runtime.GOOS != "windows" {
+	if !platform.IsWindows() {
 		if err := os.Chmod(srcPath, 0755); err != nil {
 			return fmt.Errorf("failed to set permissions: %w", err)
 		}
@@ -717,25 +717,6 @@ func (m *Manager) updateDownloadedManifest(lib Library) error {
 	}
 
 	return os.WriteFile(manifestPath, data, 0644)
-}
-
-// VGPULibraries returns the standard vGPU library names for the current platform
-func VGPULibraries() []string {
-	switch runtime.GOOS {
-	case "linux":
-		return []string{
-			"libcuda.so.1",
-			"libnvidia-ml.so.1",
-			"libcuda-vgpu.so",
-		}
-	case "windows":
-		return []string{
-			"nvcuda.dll",
-			"nvml.dll",
-		}
-	default:
-		return nil
-	}
 }
 
 // GetRemoteGPUWorkerPath returns the path to the remote-gpu-worker binary
