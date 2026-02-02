@@ -300,14 +300,19 @@ register_agent() {
     info ""
     info "Registering GPU Go agent..."
     
+    # Get sudo command (empty if already root)
+    SUDO=$(get_sudo)
+    
     # Build register command
-    REGISTER_CMD="${binary_path} agent register -t ${token}"
+    # Use sudo to ensure config is saved to root's home directory (~/.gpugo/config)
+    # This matches the systemd service which runs as root
+    REGISTER_CMD="${SUDO} ${binary_path} agent register -t ${token}"
     
     if [ -n "${ENDPOINT}" ]; then
         REGISTER_CMD="${REGISTER_CMD} --server ${ENDPOINT}"
     fi
     
-    info "Running: ggo agent register"
+    info "Running: ${SUDO:+sudo }ggo agent register"
     
     if ${REGISTER_CMD}; then
         info "Agent registered successfully!"
