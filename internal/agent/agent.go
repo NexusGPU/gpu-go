@@ -331,7 +331,10 @@ func (a *Agent) pullConfig() error {
 
 	// Reconcile workers with hypervisor if available
 	if a.reconciler != nil {
-		infos := a.convertToWorkerInfos(resp.Workers)
+		infos, err := a.convertToWorkerInfos(resp.Workers)
+		if err != nil {
+			return fmt.Errorf("failed to convert worker infos: %w", err)
+		}
 		a.reconciler.SetDesiredWorkers(infos)
 	}
 
@@ -343,7 +346,26 @@ func (a *Agent) pullConfig() error {
 }
 
 // convertToWorkerInfos converts API worker configs to hypervisor WorkerInfo
-func (a *Agent) convertToWorkerInfos(apiWorkers []api.WorkerConfig) []*hvApi.WorkerInfo {
+func (a *Agent) convertToWorkerInfos(apiWorkers []api.WorkerConfig) ([]*hvApi.WorkerInfo, error) {
+	// Load config to get license information
+	cfg, err := a.config.LoadConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load config: %w", err)
+	}
+	if cfg == nil {
+		return nil, fmt.Errorf("config is nil")
+	}
+
+	// Validate license fields
+	if cfg.License.Plain == "" {
+		klog.Errorf("License plain field is missing in config.json")
+		return nil, fmt.Errorf("license plain field is missing in config.json")
+	}
+	if cfg.License.Encrypted == "" {
+		klog.Errorf("License encrypted field is missing in config.json")
+		return nil, fmt.Errorf("license encrypted field is missing in config.json")
+	}
+
 	infos := make([]*hvApi.WorkerInfo, 0, len(apiWorkers))
 	for _, w := range apiWorkers {
 		if !w.Enabled {
@@ -363,11 +385,15 @@ func (a *Agent) convertToWorkerInfos(apiWorkers []api.WorkerConfig) []*hvApi.Wor
 			Executable: a.workerBinaryPath,
 			Args:       []string{"-p", fmt.Sprintf("%d", w.ListenPort), "-n", "native"},
 			WorkingDir: a.config.StateDir(),
+			Env: map[string]string{
+				"TF_LICENSE":      cfg.License.Plain,
+				"TF_LICENSE_SIGN": cfg.License.Encrypted,
+			},
 		}
 
 		infos = append(infos, info)
 	}
-	return infos
+	return infos, nil
 }
 
 // normalizeWorkerStatus maps status to API-allowed WorkerStatus: "pending" | "running" | "stopping" | "stopped".
