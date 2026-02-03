@@ -1,6 +1,6 @@
 <p align="center"><a href="https://tensor-fusion.ai" target="_blank" rel="noreferrer"><img width="100%" src="https://cdn.tensor-fusion.ai/logo-banner.png" alt="Logo"></a></p>
 
-# GPU Go - Remote GPU Management for VS Code
+# GPU Go VSCode Extension
 
 [![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/nexusgpu.gpu-go?style=flat-square&label=VS%20Code%20Marketplace&logo=visual-studio-code)](https://marketplace.visualstudio.com/items?itemName=nexusgpu.gpu-go)
 [![Installs](https://img.shields.io/visual-studio-marketplace/i/nexusgpu.gpu-go?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=nexusgpu.gpu-go)
