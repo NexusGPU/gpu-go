@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/NexusGPU/gpu-go/cmd/ggo/cmdutil"
+	"github.com/NexusGPU/gpu-go/internal/api"
 	"github.com/NexusGPU/gpu-go/internal/studio"
 	"github.com/NexusGPU/gpu-go/internal/tui"
 	"github.com/spf13/cobra"
@@ -15,7 +16,8 @@ import (
 var (
 	mode          string
 	image         string
-	gpuURL        string
+	shareLink     string
+	serverURL     string
 	sshKey        string
 	ports         []string
 	volumes       []string
@@ -45,10 +47,10 @@ Supported platforms:
 
 Examples:
   # Create a new studio environment with remote GPU
-  ggo studio create my-studio --gpu-url "https://worker.example.com:9001"
+  ggo studio create my-studio -s "https://worker.example.com:9001"
 
   # Create with specific mode
-  ggo studio create my-studio --mode wsl --gpu-url "https://..."
+  ggo studio create my-studio --mode wsl -s "https://..."
 
   # Create with specific Colima profile
   ggo studio create my-studio --mode colima --colima-profile myprofile
@@ -132,30 +134,34 @@ The environment will be configured with:
   - Pre-installed AI/ML libraries (based on image)
 
 Examples:
-  # Create with auto-detected platform
-  ggo studio create my-env --gpu-url "https://worker:9001"
+  # Create with share link (required for GPU access)
+  ggo studio create my-env -s abc123
 
   # Create with specific image
-  ggo studio create my-env --image tensorfusion/studio-torch:latest
+  ggo studio create my-env -s abc123 --image tensorfusion/studio-torch:latest
 
   # Create with WSL on Windows (specific distro)
-  ggo studio create my-env --mode wsl --wsl-distro Ubuntu-22.04 --gpu-url "https://..."
+  ggo studio create my-env --mode wsl --wsl-distro Ubuntu-22.04 -s abc123
 
   # Create with Colima on macOS (specific profile)
-  ggo studio create my-env --mode colima --colima-profile myprofile --gpu-url "https://..."
+  ggo studio create my-env --mode colima --colima-profile myprofile -s abc123
 
   # Create with custom Docker socket
-  ggo studio create my-env --docker-host unix://$HOME/.colima/custom/docker.sock
+  ggo studio create my-env -s abc123 --docker-host unix://$HOME/.colima/custom/docker.sock
 
-  # Create with custom ports and volumes
-  ggo studio create my-env --gpu-url "..." -p 8888:8888 -v ~/projects:/workspace`,
+  # Create with custom ports and volumes (mount project directory)
+  ggo studio create my-env -s abc123 -p 8888:8888 -v ~/projects:/workspace
+
+  # Best practice: mount user data directory to prevent data loss on studio rebuild
+  ggo studio create my-env -s abc123 -v ~/data:/data`,
 		Args: cobra.ExactArgs(1),
 		RunE: runCreate,
 	}
 
 	cmd.Flags().StringVarP(&mode, "mode", "m", "", "Container/VM mode (wsl, colima, docker, k8s, auto)")
 	cmd.Flags().StringVarP(&image, "image", "i", "tensorfusion/studio-torch:latest", "Container image")
-	cmd.Flags().StringVar(&gpuURL, "gpu-url", "", "Remote GPU worker URL")
+	cmd.Flags().StringVarP(&shareLink, "share-link", "s", "", "Share link or share code to remote vGPU worker (required)")
+	cmd.Flags().StringVar(&serverURL, "server", api.GetDefaultBaseURL(), "Server URL for resolving share links")
 	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "SSH public key to authorize")
 	cmd.Flags().StringArrayVarP(&ports, "port", "p", nil, "Port mappings (host:container)")
 	cmd.Flags().StringArrayVarP(&volumes, "volume", "v", nil, "Volume mounts (host:container[:ro])")
@@ -176,7 +182,24 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	mgr := getManager()
 	out := getOutput()
 
-	opts, err := buildCreateOptions(name)
+	// Resolve share link if provided
+	var shareInfo *api.SharePublicInfo
+	if shareLink != "" {
+		shortCode := extractShortCode(shareLink)
+		client := api.NewClient(api.WithBaseURL(serverURL))
+
+		var err error
+		shareInfo, err = client.GetSharePublic(ctx, shortCode)
+		if err != nil {
+			cmd.SilenceUsage = true
+			klog.Errorf("Failed to resolve share link: error=%v", err)
+			return fmt.Errorf("failed to resolve share link '%s': %w", shareLink, err)
+		}
+		klog.Infof("Resolved share link: worker_id=%s vendor=%s connection_url=%s",
+			shareInfo.WorkerID, shareInfo.HardwareVendor, shareInfo.ConnectionURL)
+	}
+
+	opts, err := buildCreateOptions(name, shareInfo)
 	if err != nil {
 		return err
 	}
@@ -186,6 +209,9 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		out.Printf("%s Creating studio environment '%s'...\n",
 			styles.Info.Render("◐"),
 			styles.Bold.Render(name))
+		if shareInfo != nil {
+			out.Printf("   GPU: %s (vendor: %s)\n", shareInfo.WorkerID, shareInfo.HardwareVendor)
+		}
 	}
 
 	env, err := mgr.Create(ctx, opts)
@@ -197,7 +223,19 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	return out.Render(&createResult{env: env, mgr: mgr, noSSH: noSSH})
 }
 
-func buildCreateOptions(name string) (*studio.CreateOptions, error) {
+// extractShortCode extracts the short code from a share link URL
+func extractShortCode(input string) string {
+	input = strings.TrimSpace(input)
+	if strings.Contains(input, "/") {
+		parts := strings.Split(strings.TrimSuffix(input, "/"), "/")
+		if len(parts) > 0 {
+			return parts[len(parts)-1]
+		}
+	}
+	return input
+}
+
+func buildCreateOptions(name string, shareInfo *api.SharePublicInfo) (*studio.CreateOptions, error) {
 	studioMode := studio.ModeAuto
 	if mode != "" {
 		studioMode = studio.Mode(mode)
@@ -218,15 +256,24 @@ func buildCreateOptions(name string) (*studio.CreateOptions, error) {
 		return nil, err
 	}
 
+	// Set GPU connection info from share link
+	gpuWorkerURL := ""
+	hardwareVendor := ""
+	if shareInfo != nil {
+		gpuWorkerURL = shareInfo.ConnectionURL
+		hardwareVendor = shareInfo.HardwareVendor
+	}
+
 	return &studio.CreateOptions{
-		Name:         name,
-		Mode:         studioMode,
-		Image:        image,
-		GPUWorkerURL: gpuURL,
-		SSHPublicKey: sshKey,
-		Ports:        portMappings,
-		Volumes:      volumeMounts,
-		Envs:         envMap,
+		Name:           name,
+		Mode:           studioMode,
+		Image:          image,
+		GPUWorkerURL:   gpuWorkerURL,
+		HardwareVendor: hardwareVendor,
+		SSHPublicKey:   sshKey,
+		Ports:          portMappings,
+		Volumes:        volumeMounts,
+		Envs:           envMap,
 		Resources: studio.ResourceSpec{
 			CPUs:   cpus,
 			Memory: memory,

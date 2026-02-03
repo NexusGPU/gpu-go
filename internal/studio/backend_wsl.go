@@ -57,9 +57,115 @@ func (b *WSLBackend) IsAvailable(ctx context.Context) bool {
 		return false
 	}
 
-	// Check if WSL is available
+	status := b.GetWSLStatus(ctx)
+	return status.IsReady()
+}
+
+// WSLStatus represents the detailed status of WSL
+type WSLStatus struct {
+	WSLInstalled     bool
+	HasDistribution  bool
+	DistributionName string
+	DockerInstalled  bool
+	DockerRunning    bool
+	ErrorMessage     string
+}
+
+// IsReady returns true if WSL is ready to run containers
+func (s *WSLStatus) IsReady() bool {
+	return s.WSLInstalled && s.HasDistribution && s.DockerInstalled && s.DockerRunning
+}
+
+// GetInstallGuidance returns installation guidance based on the current status
+func (s *WSLStatus) GetInstallGuidance() string {
+	switch {
+	case !s.WSLInstalled:
+		return `WSL is not installed. Please run the following in PowerShell (as Administrator):
+
+  wsl --install
+
+Then restart your computer and run 'ggo studio backends' again.`
+
+	case !s.HasDistribution:
+		return `WSL is installed but no Linux distribution found. Please run:
+
+  wsl --install -d Ubuntu
+
+Then restart your computer and run 'ggo studio backends' again.`
+
+	case !s.DockerInstalled:
+		return fmt.Sprintf(`WSL distribution '%s' found but Docker is not installed.
+Please open WSL terminal and run:
+
+  curl -fsSL https://get.docker.com | sh
+  sudo usermod -aG docker $USER
+
+Then log out and back in to WSL, and run 'ggo studio backends' again.`, s.DistributionName)
+
+	case !s.DockerRunning:
+		return fmt.Sprintf(`Docker is installed in WSL '%s' but not running.
+Please open WSL terminal and run:
+
+  sudo service docker start
+
+Or to start Docker automatically, add to your ~/.bashrc:
+
+  if service docker status 2>&1 | grep -q "is not running"; then
+    sudo service docker start
+  fi`, s.DistributionName)
+	}
+	return ""
+}
+
+// GetWSLStatus checks the detailed status of WSL
+func (b *WSLBackend) GetWSLStatus(ctx context.Context) *WSLStatus {
+	status := &WSLStatus{}
+
+	// Check if WSL command exists
 	cmd := exec.CommandContext(ctx, "wsl", "--status")
-	return cmd.Run() == nil
+	if err := cmd.Run(); err != nil {
+		status.WSLInstalled = false
+		status.ErrorMessage = "WSL is not installed or not accessible"
+		return status
+	}
+	status.WSLInstalled = true
+
+	// Check for distributions
+	distro, err := b.getDefaultDistro(ctx)
+	if err != nil {
+		status.HasDistribution = false
+		status.ErrorMessage = "No WSL distribution found"
+		return status
+	}
+	status.HasDistribution = true
+	status.DistributionName = distro
+
+	// Check if Docker is installed in WSL
+	output, err := b.runInWSL(ctx, distro, "which", "docker")
+	if err != nil || strings.TrimSpace(string(output)) == "" {
+		status.DockerInstalled = false
+		status.ErrorMessage = "Docker is not installed in WSL"
+		return status
+	}
+	status.DockerInstalled = true
+
+	// Check if Docker daemon is running
+	output, err = b.runInWSL(ctx, distro, "docker", "info")
+	if err != nil {
+		status.DockerRunning = false
+		// Check if it's a permission issue
+		if strings.Contains(string(output), "permission denied") {
+			status.ErrorMessage = "Docker permission denied. Run: sudo usermod -aG docker $USER"
+		} else if strings.Contains(string(output), "Cannot connect") {
+			status.ErrorMessage = "Docker daemon is not running"
+		} else {
+			status.ErrorMessage = fmt.Sprintf("Docker error: %s", string(output))
+		}
+		return status
+	}
+	status.DockerRunning = true
+
+	return status
 }
 
 // getDefaultDistro returns the default WSL distribution

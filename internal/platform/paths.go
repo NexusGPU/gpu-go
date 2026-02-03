@@ -3,7 +3,9 @@ package platform
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strings"
 )
 
 // Platform constants for runtime.GOOS comparisons
@@ -189,4 +191,91 @@ func IsDarwin() bool {
 // IsLinux returns true if running on Linux
 func IsLinux() bool {
 	return runtime.GOOS == osLinux
+}
+
+// StudioDir returns the directory for studio configurations
+// All platforms: ~/.gpugo/studio (or UserDir/studio)
+func (p *Paths) StudioDir() string {
+	return filepath.Join(p.userDir, "studio")
+}
+
+// StudioLogsDir returns the logs directory for a specific studio
+// name: the normalized studio name (use NormalizeName to sanitize)
+// All platforms: ~/.gpugo/studio/{name}/logs
+func (p *Paths) StudioLogsDir(name string) string {
+	return filepath.Join(p.StudioDir(), NormalizeName(name), "logs")
+}
+
+// StudioConfigDir returns the config directory for a specific studio
+// Used for storing ld.so.preload and ld.so.conf content for the studio
+// All platforms: ~/.gpugo/studio/{name}/config
+func (p *Paths) StudioConfigDir(name string) string {
+	return filepath.Join(p.StudioDir(), NormalizeName(name), "config")
+}
+
+// CurrentOSLogsDir returns the logs directory for the current OS (used by ggo use)
+// All platforms: ~/.gpugo/studio/current-os/logs
+func (p *Paths) CurrentOSLogsDir() string {
+	return p.StudioLogsDir("current-os")
+}
+
+// CurrentOSConfigDir returns the config directory for the current OS (used by ggo use)
+// All platforms: ~/.gpugo/studio/current-os/config
+func (p *Paths) CurrentOSConfigDir() string {
+	return p.StudioConfigDir("current-os")
+}
+
+// LDSoConfPath returns the path to the ld.so.conf.d file for a studio
+// This file will be mounted to /etc/ld.so.conf.d/zz_tensor-fusion.conf in containers
+func (p *Paths) LDSoConfPath(name string) string {
+	return filepath.Join(p.StudioConfigDir(name), "ld.so.conf.d", "zz_tensor-fusion.conf")
+}
+
+// LDSoPreloadPath returns the path to the ld.so.preload file for a studio
+// This file will be mounted to /etc/ld.so.preload in containers
+func (p *Paths) LDSoPreloadPath(name string) string {
+	return filepath.Join(p.StudioConfigDir(name), "ld.so.preload")
+}
+
+// NormalizeName normalizes a string to be a valid folder name
+// - Converts to lowercase
+// - Replaces spaces and special chars with hyphens
+// - Removes consecutive hyphens
+// - Trims leading/trailing hyphens
+func NormalizeName(name string) string {
+	// Convert to lowercase
+	name = strings.ToLower(name)
+
+	// Replace any non-alphanumeric characters (except hyphen and underscore) with hyphen
+	re := regexp.MustCompile(`[^a-z0-9\-_]+`)
+	name = re.ReplaceAllString(name, "-")
+
+	// Remove consecutive hyphens
+	re = regexp.MustCompile(`-+`)
+	name = re.ReplaceAllString(name, "-")
+
+	// Trim leading/trailing hyphens
+	name = strings.Trim(name, "-")
+
+	// Ensure not empty
+	if name == "" {
+		name = "default"
+	}
+
+	return name
+}
+
+// EnsureStudioDirs creates all required directories for a studio
+func (p *Paths) EnsureStudioDirs(name string) error {
+	dirs := []string{
+		p.StudioLogsDir(name),
+		p.StudioConfigDir(name),
+		filepath.Dir(p.LDSoConfPath(name)), // ld.so.conf.d directory
+	}
+	for _, dir := range dirs {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
+	}
+	return nil
 }

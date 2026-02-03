@@ -3,7 +3,10 @@ package deps
 import (
 	"context"
 	"fmt"
+	"os"
 	"slices"
+	"sort"
+	"strings"
 
 	"github.com/NexusGPU/gpu-go/cmd/ggo/cmdutil"
 	"github.com/NexusGPU/gpu-go/internal/api"
@@ -18,6 +21,7 @@ var (
 	apiURL          string
 	force           bool
 	verbose         bool
+	autoConfirm     bool // -y flag for auto-confirmation
 	syncOS          string
 	syncArch        string
 	listOS          string
@@ -66,7 +70,7 @@ func newSyncCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sync",
 		Short: "Sync releases metadata from API",
-		Long:  `Fetch vendor releases from the API and cache them locally as version metadata.`,
+		Long:  `Fetch vendor releases from the API and cache them locally as release manifest.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			mgr := getManager()
 			out := getOutput()
@@ -100,7 +104,7 @@ func newSyncCmd() *cobra.Command {
 
 // syncResult implements Renderable for sync command
 type syncResult struct {
-	manifest *deps.Manifest
+	manifest *deps.ReleaseManifest
 	verbose  bool
 }
 
@@ -118,6 +122,7 @@ func (r *syncResult) RenderTUI(out *tui.Output) {
 				for _, lib := range r.manifest.Libraries {
 					fmt.Printf("  Name: %s\n", lib.Name)
 					fmt.Printf("    Version: %s\n", lib.Version)
+					fmt.Printf("    Type: %s\n", lib.Type)
 					fmt.Printf("    Platform: %s/%s\n", lib.Platform, lib.Arch)
 					fmt.Printf("    Size: %d bytes\n", lib.Size)
 					fmt.Printf("    SHA256: %s\n", lib.SHA256)
@@ -127,7 +132,11 @@ func (r *syncResult) RenderTUI(out *tui.Output) {
 			} else {
 				fmt.Println("\nSynced libraries:")
 				for _, lib := range r.manifest.Libraries {
-					fmt.Printf("  %s (version: %s, platform: %s/%s)\n", lib.Name, lib.Version, lib.Platform, lib.Arch)
+					typeStr := ""
+					if lib.Type != "" {
+						typeStr = fmt.Sprintf(" [%s]", lib.Type)
+					}
+					fmt.Printf("  %s (version: %s, platform: %s/%s)%s\n", lib.Name, lib.Version, lib.Platform, lib.Arch, typeStr)
 				}
 			}
 		}
@@ -144,17 +153,17 @@ func newListCmd() *cobra.Command {
 			out := getOutput()
 			ctx := context.Background()
 
-			installed, err := mgr.GetInstalledLibraries()
+			depsManifest, err := mgr.LoadDepsManifest()
 			if err != nil {
-				klog.Warningf("Failed to load installed libraries: error=%v", err)
+				klog.Warningf("Failed to load deps manifest: error=%v", err)
 			}
 
-			downloaded, err := mgr.GetDownloadedLibraries()
+			downloaded, err := mgr.LoadDownloadedManifest()
 			if err != nil {
-				klog.Warningf("Failed to load downloaded libraries: error=%v", err)
+				klog.Warningf("Failed to load downloaded manifest: error=%v", err)
 			}
 
-			manifest, synced, err := mgr.FetchManifest(ctx)
+			manifest, synced, err := mgr.FetchReleaseManifest(ctx)
 			if err != nil {
 				cmd.SilenceUsage = true
 				klog.Errorf("Failed to fetch manifest: error=%v", err)
@@ -162,9 +171,9 @@ func newListCmd() *cobra.Command {
 			}
 
 			if synced && !out.IsJSON() {
-				updates, _ := mgr.CheckUpdates(ctx)
-				if len(updates) > 0 {
-					out.Info(fmt.Sprintf("Manifest updated. %d updates available. Run 'ggo deps update' to upgrade.", len(updates)))
+				diff, _ := mgr.ComputeUpdateDiff()
+				if diff != nil && len(diff.ToDownload) > 0 {
+					out.Info(fmt.Sprintf("Manifest updated. %d updates available. Run 'ggo deps update' to upgrade.", len(diff.ToDownload)))
 				}
 			}
 
@@ -184,14 +193,8 @@ func newListCmd() *cobra.Command {
 				}
 			}
 
-			slices.SortFunc(libs, func(a, b deps.Library) int {
-				if a.Name != b.Name {
-					return compareStrings(a.Name, b.Name)
-				}
-				return compareStrings(a.Platform, b.Platform)
-			})
-
-			displayLibs := buildDisplayLibraries(libs, installed, downloaded)
+			// Build merged display libraries (group by name+platform+arch, show latest version)
+			displayLibs := buildMergedDisplayLibraries(libs, depsManifest, downloaded)
 
 			return out.Render(&listResult{libs: displayLibs, filterDesc: filterDesc})
 		},
@@ -205,43 +208,131 @@ func newListCmd() *cobra.Command {
 // DisplayLibrary contains library info with status
 type DisplayLibrary struct {
 	deps.Library
-	Status    string `json:"status"`
-	Installed bool   `json:"installed"`
+	Status         string   `json:"status"`
+	Installed      bool     `json:"installed"`
+	Downloaded     bool     `json:"downloaded"`
+	AvailVersions  []string `json:"available_versions,omitempty"`
+	InstalledVer   string   `json:"installed_version,omitempty"`
+	DownloadedVer  string   `json:"downloaded_version,omitempty"`
+	FileExists     bool     `json:"file_exists"`
+	ActualFileSize int64    `json:"actual_file_size,omitempty"`
 }
 
-func buildDisplayLibraries(libs []deps.Library, installed *deps.LocalManifest, downloaded *deps.DownloadedManifest) []DisplayLibrary {
-	displayLibs := make([]DisplayLibrary, len(libs))
-	for i, lib := range libs {
-		dLib := DisplayLibrary{Library: lib, Status: "Available"}
-
-		if installed != nil {
-			if installedLib, exists := installed.Libraries[lib.Name]; exists {
-				if installedLib.Version == lib.Version && installedLib.Platform == lib.Platform && installedLib.Arch == lib.Arch {
-					dLib.Status = "Installed"
-					dLib.Installed = true
-					if lib.Size == 0 && installedLib.Size > 0 {
-						dLib.Size = installedLib.Size
-					}
-				} else if installedLib.Version != lib.Version {
-					dLib.Status = fmt.Sprintf("Update: %s -> %s", installedLib.Version, lib.Version)
-					dLib.Installed = true
-				}
-			}
-		}
-
-		if !dLib.Installed && downloaded != nil {
-			if downloadedLib, exists := downloaded.Libraries[lib.Name]; exists {
-				if downloadedLib.Version == lib.Version && downloadedLib.Platform == lib.Platform && downloadedLib.Arch == lib.Arch {
-					dLib.Status = "Downloaded"
-					if lib.Size == 0 && downloadedLib.Size > 0 {
-						dLib.Size = downloadedLib.Size
-					}
-				}
-			}
-		}
-		displayLibs[i] = dLib
+// buildMergedDisplayLibraries groups libraries by key (name+platform+arch) and merges versions
+func buildMergedDisplayLibraries(libs []deps.Library, depsManifest *deps.DepsManifest, downloaded *deps.DownloadedManifest) []DisplayLibrary {
+	// Group by key
+	grouped := make(map[string][]deps.Library)
+	for _, lib := range libs {
+		key := lib.Key()
+		grouped[key] = append(grouped[key], lib)
 	}
+
+	// Build display list
+	var displayLibs []DisplayLibrary
+	for _, libGroup := range grouped {
+		if len(libGroup) == 0 {
+			continue
+		}
+
+		// Sort by version descending to get latest first
+		sort.Slice(libGroup, func(i, j int) bool {
+			return libGroup[i].Version > libGroup[j].Version
+		})
+
+		// Use latest version as the primary display
+		latestLib := libGroup[0]
+		dLib := DisplayLibrary{
+			Library: latestLib,
+			Status:  "Available",
+		}
+
+		// Collect all available versions
+		for _, lib := range libGroup {
+			dLib.AvailVersions = append(dLib.AvailVersions, lib.Version)
+		}
+
+		key := latestLib.Key()
+
+		// Check deps manifest (what's required/installed)
+		if depsManifest != nil {
+			if installedLib, exists := depsManifest.Libraries[key]; exists {
+				dLib.InstalledVer = installedLib.Version
+				dLib.Installed = true
+
+				// Use installed lib's size if current is 0
+				if dLib.Size == 0 && installedLib.Size > 0 {
+					dLib.Size = installedLib.Size
+				}
+			}
+		}
+
+		// Check downloaded manifest
+		if downloaded != nil {
+			if downloadedLib, exists := downloaded.Libraries[key]; exists {
+				dLib.DownloadedVer = downloadedLib.Version
+				dLib.Downloaded = true
+
+				// Use downloaded lib's size if current is 0
+				if dLib.Size == 0 && downloadedLib.Size > 0 {
+					dLib.Size = downloadedLib.Size
+				}
+			}
+		}
+
+		// Check if file actually exists and get actual size
+		mgr := getManager()
+		filePath := mgr.GetLibraryPath(latestLib.Name)
+		if info, err := os.Stat(filePath); err == nil {
+			dLib.FileExists = true
+			dLib.ActualFileSize = info.Size()
+			// Always use actual file size if available
+			if dLib.ActualFileSize > 0 {
+				dLib.Size = dLib.ActualFileSize
+			}
+		}
+
+		// Determine status
+		dLib.Status = determineStatus(dLib)
+
+		displayLibs = append(displayLibs, dLib)
+	}
+
+	// Sort by name
+	slices.SortFunc(displayLibs, func(a, b DisplayLibrary) int {
+		if a.Name != b.Name {
+			return compareStrings(a.Name, b.Name)
+		}
+		return compareStrings(a.Platform, b.Platform)
+	})
+
 	return displayLibs
+}
+
+func determineStatus(dLib DisplayLibrary) string {
+	// If file doesn't exist, cannot be installed/downloaded
+	if !dLib.FileExists {
+		if dLib.Installed && dLib.InstalledVer != "" {
+			return fmt.Sprintf("Missing (v%s)", dLib.InstalledVer)
+		}
+		return "Available"
+	}
+
+	// File exists - check versions
+	if dLib.Installed {
+		if dLib.InstalledVer == dLib.Version {
+			return "Installed"
+		}
+		return fmt.Sprintf("Update: %s → %s", dLib.InstalledVer, dLib.Version)
+	}
+
+	if dLib.Downloaded {
+		if dLib.DownloadedVer == dLib.Version {
+			return "Downloaded"
+		}
+		return fmt.Sprintf("Downloaded (%s)", dLib.DownloadedVer)
+	}
+
+	return "Available"
 }
 
 // listResult implements Renderable for list command
@@ -270,24 +361,33 @@ func (r *listResult) RenderTUI(out *tui.Output) {
 		style := styles.Muted
 		status := dLib.Status
 
-		if status == "Installed" {
+		switch {
+		case strings.HasPrefix(status, "Installed"):
 			style = styles.Success
-		} else if status == "Downloaded" {
+		case strings.HasPrefix(status, "Downloaded"):
 			style = styles.Info
-		} else if len(status) > 7 && status[:7] == "Update:" {
+		case strings.HasPrefix(status, "Update:"):
 			style = styles.Warning
+		case strings.HasPrefix(status, "Missing"):
+			style = styles.Error
+		}
+
+		typeStr := dLib.Type
+		if typeStr == "" {
+			typeStr = "-"
 		}
 
 		rows = append(rows, []string{
 			dLib.Name,
 			dLib.Version,
+			typeStr,
 			fmt.Sprintf("%s/%s", dLib.Platform, dLib.Arch),
 			formatSize(dLib.Size),
 			style.Render(status),
 		})
 	}
 
-	out.PrintTable([]string{"Name", "Version", "Platform", "Size", "Status"}, rows)
+	out.PrintTable([]string{"Name", "Version", "Type", "Platform", "Size", "Status"}, rows)
 }
 
 func compareStrings(a, b string) int {
@@ -317,67 +417,50 @@ func newDownloadCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "download [library...]",
 		Short: "Download dependencies to cache",
-		Long:  `Download vGPU library dependencies to the local cache without installing.`,
+		Long: `Download vGPU library dependencies to the local cache.
+Downloads all libraries in deps-manifest that aren't already downloaded or have version mismatches.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			mgr := getManager()
 			out := getOutput()
 			ctx := context.Background()
 
-			manifest, _, err := mgr.FetchManifest(ctx)
+			// Ensure deps manifest exists
+			depsManifest, err := mgr.LoadDepsManifest()
 			if err != nil {
 				cmd.SilenceUsage = true
-				klog.Errorf("Failed to fetch manifest: error=%v", err)
 				return err
 			}
 
-			targetOS := downloadOS
-			targetArch := downloadArch
-
-			libs := mgr.GetLibrariesForPlatform(manifest, targetOS, targetArch, "")
-			if len(libs) == 0 {
-				platformDesc := "this platform"
-				if targetOS != "" || targetArch != "" {
-					platformDesc = fmt.Sprintf("%s/%s", targetOS, targetArch)
-				}
-				return out.Render(&cmdutil.ActionData{
-					Success: false,
-					Message: fmt.Sprintf("No libraries available for %s", platformDesc),
-				})
-			}
-
-			filtered := filterLibraries(libs, args, downloadName, downloadVersion)
-			if len(filtered) == 0 {
-				return out.Render(&cmdutil.ActionData{
-					Success: false,
-					Message: "No libraries match the specified criteria",
-				})
-			}
-
-			downloadedLibs := []deps.Library{}
-			for _, lib := range filtered {
+			if depsManifest == nil || len(depsManifest.Libraries) == 0 {
 				if !out.IsJSON() {
-					fmt.Printf("Downloading %s (version: %s, platform: %s/%s)...\n", lib.Name, lib.Version, lib.Platform, lib.Arch)
+					out.Info("No dependencies configured. Running 'ggo deps update' first...")
 				}
-
-				progressFn := func(downloaded, total int64) {
-					if !out.IsJSON() && total > 0 {
-						pct := float64(downloaded) / float64(total) * 100
-						fmt.Printf("\r  Progress: %.1f%% (%d/%d bytes)", pct, downloaded, total)
-					}
-				}
-
-				if err := mgr.DownloadLibrary(ctx, lib, progressFn); err != nil {
+				_, _, err := mgr.UpdateDepsManifest(ctx)
+				if err != nil {
 					cmd.SilenceUsage = true
-					klog.Errorf("Failed to download: library=%s error=%v", lib.Name, err)
 					return err
 				}
-				if !out.IsJSON() {
-					fmt.Println("\n  Done!")
-				}
-				downloadedLibs = append(downloadedLibs, lib)
 			}
 
-			return out.Render(&downloadResult{libs: downloadedLibs})
+			// Download all required libraries
+			if !out.IsJSON() {
+				fmt.Println("Downloading dependencies...")
+			}
+
+			progressFn := func(lib deps.Library, downloaded, total int64) {
+				if !out.IsJSON() && total > 0 {
+					pct := float64(downloaded) / float64(total) * 100
+					fmt.Printf("\r  %s: %.1f%% (%d/%d bytes)", lib.Name, pct, downloaded, total)
+				}
+			}
+
+			results, err := mgr.DownloadAllRequired(ctx, progressFn)
+			if err != nil {
+				cmd.SilenceUsage = true
+				return err
+			}
+
+			return out.Render(&downloadResult{results: results})
 		},
 	}
 
@@ -389,40 +472,85 @@ func newDownloadCmd() *cobra.Command {
 	return cmd
 }
 
-func filterLibraries(libs []deps.Library, args []string, name, version string) []deps.Library {
-	var filtered []deps.Library
-	for _, lib := range libs {
-		if name != "" {
-			if lib.Name != name {
-				continue
-			}
-		} else if len(args) > 0 {
-			matched := slices.Contains(args, lib.Name)
-			if !matched {
-				continue
-			}
-		}
-
-		if version != "" && lib.Version != version {
-			continue
-		}
-
-		filtered = append(filtered, lib)
-	}
-	return filtered
-}
-
 // downloadResult implements Renderable for download command
 type downloadResult struct {
-	libs []deps.Library
+	results []deps.DownloadResult
 }
 
 func (r *downloadResult) RenderJSON() any {
-	return tui.NewListResult(r.libs)
+	return tui.NewListResult(r.results)
 }
 
 func (r *downloadResult) RenderTUI(out *tui.Output) {
-	out.Println("\nAll downloads complete!")
+	if len(r.results) == 0 {
+		out.Info("No dependencies to download")
+		return
+	}
+
+	styles := tui.DefaultStyles()
+	var rows [][]string
+
+	var newCount, updatedCount, existingCount, failedCount int
+
+	for _, res := range r.results {
+		style := styles.Muted
+		statusStr := string(res.Status)
+
+		switch res.Status {
+		case deps.DownloadStatusNew:
+			style = styles.Success
+			statusStr = "✓ New"
+			newCount++
+		case deps.DownloadStatusUpdated:
+			style = styles.Warning
+			statusStr = "✓ Updated"
+			updatedCount++
+		case deps.DownloadStatusExisting:
+			style = styles.Info
+			statusStr = "• Existing"
+			existingCount++
+		case deps.DownloadStatusFailed:
+			style = styles.Error
+			statusStr = "✗ Failed"
+			failedCount++
+		}
+
+		typeStr := res.Library.Type
+		if typeStr == "" {
+			typeStr = "-"
+		}
+
+		rows = append(rows, []string{
+			res.Library.Name,
+			res.Library.Version,
+			typeStr,
+			formatSize(res.Library.Size),
+			style.Render(statusStr),
+		})
+	}
+
+	fmt.Println()
+	out.PrintTable([]string{"Name", "Version", "Type", "Size", "Status"}, rows)
+	fmt.Println()
+
+	// Summary
+	var summary []string
+	if newCount > 0 {
+		summary = append(summary, fmt.Sprintf("%d new", newCount))
+	}
+	if updatedCount > 0 {
+		summary = append(summary, fmt.Sprintf("%d updated", updatedCount))
+	}
+	if existingCount > 0 {
+		summary = append(summary, fmt.Sprintf("%d existing", existingCount))
+	}
+	if failedCount > 0 {
+		summary = append(summary, fmt.Sprintf("%d failed", failedCount))
+	}
+
+	if len(summary) > 0 {
+		out.Println(fmt.Sprintf("Download complete: %s", strings.Join(summary, ", ")))
+	}
 }
 
 func newInstallCmd() *cobra.Command {
@@ -435,7 +563,7 @@ func newInstallCmd() *cobra.Command {
 			out := getOutput()
 			ctx := context.Background()
 
-			manifest, _, err := mgr.FetchManifest(ctx)
+			manifest, _, err := mgr.FetchReleaseManifest(ctx)
 			if err != nil {
 				cmd.SilenceUsage = true
 				klog.Errorf("Failed to fetch manifest: error=%v", err)
@@ -519,92 +647,168 @@ func (r *installResult) RenderJSON() any {
 
 func (r *installResult) RenderTUI(out *tui.Output) {
 	out.Println("\nAll libraries installed!")
-	out.Println("\nTo use the libraries, add the following to your environment:")
-	out.Printf("  export LD_PRELOAD=%s\n", r.mgr.GetLibraryPath("libcuda.so.1"))
 }
 
 func newUpdateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "update",
 		Short: "Check for and install updates",
+		Long: `Sync releases from API, update deps manifest, and optionally download updates.
+Use -y flag to automatically download without confirmation.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			mgr := getManager()
 			out := getOutput()
 			ctx := context.Background()
 
 			if !out.IsJSON() {
-				fmt.Println("Checking for updates...")
+				fmt.Println("Syncing releases and checking for updates...")
 			}
-			updates, err := mgr.CheckUpdates(ctx)
+
+			// Update deps manifest (syncs releases internally)
+			newDeps, changes, err := mgr.UpdateDepsManifest(ctx)
 			if err != nil {
 				cmd.SilenceUsage = true
-				klog.Errorf("Failed to check updates: error=%v", err)
+				klog.Errorf("Failed to update deps manifest: error=%v", err)
 				return err
 			}
 
-			if len(updates) == 0 {
+			// Compute diff between deps manifest and downloaded
+			diff, err := mgr.ComputeUpdateDiff()
+			if err != nil {
+				cmd.SilenceUsage = true
+				return err
+			}
+
+			if len(diff.ToDownload) == 0 {
 				return out.Render(&cmdutil.ActionData{
 					Success: true,
-					Message: "All libraries are up to date!",
+					Message: "All dependencies are up to date!",
 				})
 			}
 
+			// Show what needs to be downloaded
 			if !out.IsJSON() {
-				fmt.Printf("Found %d updates:\n", len(updates))
-				for _, lib := range updates {
-					fmt.Printf("  %s: %s\n", lib.Name, lib.Version)
-				}
-				fmt.Println("\nInstalling updates...")
-			}
+				fmt.Printf("\nFound %d dependencies to update:\n\n", len(diff.ToDownload))
 
-			installed := []deps.Library{}
-			for _, lib := range updates {
-				if !out.IsJSON() {
-					fmt.Printf("Updating %s...\n", lib.Name)
-				}
-
-				progressFn := func(downloaded, total int64) {
-					if !out.IsJSON() && total > 0 {
-						pct := float64(downloaded) / float64(total) * 100
-						fmt.Printf("\r  Progress: %.1f%%", pct)
+				styles := tui.DefaultStyles()
+				var rows [][]string
+				for _, lib := range diff.ToDownload {
+					typeStr := lib.Type
+					if typeStr == "" {
+						typeStr = "-"
 					}
+					rows = append(rows, []string{
+						lib.Name,
+						lib.Version,
+						typeStr,
+						fmt.Sprintf("%s/%s", lib.Platform, lib.Arch),
+						formatSize(lib.Size),
+						styles.Warning.Render("Pending"),
+					})
 				}
-
-				if err := mgr.DownloadLibrary(ctx, lib, progressFn); err != nil {
-					klog.Errorf("Failed to download: library=%s error=%v", lib.Name, err)
-					continue
-				}
-				if !out.IsJSON() {
-					fmt.Println()
-				}
-
-				if err := mgr.InstallLibrary(lib); err != nil {
-					klog.Errorf("Failed to install: library=%s error=%v", lib.Name, err)
-					continue
-				}
-				if !out.IsJSON() {
-					fmt.Println("  Done!")
-				}
-				installed = append(installed, lib)
+				out.PrintTable([]string{"Name", "Version", "Type", "Platform", "Size", "Status"}, rows)
+				fmt.Println()
 			}
 
-			return out.Render(&updateResult{libs: installed})
+			// If not auto-confirm, prompt user
+			if !autoConfirm && !out.IsJSON() {
+				fmt.Print("Do you want to download these updates? [y/N]: ")
+				var response string
+				_, _ = fmt.Scanln(&response)
+				response = strings.ToLower(strings.TrimSpace(response))
+				if response != "y" && response != "yes" {
+					out.Info("Update cancelled")
+					return nil
+				}
+			}
+
+			// Download updates
+			if !out.IsJSON() {
+				fmt.Println("\nDownloading updates...")
+			}
+
+			progressFn := func(lib deps.Library, downloaded, total int64) {
+				if !out.IsJSON() && total > 0 {
+					pct := float64(downloaded) / float64(total) * 100
+					fmt.Printf("\r  %s: %.1f%%", lib.Name, pct)
+				}
+			}
+
+			results, err := mgr.DownloadAllRequired(ctx, progressFn)
+			if err != nil {
+				cmd.SilenceUsage = true
+				return err
+			}
+
+			return out.Render(&updateResult{
+				deps:    newDeps,
+				changes: changes,
+				results: results,
+			})
 		},
 	}
+
+	cmd.Flags().BoolVarP(&autoConfirm, "yes", "y", false, "Automatically confirm and download updates")
 	return cmd
 }
 
 // updateResult implements Renderable for update command
 type updateResult struct {
-	libs []deps.Library
+	deps    *deps.DepsManifest
+	changes []deps.Library
+	results []deps.DownloadResult
 }
 
 func (r *updateResult) RenderJSON() any {
-	return tui.NewListResult(r.libs)
+	return map[string]any{
+		"deps_manifest": r.deps,
+		"changes":       r.changes,
+		"downloads":     r.results,
+	}
 }
 
 func (r *updateResult) RenderTUI(out *tui.Output) {
-	out.Println("\nAll updates installed!")
+	if len(r.results) == 0 {
+		out.Success("All dependencies are up to date!")
+		return
+	}
+
+	styles := tui.DefaultStyles()
+	var rows [][]string
+
+	var successCount, failedCount int
+	for _, res := range r.results {
+		style := styles.Success
+		statusStr := "✓ Downloaded"
+
+		switch res.Status {
+		case deps.DownloadStatusFailed:
+			style = styles.Error
+			statusStr = "✗ Failed"
+			failedCount++
+		case deps.DownloadStatusExisting:
+			style = styles.Info
+			statusStr = "• Up to date"
+		default:
+			successCount++
+		}
+
+		rows = append(rows, []string{
+			res.Library.Name,
+			res.Library.Version,
+			style.Render(statusStr),
+		})
+	}
+
+	fmt.Println()
+	out.PrintTable([]string{"Name", "Version", "Status"}, rows)
+	fmt.Println()
+
+	if failedCount > 0 {
+		out.Warning(fmt.Sprintf("%d updates failed", failedCount))
+	} else {
+		out.Success(fmt.Sprintf("All %d updates installed!", successCount))
+	}
 }
 
 func newCleanCmd() *cobra.Command {

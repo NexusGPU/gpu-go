@@ -6,6 +6,7 @@ import (
 	"github.com/NexusGPU/gpu-go/cmd/ggo/agent"
 	"github.com/NexusGPU/gpu-go/cmd/ggo/auth"
 	"github.com/NexusGPU/gpu-go/cmd/ggo/deps"
+	"github.com/NexusGPU/gpu-go/cmd/ggo/launch"
 	"github.com/NexusGPU/gpu-go/cmd/ggo/libs"
 	"github.com/NexusGPU/gpu-go/cmd/ggo/share"
 	"github.com/NexusGPU/gpu-go/cmd/ggo/studio"
@@ -53,6 +54,11 @@ func init() {
 
 	// Version command
 	rootCmd.AddCommand(version.NewVersionCmd())
+
+	// Launch command (Windows only - returns nil on other platforms)
+	if launchCmd := launch.NewLaunchCmd(); launchCmd != nil {
+		rootCmd.AddCommand(launchCmd)
+	}
 }
 
 func main() {

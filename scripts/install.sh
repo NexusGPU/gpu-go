@@ -219,7 +219,7 @@ setup_systemd_service() {
     SERVICE_CONTENT="[Unit]
 Description=GPU Go Agent - GPU Sharing Service
 Documentation=https://tensor-fusion.ai/docs
-After=network-online.target nvidia-persistenced.service
+After=network-online.target
 Wants=network-online.target
 
 [Service]

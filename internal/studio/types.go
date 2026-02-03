@@ -114,17 +114,18 @@ const (
 
 // CreateOptions contains options for creating an environment
 type CreateOptions struct {
-	Name         string            `json:"name"`
-	Mode         Mode              `json:"mode"`
-	Image        string            `json:"image"`
-	GPUWorkerURL string            `json:"gpu_worker_url,omitempty"`
-	SSHPublicKey string            `json:"ssh_public_key,omitempty"`
-	WorkDir      string            `json:"work_dir,omitempty"`
-	Ports        []PortMapping     `json:"ports,omitempty"`
-	Envs         map[string]string `json:"envs,omitempty"`
-	Volumes      []VolumeMount     `json:"volumes,omitempty"`
-	Resources    ResourceSpec      `json:"resources,omitempty"`
-	Labels       map[string]string `json:"labels,omitempty"`
+	Name           string            `json:"name"`
+	Mode           Mode              `json:"mode"`
+	Image          string            `json:"image"`
+	GPUWorkerURL   string            `json:"gpu_worker_url,omitempty"`  // TENSOR_FUSION_OPERATOR_CONNECTION_INFO
+	HardwareVendor string            `json:"hardware_vendor,omitempty"` // nvidia, amd, hygon
+	SSHPublicKey   string            `json:"ssh_public_key,omitempty"`
+	WorkDir        string            `json:"work_dir,omitempty"`
+	Ports          []PortMapping     `json:"ports,omitempty"`
+	Envs           map[string]string `json:"envs,omitempty"`
+	Volumes        []VolumeMount     `json:"volumes,omitempty"`
+	Resources      ResourceSpec      `json:"resources,omitempty"`
+	Labels         map[string]string `json:"labels,omitempty"`
 }
 
 // PortMapping represents a port mapping

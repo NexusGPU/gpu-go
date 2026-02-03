@@ -467,7 +467,7 @@ export class CLI {
             args.push('--image', options.image);
         }
         if (options.gpuUrl) {
-            args.push('--gpu-url', options.gpuUrl);
+            args.push('-s', options.gpuUrl);
         }
         options.ports?.forEach(p => args.push('-p', p));
         options.volumes?.forEach(v => args.push('--volume', v));

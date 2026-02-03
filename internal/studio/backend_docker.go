@@ -10,6 +10,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/NexusGPU/gpu-go/internal/platform"
+	"k8s.io/klog/v2"
 )
 
 // DockerBackend implements the Backend interface using Docker
@@ -62,8 +65,11 @@ func (b *DockerBackend) setDockerEnv(cmd *exec.Cmd) {
 }
 
 func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Environment, error) {
+	paths := platform.DefaultPaths()
+
 	// Generate container name
 	containerName := fmt.Sprintf("ggo-%s", opts.Name)
+	normalizedName := platform.NormalizeName(opts.Name)
 
 	// Build docker run command
 	args := []string{"run", "-d", "--name", containerName}
@@ -89,31 +95,55 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 		args = append(args, "-p", fmt.Sprintf("%d:22/tcp", sshPort))
 	}
 
-	// Setup GPU connection environment
+	// Setup GPU environment if GPU worker URL is provided
 	if opts.GPUWorkerURL != "" {
-		// Parse worker URL to extract connection info
-		connInfo, err := parseGPUWorkerURL(opts.GPUWorkerURL)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse GPU worker URL: %w", err)
+		vendor := ParseVendor(opts.HardwareVendor)
+
+		// Create GPU environment config
+		gpuConfig := &GPUEnvConfig{
+			Vendor:        vendor,
+			ConnectionURL: opts.GPUWorkerURL,
+			CachePath:     paths.CacheDir(),
+			LogPath:       paths.StudioLogsDir(normalizedName),
+			StudioName:    normalizedName,
+			IsContainer:   true,
 		}
 
-		// Add TENSOR_FUSION_CONNECTION env var with connection details
-		args = append(args, "-e", fmt.Sprintf("TENSOR_FUSION_CONNECTION=%s", connInfo))
-		args = append(args, "-e", fmt.Sprintf("GPU_WORKER_URL=%s", opts.GPUWorkerURL))
-		args = append(args, "-e", "CUDA_VISIBLE_DEVICES=0")
+		// Setup GPU environment (creates config files)
+		envResult, err := SetupGPUEnv(paths, gpuConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to setup GPU environment: %w", err)
+		}
 
-		// Mount directory for GPU libraries
-		args = append(args, "-v", "/tmp/tensor-fusion/libs:/usr/local/tensor-fusion/libs:ro")
+		klog.Infof("Setting up GPU environment for studio %s: vendor=%s connection_url=%s",
+			opts.Name, vendor, opts.GPUWorkerURL)
 
-		// Set LD_LIBRARY_PATH to include GPU libraries
-		args = append(args, "-e", "LD_LIBRARY_PATH=/usr/local/tensor-fusion/libs:$LD_LIBRARY_PATH")
+		// Add environment variables
+		for k, v := range envResult.EnvVars {
+			args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
+		}
+
+		// Add CUDA_VISIBLE_DEVICES for NVIDIA
+		if vendor == VendorNvidia {
+			args = append(args, "-e", "CUDA_VISIBLE_DEVICES=0")
+		}
+
+		// Add volume mounts from GPU env setup
+		for _, vol := range envResult.VolumeMounts {
+			mountOpt := fmt.Sprintf("%s:%s", vol.HostPath, vol.ContainerPath)
+			if vol.ReadOnly {
+				mountOpt += MountOptionReadOnly
+			}
+			args = append(args, "-v", mountOpt)
+		}
 	}
 
+	// Add user-specified environment variables
 	for k, v := range opts.Envs {
 		args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
 	}
 
-	// Add volume mounts
+	// Add user-specified volume mounts
 	for _, vol := range opts.Volumes {
 		mountOpt := fmt.Sprintf("%s:%s", vol.HostPath, vol.ContainerPath)
 		if vol.ReadOnly {
@@ -141,6 +171,8 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 		image = "tensorfusion/studio-torch:latest"
 	}
 	args = append(args, image)
+
+	klog.V(2).Infof("Running docker command: %s %v", b.dockerCmd, args)
 
 	// Run container
 	cmd := exec.CommandContext(ctx, b.dockerCmd, args...)
@@ -442,33 +474,6 @@ func parseSSHPort(ports string) int {
 func findAvailablePort(start int) int {
 	// Simple implementation - in production, actually check if port is available
 	return start
-}
-
-// SetupGPUEnvironment configures the container for GPU access
-func (b *DockerBackend) SetupGPUEnvironment(ctx context.Context, envID string, workerURL string) error {
-	// Create setup script
-	setupScript := fmt.Sprintf(`#!/bin/bash
-set -e
-
-# Set up GPU Go environment
-export GPU_GO_CONNECTION_URL="%s"
-export CUDA_VISIBLE_DEVICES=0
-
-# Add to bashrc
-echo 'export GPU_GO_CONNECTION_URL="%s"' >> /root/.bashrc
-echo 'export CUDA_VISIBLE_DEVICES=0' >> /root/.bashrc
-
-# Configure LD_PRELOAD if vgpu libraries are present
-if [ -f /usr/local/lib/libcuda-vgpu.so ]; then
-    echo 'export LD_PRELOAD=/usr/local/lib/libcuda-vgpu.so' >> /root/.bashrc
-fi
-
-echo "GPU environment configured successfully"
-`, workerURL, workerURL)
-
-	// Execute setup script
-	_, err := b.Exec(ctx, envID, []string{"bash", "-c", setupScript})
-	return err
 }
 
 var _ Backend = (*DockerBackend)(nil)

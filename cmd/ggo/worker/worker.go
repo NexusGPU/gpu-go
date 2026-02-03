@@ -638,7 +638,7 @@ func (r *workerShareResult) RenderTUI(out *tui.Output) {
 	out.Println()
 	out.Println(styles.Subtitle.Render("Option 2: Create an AI Studio with this GPU"))
 	out.Println()
-	out.Println("  " + tui.Code(fmt.Sprintf("ggo studio create <name> --gpu-url %s", r.share.ConnectionURL)))
+	out.Println("  " + tui.Code(fmt.Sprintf("ggo studio create <name> -s %s", r.share.ConnectionURL)))
 	out.Println()
 	out.Println(styles.Muted.Render("  This creates a containerized development environment with remote GPU access."))
 	out.Println()
