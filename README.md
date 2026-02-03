@@ -1,7 +1,7 @@
 <p align="center"><a href="https://tensor-fusion.ai" target="_blank" rel="noreferrer"><img width="100%" src="https://cdn.tensor-fusion.ai/logo-banner.png" alt="Logo"></a></p>
 
 <p align="center">
-    <br /><strong><a href="https://tensor-fusion.ai" target="_blank">GPUGo (ggo)</a></strong><br/><b>Use Remote GPUs Like They Are Local</b>
+    <br /><strong><a href="https://tensor-fusion.ai" target="_blank">GPUGo</a></strong><br/><b>Use Remote GPUs Like They Are Local</b>
     <br />
     <a href="https://tensor-fusion.ai/guide/overview"><strong>Explore the docs »</strong></a>
     <br />
