@@ -1,134 +1,90 @@
-# GPU Go (ggo)
+<p align="center"><a href="https://tensor-fusion.ai" target="_blank" rel="noreferrer"><img width="100%" src="https://cdn.tensor-fusion.ai/logo-banner.png" alt="Logo"></a></p>
 
-<div align="center">
-
-![GPU Go Logo](vscode-extension/images/icon.png)
-
-**Use Remote GPUs Like They Are Local**
+<p align="center">
+    <br /><strong><a href="https://tensor-fusion.ai" target="_blank">GPUGo (ggo)</a></strong><br/><b>Use Remote GPUs Like They Are Local</b>
+    <br />
+    <a href="https://tensor-fusion.ai/guide/overview"><strong>Explore the docs »</strong></a>
+    <br />
+    <a href="https://tensor-fusion.ai/guide/overview">View Demo</a>
+    |
+    <a href="https://github.com/NexusGPU/tensor-fusion/issues/new?labels=bug&template=bug-report---.md">Report Bug</a>
+    |
+    <a href="https://github.com/NexusGPU/tensor-fusion/issues/new?labels=enhancement&template=feature-request---.md">Request Feature</a>
+</p>
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/NexusGPU/gpu-go)](https://goreportcard.com/report/github.com/NexusGPU/gpu-go)
 [![Release](https://img.shields.io/github/v/release/NexusGPU/gpu-go)](https://github.com/NexusGPU/gpu-go/releases)
+[![Discord](https://img.shields.io/discord/1234567890?color=7289da&label=Discord&logo=discord&logoColor=ffffff)](https://discord.gg/2bybv9yQNk)
 
-[Features](#features) • [Installation](#installation) • [Quick Start](#quick-start) • [VS Code Extension](#vs-code-extension) • [Documentation](#documentation)
+**GPUGo** is the official CLI and client tool for [TensorFusion GPU Go](https://tensor-fusion.ai/products/gpu-go), designed to transform how you access and manage GPU resources. 
 
-</div>
-
----
-
-## 🚀 Overview
-
-**GPU Go (`ggo`)** is a cross-platform tool that transforms how you access and manage GPU resources. It allows developers to treat remote GPUs (on servers, cloud instances, or colleagues' machines) as if they were attached to their local development environment.
+It allows developers to treat remote GPUs (on servers, cloud instances, or colleagues' machines) as if they were attached to their local development environment.
 
 Think of it as **"NFS for GPUs"**: seamless, low-latency, and easy to manage.
 
-### Why GPU Go?
+## 🌟 Highlights
 
-- **Zero Friction**: Spin up a "Studio" environment with one command and get instant access to remote GPUs.
-- **Cost Effective**: Share powerful GPU servers among multiple developers.
+- **Zero Friction**: Spin up a local-first studio environment with one command and get instant access to remote GPUs.
+- **Cost Effective**: Share powerful GPU servers among multiple developers using [TensorFusion](https://github.com/NexusGPU/tensor-fusion)'s virtualization technology.
 - **Cross-Platform**: Works on macOS (Apple Silicon or Intel), Windows (WSL), and Linux.
-- **Flexible Backends**: Supports Docker, Colima, WSL, and Kubernetes.
+- **Flexible Backends**: Supports Docker, Colima, WSL, and Kubernetes for  for studio environments.
+- **VS Code Integration**: Full GUI management via the official extension.
 
-<div align="center">
-  <a href="https://tensor-fusion.ai/auth/login?callbackUrl=%2Fdashboard">
-    <img src="https://img.shields.io/badge/Try_It_Now-Get_Started_Free-success?style=for-the-badge&logo=rocket" alt="Try It Now" height="40">
-  </a>
-</div>
+## 🚀 Quick Start
 
-## 📸 Screenshot
+### 1. Register & Get Started
 
-### Use Remote GPU in Local AI Studio
+[Register and follow dashboard instructions](https://tensor-fusion.ai/auth/login?callbackUrl=%2Fdashboard) to get your account and access tokens.
 
-### Manage Fractional vGPUs
+### 2. Install GPUGo Agent on GPU Host
 
-### Dashboard
+Copy the command from dashboard and run. You can see real-time onboarding progress on dashboard.
 
-![GPU Go In Action](./public/screenshot.png)
-
-## ✨ Features
-
-- **🤖 Agent Mode**: Turn any machine with a GPU into a provider node in minutes.
-- **🖥️ AI Studio**: One-click local development environments (Jupyter, VS Code Remote) connected to remote GPUs.
-- **🔗 Smart Sharing**: Generate shareable links for temporary or long-term GPU access.
-- **📦 Dependency Management**: Automatically handles vGPU libraries and drivers.
-- **🔌 VS Code Integration**: Full GUI management via the official extension.
-
-## 📥 Installation
-
-### Quick Install (Recommended)
-
-- [Register and follow dashboard instructions](https://tensor-fusion.ai/auth/login?callbackUrl=%2Fdashboard)
-
-### Install Client Side via VSCode Extension
-
-1. Go to Cursor/VSCode/Antigravity/Windsurf -> Extensions
-2. Search "GPUGo"
-3. Install from IDE
-
-## GPUGo Binary (Optional)
-
-### 1. Server Side: Share a GPU
-
-Have a server with GPUs? Run the **Agent**.
+**Optionally**, you can run in manual way
 
 ```bash
-# 1. Register the agent
+curl -fsSL https://cdn.tensor-fusion.ai/gpugo/install.sh | sh
+```
+```bash
+# 1. Register the agent using the token from the Dashboard
 ggo agent register -t "<token-from-dashboard>"
 
 # 2. Start agent service
 ggo agent start
-
-# 3. Create a worker (a slice of GPU resource)
-# Example: Share GPU 0 on port 9001
-ggo worker create --name "Dev-Worker-1" --gpu-ids GPU-0 --port 9001
 ```
 
-### 2. Client Side: Use a Remote GPU
+### 4. Client Side: Use a Remote GPU
 
-Want to use a GPU for development? Create a **Studio** environment.
+Create a **Studio** environment locally that is connected to the remote GPU.
 
 ```bash
-# Login first
+# Login first, copy personal access token (PAT) from dashboard
 ggo auth login
 
-# List available GPU images
-ggo studio images
-
 # Create a studio environment connected to a remote GPU
-# This sets up a local container (via Docker/Colima/WSL) bridged to the remote GPU
 ggo studio create my-project -s "https://go.gpu.tf/s/share-code"
 
 # Connect via SSH (automatically configures your ~/.ssh/config)
 ggo studio ssh my-project
 ```
 
-## 🧩 VS Code Extension
+## 🧩 VS Code Extension (Recommended)
 
 Prefer a GUI? The **GPU Go VS Code Extension** provides a beautiful interface to manage your studios, agents, and workers.
 
-- Manage Studio environments
-- Visualize GPU metrics (Usage, VRAM, Temp)
-- One-click connect
+- [Open VSX Registry](https://open-vsx.org/extension/nexusgpu/gpu-go)
+- [VSCode Marketplace](https://marketplace.visualstudio.com/items?itemName=nexusgpu.gpu-go)
 
-👉 [Check out the VS Code Extension](./vscode-extension/README.md)
+👉 [Check out the VS Code Extension README](./vscode-extension/README.md)
 
-## 🏗 Architecture
+## 💬 Community & Contact
 
-GPU Go consists of three main components:
-
-1.  **CLI (`ggo`)**: The unified command-line interface for both clients and servers.
-2.  **Agent**: Runs on the GPU host, managing hardware isolation and exposing resources.
-3.  **Studio**: Runs on the client machine, managing the containerized environment that consumes the remote GPU.
-
-## 🤝 Contributing
-
-We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
-
-1.  Fork the repo
-2.  Create your feature branch (`git checkout -b feature/amazing-feature`)
-3.  Commit your changes
-4.  Push to the branch
-5.  Open a Pull Request
+- Discord channel: [https://discord.gg/2bybv9yQNk](https://discord.gg/2bybv9yQNk)
+- Discuss anything about TensorFusion & GPUGo: [Github Discussions](https://github.com/NexusGPU/tensor-fusion/discussions)
+- Contact us with WeCom for Greater China region: [企业微信](https://work.weixin.qq.com/ca/cawcde42751d9f6a29)
+- Email us: [support@tensor-fusion.com](mailto:support@tensor-fusion.com)
+- Schedule [1:1 meeting with TensorFusion founders](https://tensor-fusion.ai/book-demo)
 
 ## 📄 License
 
