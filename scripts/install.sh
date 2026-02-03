@@ -237,7 +237,6 @@ Group=root
 # Security hardening (relaxed for GPU access)
 NoNewPrivileges=false
 ProtectSystem=full
-ProtectHome=read-only
 PrivateTmp=true
 PrivateDevices=false
 
