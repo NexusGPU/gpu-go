@@ -380,16 +380,20 @@ func (a *Agent) convertToWorkerInfos(apiWorkers []api.WorkerConfig) ([]*hvApi.Wo
 		}
 
 		// Set WorkerRunningInfo with remote-gpu-worker binary
+		// Ensure Env map is initialized (not nil) to avoid issues in single_node backend
+		envVars := make(map[string]string)
+		envVars["TF_LICENSE"] = cfg.License.Plain
+		envVars["TF_LICENSE_SIGN"] = cfg.License.Encrypted
+
 		info.WorkerRunningInfo = &hvApi.WorkerRunningInfo{
 			Type:       hvApi.WorkerRuntimeTypeProcess,
 			Executable: a.workerBinaryPath,
 			Args:       []string{"-p", fmt.Sprintf("%d", w.ListenPort), "-n", "native"},
 			WorkingDir: a.config.StateDir(),
-			Env: map[string]string{
-				"TF_LICENSE":      cfg.License.Plain,
-				"TF_LICENSE_SIGN": cfg.License.Encrypted,
-			},
+			Env:        envVars,
 		}
+		klog.Infof("Set environment variables for worker %s: TF_LICENSE (len=%d, empty=%v), TF_LICENSE_SIGN (len=%d, empty=%v)",
+			w.WorkerID, len(cfg.License.Plain), cfg.License.Plain == "", len(cfg.License.Encrypted), cfg.License.Encrypted == "")
 
 		infos = append(infos, info)
 	}

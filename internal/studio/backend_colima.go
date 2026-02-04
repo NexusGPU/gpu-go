@@ -59,14 +59,50 @@ func (b *ColimaBackend) IsAvailable(ctx context.Context) bool {
 		return false
 	}
 
-	// Check if Colima is installed and running for this profile
-	cmd := exec.CommandContext(ctx, "colima", "status", "-p", b.profile)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
+	// First, check if colima command exists
+	if _, err := exec.LookPath("colima"); err != nil {
 		return false
 	}
 
-	return strings.Contains(string(output), "running")
+	// Use colima list to check if the profile is running
+	// This is more reliable than colima status -p which may fail
+	cmd := exec.CommandContext(ctx, "colima", "list")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// Fallback: check if Docker socket exists
+		homeDir, _ := os.UserHomeDir()
+		sockPath := fmt.Sprintf("%s/.colima/%s/docker.sock", homeDir, b.profile)
+		if _, err := os.Stat(sockPath); err == nil {
+			// Socket exists, try to verify with docker
+			testCmd := exec.CommandContext(ctx, "docker", "info")
+			testCmd.Env = append(os.Environ(), fmt.Sprintf("DOCKER_HOST=unix://%s", sockPath))
+			if err := testCmd.Run(); err == nil {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Parse colima list output to find the profile
+	outputStr := string(output)
+	lines := strings.SplitSeq(outputStr, "\n")
+	for line := range lines {
+		// Skip header line
+		if strings.Contains(line, "PROFILE") || strings.Contains(line, "STATUS") {
+			continue
+		}
+		// Check if this line contains our profile and "Running" status
+		fields := strings.Fields(line)
+		if len(fields) >= 2 {
+			profile := fields[0]
+			status := strings.ToLower(fields[1])
+			if profile == b.profile && (status == string(StatusRunning) || strings.Contains(status, string(StatusRunning))) {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // EnsureRunning ensures Colima is running
