@@ -27,7 +27,12 @@ It provides commands to:
   - Run an agent on GPU servers to sync with the cloud platform
   - Set up temporary or long-term remote GPU environments
   - Manage workers on GPU servers
-  - Share GPU workers with others via share links`,
+  - Share GPU workers with others via share links
+
+Troubleshooting & Support:
+  - Troubleshooting Handbook: https://tensor-fusion.ai/docs/gpu-go/troubleshooting/handbook
+  - Discord Community: https://discord.com/invite/2bybv9yQNk
+  - GitHub Issues: https://github.com/NexusGPU/gpu-go/issues`,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			// klog verbosity is controlled by -v flag, no need to configure here
 		},
