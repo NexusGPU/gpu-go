@@ -2,6 +2,7 @@ package share
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"strings"
@@ -43,6 +44,15 @@ func NewShareCmd() *cobra.Command {
 		Use:   "share",
 		Short: "Manage share links for GPU workers",
 		Long:  `The share command manages share links that allow others to connect to your GPU workers.`,
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			// Initialize klog flags if not already initialized
+			klog.InitFlags(nil)
+			// Disable logtostderr so that stderrthreshold takes effect
+			// When logtostderr=true (default), ALL logs go to stderr ignoring stderrthreshold
+			flag.Set("logtostderr", "false")
+			// Set stderrthreshold to WARNING level - only WARNING and ERROR will be shown
+			flag.Set("stderrthreshold", "WARNING")
+		},
 	}
 
 	cmd.PersistentFlags().StringVar(&serverURL, "server", api.GetDefaultBaseURL(), "Server URL (or set GPU_GO_ENDPOINT env var)")

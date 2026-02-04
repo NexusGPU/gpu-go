@@ -10,11 +10,12 @@ COVERAGE_DIR=./coverage
 GO_VERSION=1.25.0
 
 # Version info (can be overridden via environment variables)
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+# Use := for immediate evaluation to ensure values are computed at Makefile parse time
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-# Build flags
+# Build flags - ensure version info is always included
 LDFLAGS=-s -w \
 	-X 'github.com/NexusGPU/gpu-go/cmd/ggo/version.Version=$(VERSION)' \
 	-X 'github.com/NexusGPU/gpu-go/cmd/ggo/version.Commit=$(COMMIT)' \
@@ -31,20 +32,29 @@ help: ## Display this help message
 # Build targets
 build: ## Build the binary (default: release build)
 	@echo "Building $(BINARY_NAME)..."
+	@echo "  Version: $(VERSION)"
+	@echo "  Commit: $(COMMIT)"
+	@echo "  Build Date: $(BUILD_DATE)"
 	@mkdir -p $(BUILD_DIR)
 	@go build $(BUILD_FLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) $(MAIN_PACKAGE)
 	@echo "Binary built: $(BUILD_DIR)/$(BINARY_NAME)"
 
 build-debug: ## Build the binary with debug symbols
 	@echo "Building $(BINARY_NAME) (debug)..."
+	@echo "  Version: $(VERSION)"
+	@echo "  Commit: $(COMMIT)"
+	@echo "  Build Date: $(BUILD_DATE)"
 	@mkdir -p $(BUILD_DIR)
-	@go build $(BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) $(MAIN_PACKAGE)
+	@go build $(BUILD_FLAGS) -ldflags "-X 'github.com/NexusGPU/gpu-go/cmd/ggo/version.Version=$(VERSION)' -X 'github.com/NexusGPU/gpu-go/cmd/ggo/version.Commit=$(COMMIT)' -X 'github.com/NexusGPU/gpu-go/cmd/ggo/version.BuildDate=$(BUILD_DATE)'" -o $(BUILD_DIR)/$(BINARY_NAME) $(MAIN_PACKAGE)
 	@echo "Debug binary built: $(BUILD_DIR)/$(BINARY_NAME)"
 
 build-race: ## Build the binary with race detector
 	@echo "Building $(BINARY_NAME) (race detector)..."
+	@echo "  Version: $(VERSION)"
+	@echo "  Commit: $(COMMIT)"
+	@echo "  Build Date: $(BUILD_DATE)"
 	@mkdir -p $(BUILD_DIR)
-	@go build $(BUILD_FLAGS) -race -o $(BUILD_DIR)/$(BINARY_NAME)-race $(MAIN_PACKAGE)
+	@go build $(BUILD_FLAGS) -race -ldflags "-X 'github.com/NexusGPU/gpu-go/cmd/ggo/version.Version=$(VERSION)' -X 'github.com/NexusGPU/gpu-go/cmd/ggo/version.Commit=$(COMMIT)' -X 'github.com/NexusGPU/gpu-go/cmd/ggo/version.BuildDate=$(BUILD_DATE)'" -o $(BUILD_DIR)/$(BINARY_NAME)-race $(MAIN_PACKAGE)
 	@echo "Race detector binary built: $(BUILD_DIR)/$(BINARY_NAME)-race"
 
 install: ## Install the binary to GOPATH/bin

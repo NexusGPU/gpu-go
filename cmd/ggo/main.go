@@ -55,7 +55,7 @@ func init() {
 	// Version command
 	rootCmd.AddCommand(version.NewVersionCmd())
 
-	// Launch command (Windows only - returns nil on other platforms)
+	// Launch command (Windows/Linux - returns nil on macOS)
 	if launchCmd := launch.NewLaunchCmd(); launchCmd != nil {
 		rootCmd.AddCommand(launchCmd)
 	}

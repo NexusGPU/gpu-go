@@ -3,6 +3,7 @@ package use
 import (
 	"bufio"
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -72,6 +73,15 @@ Examples:
   # Set up a long-term GPU connection (persists across shell sessions)
   ggo use abc123 --long-term`,
 		Args: cobra.ExactArgs(1),
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			// Initialize klog flags if not already initialized
+			klog.InitFlags(nil)
+			// Disable logtostderr so that stderrthreshold takes effect
+			// When logtostderr=true (default), ALL logs go to stderr ignoring stderrthreshold
+			flag.Set("logtostderr", "false")
+			// Set stderrthreshold to WARNING level - only WARNING and ERROR will be shown
+			flag.Set("stderrthreshold", "WARNING")
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			shortCode := extractShortCode(args[0])
 			client := api.NewClient(api.WithBaseURL(serverURL))
@@ -955,8 +965,20 @@ func cleanCurrentEnv(out *tui.Output) error {
 		shouldClean := isYesResponse(response)
 
 		if shouldClean {
-			// Output clean commands to stdout for eval
-			return cleanEnvEval(out)
+			// User confirmed cleanup - need to guide them to use eval
+			// Direct command execution doesn't work because we need shell to eval the unset commands
+			fmt.Fprintln(os.Stderr)
+			fmt.Fprintln(os.Stderr, styles.Subtitle.Render("To deactivate, run:"))
+			fmt.Fprintln(os.Stderr)
+			fmt.Fprintln(os.Stderr, "   eval \"$(ggo clean -y)\"")
+			fmt.Fprintln(os.Stderr)
+			fmt.Fprintln(os.Stderr, "Or if you activated via 'eval \"$(ggo use ...)\"', just run:")
+			fmt.Fprintln(os.Stderr)
+			fmt.Fprintln(os.Stderr, "   ggo clean")
+			fmt.Fprintln(os.Stderr)
+			fmt.Fprintln(os.Stderr, "(The wrapper function will handle it automatically)")
+			fmt.Fprintln(os.Stderr)
+			return nil
 		}
 
 		// User chose not to clean, show how to clean later

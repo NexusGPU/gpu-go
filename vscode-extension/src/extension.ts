@@ -253,7 +253,7 @@ function registerCommands(context: vscode.ExtensionContext, cli: CLI) {
     context.subscriptions.push(
         vscode.commands.registerCommand('gpugo.openDashboard', async () => {
             const config = vscode.workspace.getConfiguration('gpugo');
-            const dashboardUrl = config.get<string>('dashboardUrl', 'https://go.tensor-fusion.ai');
+            const dashboardUrl = config.get<string>('dashboardUrl', 'https://tensor-fusion.ai');
             vscode.env.openExternal(vscode.Uri.parse(dashboardUrl));
         })
     );

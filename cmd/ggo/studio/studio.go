@@ -2,6 +2,7 @@ package studio
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"strings"
 
@@ -73,6 +74,15 @@ Examples:
 
   # Remove an environment
   ggo studio rm my-studio`,
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			// Initialize klog flags if not already initialized
+			klog.InitFlags(nil)
+			// Disable logtostderr so that stderrthreshold takes effect
+			// When logtostderr=true (default), ALL logs go to stderr ignoring stderrthreshold
+			flag.Set("logtostderr", "false")
+			// Set stderrthreshold to WARNING level - only WARNING and ERROR will be shown
+			flag.Set("stderrthreshold", "WARNING")
+		},
 	}
 
 	cmdutil.AddOutputFlag(cmd, &outputFormat)

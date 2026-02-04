@@ -5,7 +5,7 @@ import * as os from 'os';
 import { CLI } from '../cli/cli';
 import { Logger } from '../logger';
 
-const LOGIN_URL = 'https://go.tensor-fusion.ai/settings/security#ide-extension';
+const LOGIN_URL = 'https://tensor-fusion.ai/settings/security#ide-extension';
 
 export class AuthManager {
     private context: vscode.ExtensionContext;

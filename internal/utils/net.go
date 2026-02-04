@@ -2,10 +2,17 @@ package utils
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"net"
 	"os/exec"
 	"strconv"
 	"strings"
+)
+
+const (
+	// Default port range for random port selection (high ports to avoid conflicts)
+	minRandomPort = 9000
+	maxRandomPort = 9999
 )
 
 // CheckPortAvailability checks if a port is available.
@@ -40,4 +47,16 @@ func CheckPortAvailability(port int) (int, error) {
 	// Returning 0 PID with error is acceptable fallback.
 
 	return pid, fmt.Errorf("port %d is already in use", port)
+}
+
+// GetRandomAvailablePort returns a random available port in the range 9000-9999
+// Tries up to 100 times to find an available port
+func GetRandomAvailablePort() (int, error) {
+	for i := 0; i < 100; i++ {
+		port := minRandomPort + rand.IntN(maxRandomPort-minRandomPort+1)
+		if _, err := CheckPortAvailability(port); err == nil {
+			return port, nil
+		}
+	}
+	return 0, fmt.Errorf("failed to find an available port after 100 attempts")
 }
