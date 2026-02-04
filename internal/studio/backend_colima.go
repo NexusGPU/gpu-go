@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -105,6 +106,114 @@ func (b *ColimaBackend) IsAvailable(ctx context.Context) bool {
 	return false
 }
 
+// IsInstalled checks if colima is installed (but not necessarily running)
+func (b *ColimaBackend) IsInstalled(ctx context.Context) bool {
+	if runtime.GOOS != OSDarwin && runtime.GOOS != OSLinux {
+		return false
+	}
+	_, err := exec.LookPath("colima")
+	return err == nil
+}
+
+// getSystemMemoryGB detects system total memory in GB
+func getSystemMemoryGB() (int, error) {
+	switch runtime.GOOS {
+	case OSDarwin:
+		// macOS: use sysctl
+		cmd := exec.Command("sysctl", "-n", "hw.memsize")
+		output, err := cmd.Output()
+		if err != nil {
+			return 0, err
+		}
+		memBytes, err := strconv.ParseInt(strings.TrimSpace(string(output)), 10, 64)
+		if err != nil {
+			return 0, err
+		}
+		// Convert bytes to GB (round up)
+		memGB := int((memBytes + (1024*1024*1024 - 1)) / (1024 * 1024 * 1024))
+		return memGB, nil
+	case OSLinux:
+		// Linux: read from /proc/meminfo
+		cmd := exec.Command("grep", "MemTotal", "/proc/meminfo")
+		output, err := cmd.Output()
+		if err != nil {
+			return 0, err
+		}
+		// Parse "MemTotal:       16384000 kB"
+		parts := strings.Fields(string(output))
+		if len(parts) < 2 {
+			return 0, fmt.Errorf("unexpected meminfo format")
+		}
+		memKB, err := strconv.ParseInt(parts[1], 10, 64)
+		if err != nil {
+			return 0, err
+		}
+		// Convert KB to GB (round up)
+		memGB := int((memKB*1024 + (1024*1024*1024 - 1)) / (1024 * 1024 * 1024))
+		return memGB, nil
+	}
+	// Fallback: return 8GB if detection fails
+	return 8, nil
+}
+
+// getSystemDiskGB detects available disk space in GB for the home directory
+func getSystemDiskGB() (int, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return 0, err
+	}
+
+	switch runtime.GOOS {
+	case OSDarwin:
+		// macOS: use df command
+		cmd := exec.Command("df", "-g", homeDir)
+		output, err := cmd.Output()
+		if err != nil {
+			return 0, err
+		}
+		// Parse df output: "Filesystem   1024-blocks      Used Available Capacity  Mounted on"
+		lines := strings.Split(string(output), "\n")
+		if len(lines) < 2 {
+			return 0, fmt.Errorf("unexpected df output format")
+		}
+		fields := strings.Fields(lines[1])
+		if len(fields) < 4 {
+			return 0, fmt.Errorf("unexpected df output format")
+		}
+		// Available is the 4th field (0-indexed: 3)
+		availGB, err := strconv.Atoi(fields[3])
+		if err != nil {
+			return 0, err
+		}
+		return availGB, nil
+	case OSLinux:
+		// Linux: use df command
+		cmd := exec.Command("df", "-BG", homeDir)
+		output, err := cmd.Output()
+		if err != nil {
+			return 0, err
+		}
+		// Parse df output
+		lines := strings.Split(string(output), "\n")
+		if len(lines) < 2 {
+			return 0, fmt.Errorf("unexpected df output format")
+		}
+		fields := strings.Fields(lines[1])
+		if len(fields) < 4 {
+			return 0, fmt.Errorf("unexpected df output format")
+		}
+		// Available is the 4th field, remove 'G' suffix
+		availStr := strings.TrimSuffix(fields[3], "G")
+		availGB, err := strconv.Atoi(availStr)
+		if err != nil {
+			return 0, err
+		}
+		return availGB, nil
+	}
+	// Fallback: return 60GB if detection fails
+	return 60, nil
+}
+
 // EnsureRunning ensures Colima is running
 func (b *ColimaBackend) EnsureRunning(ctx context.Context) error {
 	// Check if already running
@@ -112,12 +221,49 @@ func (b *ColimaBackend) EnsureRunning(ctx context.Context) error {
 		return nil
 	}
 
+	// Detect system resources and calculate 60% allocation
+	memGB, err := getSystemMemoryGB()
+	if err != nil {
+		// Fallback to 8GB if detection fails
+		memGB = 8
+	}
+	// Calculate 60% and round up to ensure sufficient memory
+	memAllocated := int(float64(memGB)*0.6 + 0.5)
+	if memAllocated < 2 {
+		memAllocated = 2 // Minimum 2GB
+	}
+
+	diskGB, err := getSystemDiskGB()
+	if err != nil {
+		// Fallback to 60GB if detection fails
+		diskGB = 60
+	}
+	// Calculate 60% and round up, but ensure we don't exceed available space
+	diskAllocated := int(float64(diskGB)*0.6 + 0.5)
+	if diskAllocated > diskGB {
+		diskAllocated = diskGB // Don't exceed available space
+	}
+	if diskAllocated < 20 {
+		diskAllocated = 20 // Minimum 20GB
+	}
+
+	// Get CPU count (don't limit CPU, use all available cores)
+	cpuCount := runtime.NumCPU()
+	if cpuCount < 1 {
+		cpuCount = 1 // Minimum 1 CPU
+	}
+
 	// Start Colima with the specified profile
+	// - CPU: use all available cores (no limit)
+	// - Memory: 60% of system memory (minimum 2GB)
+	// - Disk: 60% of available disk space (minimum 20GB)
+	// - DNS: configure DNS servers to fix Docker pull issues
 	cmd := exec.CommandContext(ctx, "colima", "start",
 		"-p", b.profile,
-		"--cpu", "4",
-		"--memory", "8",
-		"--disk", "60",
+		"--cpu", strconv.Itoa(cpuCount),
+		"--memory", fmt.Sprintf("%d", memAllocated),
+		"--disk", fmt.Sprintf("%d", diskAllocated),
+		"--dns", "1.1.1.1",
 	)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -348,3 +494,4 @@ func (b *ColimaBackend) GetProfile() string {
 }
 
 var _ Backend = (*ColimaBackend)(nil)
+var _ AutoStartableBackend = (*ColimaBackend)(nil)

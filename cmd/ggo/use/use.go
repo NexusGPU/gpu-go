@@ -12,6 +12,7 @@ import (
 
 	"github.com/NexusGPU/gpu-go/cmd/ggo/cmdutil"
 	"github.com/NexusGPU/gpu-go/internal/api"
+	"github.com/NexusGPU/gpu-go/internal/deps"
 	"github.com/NexusGPU/gpu-go/internal/platform"
 	"github.com/NexusGPU/gpu-go/internal/studio"
 	"github.com/NexusGPU/gpu-go/internal/tui"
@@ -65,8 +66,8 @@ Examples:
   # Connect using full short link
   ggo use https://go.gpu.tf/s/abc123
 
-  # Directly activate without prompting
-  ggo use abc123 -y
+  # Activate in current shell (recommended)
+  eval "$(ggo use abc123 -y)"
 
   # Set up a long-term GPU connection (persists across shell sessions)
   ggo use abc123 --long-term`,
@@ -86,6 +87,13 @@ Examples:
 
 			klog.Infof("Found GPU worker: worker_id=%s vendor=%s connection_url=%s", shareInfo.WorkerID, shareInfo.HardwareVendor, shareInfo.ConnectionURL)
 
+			// Download required libraries first (silent when -y is used for eval)
+			if err := ensureRemoteGPUClientLibs(ctx, out, yes); err != nil {
+				cmd.SilenceUsage = true
+				klog.Errorf("Failed to ensure GPU client libraries: error=%v", err)
+				return fmt.Errorf("failed to download GPU client libraries: %w", err)
+			}
+
 			if longTerm {
 				return setupLongTermEnv(shareInfo, outputDir, yes, out)
 			}
@@ -97,7 +105,7 @@ Examples:
 	cmd.Flags().StringVar(&serverURL, "server", api.GetDefaultBaseURL(), "Server URL (or set GPU_GO_ENDPOINT env var)")
 	cmd.Flags().BoolVar(&longTerm, "long-term", false, "Set up a long-term connection")
 	cmd.Flags().StringVar(&outputDir, "output-dir", "", "Output directory for configuration files")
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Directly activate environment without prompting")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Auto-activate environment (use with eval: eval \"$(ggo use ... -y)\")")
 
 	return cmd
 }
@@ -106,9 +114,83 @@ func getOutput() *tui.Output {
 	return cmdutil.NewOutput(outputFormat)
 }
 
+// isYesResponse checks if user response is affirmative (empty, "y", or "yes")
+func isYesResponse(response string) bool {
+	response = strings.TrimSpace(strings.ToLower(response))
+	return response == "" || response == "y" || response == "yes"
+}
+
+// ensureRemoteGPUClientLibs downloads remote-gpu-client libraries if not already present
+func ensureRemoteGPUClientLibs(ctx context.Context, out *tui.Output, silent bool) error {
+	depsMgr := deps.NewManager()
+
+	// Check if libs need to be downloaded
+	diff, err := depsMgr.ComputeUpdateDiff()
+	if err != nil {
+		// No deps manifest yet, need to sync first
+		klog.Info("No deps manifest found, syncing releases...")
+		if _, syncErr := depsMgr.SyncReleases(ctx, "", ""); syncErr != nil {
+			return fmt.Errorf("failed to sync releases: %w", syncErr)
+		}
+
+		// Update deps manifest
+		if _, _, updateErr := depsMgr.UpdateDepsManifest(ctx); updateErr != nil {
+			return fmt.Errorf("failed to update deps manifest: %w", updateErr)
+		}
+
+		diff, err = depsMgr.ComputeUpdateDiff()
+		if err != nil {
+			return fmt.Errorf("failed to compute update diff: %w", err)
+		}
+	}
+
+	// Filter to only remote-gpu-client libs
+	var toDownload []deps.Library
+	for _, lib := range diff.ToDownload {
+		if lib.Type == deps.LibraryTypeRemoteGPUClient || lib.Type == deps.LibraryTypeVGPULibrary {
+			toDownload = append(toDownload, lib)
+		}
+	}
+
+	if len(toDownload) == 0 {
+		klog.V(4).Info("All required GPU client libraries are already downloaded")
+		return nil
+	}
+
+	if !silent && !out.IsJSON() {
+		out.Printf("Downloading %d GPU client libraries...\n", len(toDownload))
+	}
+
+	// Download required libraries
+	progressFn := func(lib deps.Library, downloaded, total int64) {
+		if !silent && !out.IsJSON() && total > 0 {
+			pct := float64(downloaded) / float64(total) * 100
+			fmt.Printf("\r  %s: %.1f%%", lib.Name, pct)
+		}
+	}
+
+	for _, lib := range toDownload {
+		if err := depsMgr.DownloadLibrary(ctx, lib, func(downloaded, total int64) {
+			progressFn(lib, downloaded, total)
+		}); err != nil {
+			return fmt.Errorf("failed to download %s: %w", lib.Name, err)
+		}
+		if !silent && !out.IsJSON() {
+			fmt.Println()
+		}
+	}
+
+	if !silent && !out.IsJSON() {
+		out.Success("GPU client libraries downloaded successfully!")
+	}
+
+	return nil
+}
+
 // NewCleanCmd creates the clean command
 func NewCleanCmd() *cobra.Command {
 	var all bool
+	var yes bool
 
 	cmd := &cobra.Command{
 		Use:   "clean [short-link]",
@@ -116,6 +198,9 @@ func NewCleanCmd() *cobra.Command {
 		Long: `Clean up temporary or long-term remote GPU environment setup.
 
 Examples:
+  # Clean up current shell environment (recommended)
+  eval "$(ggo clean -y)"
+
   # Clean up a specific connection (using code or link)
   ggo clean abc123
   ggo clean https://go.gpu.tf/s/abc123
@@ -125,12 +210,19 @@ Examples:
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := getOutput()
+
+			// If -y flag, output shell commands to restore environment (for eval)
+			if yes {
+				return cleanEnvEval(out)
+			}
+
 			if all {
 				return cleanAllEnv(out)
 			}
 
 			if len(args) == 0 {
-				return fmt.Errorf("short-link is required unless --all is specified")
+				// Default to cleaning current shell (show instructions or prompt)
+				return cleanCurrentEnv(out)
 			}
 
 			shortCode := extractShortCode(args[0])
@@ -139,12 +231,14 @@ Examples:
 	}
 
 	cmd.Flags().BoolVar(&all, "all", false, "Clean up all GPU Go connections")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Deactivate environment (use with eval: eval \"$(ggo clean -y)\")")
 
 	return cmd
 }
 
 // setupTemporaryEnv sets up a temporary GPU environment
-func setupTemporaryEnv(shareInfo *api.SharePublicInfo, autoActivate bool, out *tui.Output) error {
+// When yes=true, outputs shell commands for eval (user runs: eval "$(ggo use xxx -y)")
+func setupTemporaryEnv(shareInfo *api.SharePublicInfo, yes bool, out *tui.Output) error {
 	klog.Info("Setting up temporary GPU environment...")
 
 	vendor := studio.ParseVendor(shareInfo.HardwareVendor)
@@ -167,13 +261,14 @@ func setupTemporaryEnv(shareInfo *api.SharePublicInfo, autoActivate bool, out *t
 	}
 
 	if platform.IsWindows() {
-		return renderWindowsEnv(shareInfo, config, envResult, autoActivate, out)
+		return renderWindowsEnv(shareInfo, config, envResult, yes, out)
 	}
-	return renderUnixEnv(shareInfo, config, envResult, autoActivate, out)
+	return renderUnixEnv(shareInfo, config, envResult, yes, out)
 }
 
 // renderUnixEnv renders and optionally activates the Unix environment
-func renderUnixEnv(shareInfo *api.SharePublicInfo, config *studio.GPUEnvConfig, envResult *studio.GPUEnvResult, autoActivate bool, out *tui.Output) error {
+// When yes=true, outputs shell commands for eval (designed to be run via: eval "$(ggo use xxx -y)")
+func renderUnixEnv(shareInfo *api.SharePublicInfo, config *studio.GPUEnvConfig, envResult *studio.GPUEnvResult, yes bool, out *tui.Output) error {
 	// Generate environment script
 	envScript, err := studio.GenerateEnvScript(config, paths)
 	if err != nil {
@@ -184,6 +279,18 @@ func renderUnixEnv(shareInfo *api.SharePublicInfo, config *studio.GPUEnvConfig, 
 	envFile := filepath.Join(paths.StudioConfigDir(config.StudioName), "env.sh")
 	if err := os.WriteFile(envFile, []byte(envScript), 0755); err != nil {
 		return fmt.Errorf("failed to write env file: %w", err)
+	}
+
+	// Generate and write clean script
+	cleanScript := generateCleanScript()
+	cleanFile := filepath.Join(paths.StudioConfigDir(config.StudioName), "clean.sh")
+	if err := os.WriteFile(cleanFile, []byte(cleanScript), 0755); err != nil {
+		klog.Warningf("Failed to write clean script: %v", err)
+	}
+
+	// If -y flag, output shell commands for eval
+	if yes {
+		return outputEvalCommands(config, envResult, envFile, cleanFile, out)
 	}
 
 	styles := tui.DefaultStyles()
@@ -198,101 +305,143 @@ func renderUnixEnv(shareInfo *api.SharePublicInfo, config *studio.GPUEnvConfig, 
 		out.Println()
 	}
 
-	// Check if we should auto-activate
-	shouldActivate := autoActivate
-	if !shouldActivate && !out.IsJSON() {
+	// Prompt user
+	if !out.IsJSON() {
 		out.Println(styles.Subtitle.Render("Activate Environment"))
 		out.Println()
-		out.Printf("Would you like to activate the GPU environment now? [Y/n]: ")
+		out.Printf("Would you like to activate the GPU environment in your current shell? [Y/n]: ")
 
 		reader := bufio.NewReader(os.Stdin)
 		response, _ := reader.ReadString('\n')
-		response = strings.TrimSpace(strings.ToLower(response))
-		shouldActivate = response == "" || response == "y" || response == "yes"
-	}
+		shouldActivate := isYesResponse(response)
 
-	if shouldActivate {
-		return activateUnixEnv(envFile, envResult, out)
-	}
-
-	// Show manual activation instructions
-	if !out.IsJSON() {
-		out.Println()
-		out.Println(styles.Subtitle.Render("Manual Activation"))
-		out.Println()
-		out.Println("To activate the environment, run:")
-		out.Printf("\n   source %s\n\n", envFile)
-		out.Println("Or copy-paste these exports:")
-		out.Println()
-		for k, v := range envResult.EnvVars {
-			out.Printf("   export %s=\"%s\"\n", k, v)
+		if shouldActivate {
+			out.Println()
+			out.Println(styles.Info.Render("To activate in your current shell, run:"))
+			out.Println()
+			out.Printf("   eval \"$(ggo use %s -y)\"\n", extractShortCode(shareInfo.WorkerID))
+			out.Println()
+			out.Println(styles.Muted.Render("This will set LD_PRELOAD, LD_LIBRARY_PATH and TensorFusion environment variables."))
+			out.Println()
+			out.Println("To deactivate later, run:")
+			out.Println()
+			out.Println("   eval \"$(ggo clean -y)\"")
+			out.Println()
+		} else {
+			out.Println()
+			out.Println(styles.Subtitle.Render("Manual Activation"))
+			out.Println()
+			out.Println("You can activate later by running:")
+			out.Printf("\n   eval \"$(ggo use %s -y)\"\n\n", extractShortCode(shareInfo.WorkerID))
+			out.Println("Or source the env file:")
+			out.Printf("\n   source %s\n\n", envFile)
 		}
-		// Add LD_LIBRARY_PATH and LD_PRELOAD
-		out.Printf("   export LD_LIBRARY_PATH=\"%s:$LD_LIBRARY_PATH\"\n", config.CachePath)
-		libNames := studio.GetLibraryNames(config.Vendor)
-		if len(libNames) > 0 {
-			var preloadPaths []string
-			for _, lib := range libNames {
-				preloadPaths = append(preloadPaths, filepath.Join(config.CachePath, lib))
-			}
-			out.Printf("   export LD_PRELOAD=\"%s\"\n", strings.Join(preloadPaths, ":"))
-		}
-		out.Println()
-		out.Println("To clean up, run:")
-		out.Println("\n   ggo clean")
-		out.Println()
 	}
 
 	return out.Render(&tempEnvResultUnix{shareInfo: shareInfo, envFile: envFile, envResult: envResult})
 }
 
-// activateUnixEnv activates the environment in the current shell
-func activateUnixEnv(envFile string, envResult *studio.GPUEnvResult, out *tui.Output) error {
-	styles := tui.DefaultStyles()
-
-	// Determine the current shell
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		shell = "/bin/bash"
+// outputEvalCommands outputs shell commands for eval mode
+func outputEvalCommands(config *studio.GPUEnvConfig, envResult *studio.GPUEnvResult, envFile, cleanFile string, out *tui.Output) error {
+	cachePath := config.CachePath
+	if cachePath == "" {
+		cachePath = paths.CacheDir()
 	}
 
-	out.Println()
-	out.Printf("%s Activating GPU environment...\n", styles.Info.Render("◐"))
-	out.Println()
+	var script strings.Builder
 
-	// For the current process, we can set env vars directly
+	// Save original values for later restoration
+	script.WriteString("# Save original environment for cleanup\n")
+	script.WriteString("export _GGO_ORIG_LD_LIBRARY_PATH=\"$LD_LIBRARY_PATH\"\n")
+	script.WriteString("export _GGO_ORIG_LD_PRELOAD=\"$LD_PRELOAD\"\n")
+	script.WriteString("export _GGO_ORIG_PATH=\"$PATH\"\n")
+	script.WriteString(fmt.Sprintf("export _GGO_CLEAN_FILE=\"%s\"\n", cleanFile))
+	script.WriteString("\n")
+
+	// Export TensorFusion environment variables
 	for k, v := range envResult.EnvVars {
-		if err := os.Setenv(k, v); err != nil {
-			klog.Warningf("Failed to set env var %s: %v", k, err)
+		script.WriteString(fmt.Sprintf("export %s=\"%s\"\n", k, v))
+	}
+
+	// Add LD_LIBRARY_PATH
+	script.WriteString(fmt.Sprintf("export LD_LIBRARY_PATH=\"%s${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\"\n", cachePath))
+
+	// Add LD_PRELOAD based on vendor
+	libNames := studio.GetLibraryNames(config.Vendor)
+	if len(libNames) > 0 {
+		var preloadPaths []string
+		for _, lib := range libNames {
+			preloadPaths = append(preloadPaths, filepath.Join(cachePath, lib))
 		}
+		script.WriteString(fmt.Sprintf("export LD_PRELOAD=\"%s${LD_PRELOAD:+:$LD_PRELOAD}\"\n", strings.Join(preloadPaths, ":")))
 	}
 
-	// Print what was set
-	out.Println(styles.Success.Render("✓") + " Environment variables set in current process")
-	out.Println()
+	// Mark as activated
+	script.WriteString("export _GGO_ACTIVE=1\n")
+	script.WriteString(fmt.Sprintf("export _GGO_CACHE_PATH=\"%s\"\n", cachePath))
+	script.WriteString("\n")
 
-	// To affect the parent shell, we need to tell the user to source or use exec
-	out.Println(styles.Warning.Render("Note:") + " To activate in your current shell session, please run:")
-	out.Printf("\n   source %s\n\n", envFile)
+	// Print activation message to stderr so it doesn't interfere with eval
+	script.WriteString("echo \"GPU Go environment activated for vendor: " + string(config.Vendor) + "\" >&2\n")
+	script.WriteString("echo \"Connection URL: " + config.ConnectionURL + "\" >&2\n")
+	script.WriteString("echo \"\" >&2\n")
+	script.WriteString("echo \"To deactivate and restore your environment, run:\" >&2\n")
+	script.WriteString("echo '  eval \"$(ggo clean --eval)\"' >&2\n")
 
-	// Alternative: spawn a new shell with the environment
-	out.Println("Or start a new shell with the environment:")
-	out.Printf("\n   %s --rcfile %s\n\n", filepath.Base(shell), envFile)
-
-	// Check if the shell is zsh and provide zsh-specific instructions
-	if strings.Contains(shell, "zsh") {
-		out.Println("For zsh, you can also add to your .zshrc:")
-		out.Printf("\n   echo 'source %s' >> ~/.zshrc\n\n", envFile)
-	} else {
-		out.Println("For bash, you can also add to your .bashrc:")
-		out.Printf("\n   echo 'source %s' >> ~/.bashrc\n\n", envFile)
-	}
-
-	out.Println("To clean up, run:")
-	out.Println("\n   ggo clean")
-	out.Println()
-
+	// Output to stdout for eval
+	fmt.Print(script.String())
 	return nil
+}
+
+// generateCleanScript generates a shell script to clean up the GPU environment
+func generateCleanScript() string {
+	var script strings.Builder
+	script.WriteString("#!/bin/bash\n")
+	script.WriteString("# GPU Go environment cleanup script\n")
+	script.WriteString("# Generated by ggo use\n\n")
+
+	// Restore original LD_LIBRARY_PATH (remove only TF entries)
+	script.WriteString("# Restore LD_LIBRARY_PATH\n")
+	script.WriteString("if [ -n \"$_GGO_ORIG_LD_LIBRARY_PATH\" ]; then\n")
+	script.WriteString("  export LD_LIBRARY_PATH=\"$_GGO_ORIG_LD_LIBRARY_PATH\"\n")
+	script.WriteString("else\n")
+	script.WriteString("  unset LD_LIBRARY_PATH\n")
+	script.WriteString("fi\n\n")
+
+	// Restore original LD_PRELOAD (remove only TF entries)
+	script.WriteString("# Restore LD_PRELOAD\n")
+	script.WriteString("if [ -n \"$_GGO_ORIG_LD_PRELOAD\" ]; then\n")
+	script.WriteString("  export LD_PRELOAD=\"$_GGO_ORIG_LD_PRELOAD\"\n")
+	script.WriteString("else\n")
+	script.WriteString("  unset LD_PRELOAD\n")
+	script.WriteString("fi\n\n")
+
+	// Restore original PATH
+	script.WriteString("# Restore PATH\n")
+	script.WriteString("if [ -n \"$_GGO_ORIG_PATH\" ]; then\n")
+	script.WriteString("  export PATH=\"$_GGO_ORIG_PATH\"\n")
+	script.WriteString("fi\n\n")
+
+	// Unset TensorFusion environment variables
+	script.WriteString("# Unset TensorFusion environment variables\n")
+	script.WriteString("unset TENSOR_FUSION_OPERATOR_CONNECTION_INFO\n")
+	script.WriteString("unset TF_LOG_PATH\n")
+	script.WriteString("unset TF_LOG_LEVEL\n")
+	script.WriteString("unset TF_ENABLE_LOG\n")
+	script.WriteString("unset TF_GPU_VENDOR\n\n")
+
+	// Unset internal tracking variables
+	script.WriteString("# Unset internal tracking variables\n")
+	script.WriteString("unset _GGO_ORIG_LD_LIBRARY_PATH\n")
+	script.WriteString("unset _GGO_ORIG_LD_PRELOAD\n")
+	script.WriteString("unset _GGO_ORIG_PATH\n")
+	script.WriteString("unset _GGO_ACTIVE\n")
+	script.WriteString("unset _GGO_CACHE_PATH\n")
+	script.WriteString("unset _GGO_CLEAN_FILE\n\n")
+
+	script.WriteString("echo \"GPU Go environment deactivated\"\n")
+
+	return script.String()
 }
 
 // renderWindowsEnv renders and optionally activates the Windows environment
@@ -421,7 +570,8 @@ func (r *tempEnvResultWindows) RenderTUI(out *tui.Output) {
 }
 
 // setupLongTermEnv sets up a long-term GPU environment
-func setupLongTermEnv(shareInfo *api.SharePublicInfo, outputDir string, autoActivate bool, out *tui.Output) error {
+// When yes=true, outputs shell commands for eval (user runs: eval "$(ggo use xxx -y --long-term)")
+func setupLongTermEnv(shareInfo *api.SharePublicInfo, outputDir string, yes bool, out *tui.Output) error {
 	klog.Info("Setting up long-term GPU environment...")
 
 	if outputDir == "" {
@@ -468,11 +618,12 @@ func setupLongTermEnv(shareInfo *api.SharePublicInfo, outputDir string, autoActi
 	if platform.IsWindows() {
 		return setupLongTermWindows(shareInfo, config, envResult, outputDir, out)
 	}
-	return setupLongTermUnix(shareInfo, config, envResult, outputDir, autoActivate, out)
+	return setupLongTermUnix(shareInfo, config, envResult, outputDir, yes, out)
 }
 
 // setupLongTermUnix sets up long-term environment for Unix
-func setupLongTermUnix(shareInfo *api.SharePublicInfo, config *studio.GPUEnvConfig, envResult *studio.GPUEnvResult, outputDir string, autoActivate bool, out *tui.Output) error {
+// When yes=true, outputs shell commands for eval
+func setupLongTermUnix(shareInfo *api.SharePublicInfo, config *studio.GPUEnvConfig, envResult *studio.GPUEnvResult, outputDir string, yes bool, out *tui.Output) error {
 	// Generate the profile script
 	profileScript, err := studio.GenerateEnvScript(config, paths)
 	if err != nil {
@@ -482,6 +633,18 @@ func setupLongTermUnix(shareInfo *api.SharePublicInfo, config *studio.GPUEnvConf
 	profileSnippet := filepath.Join(outputDir, "profile.sh")
 	if err := os.WriteFile(profileSnippet, []byte(profileScript), 0755); err != nil {
 		return fmt.Errorf("failed to write profile snippet: %w", err)
+	}
+
+	// Generate clean script
+	cleanScript := generateCleanScript()
+	cleanFile := filepath.Join(outputDir, "clean.sh")
+	if err := os.WriteFile(cleanFile, []byte(cleanScript), 0755); err != nil {
+		klog.Warningf("Failed to write clean script: %v", err)
+	}
+
+	// If -y flag, output shell commands for eval
+	if yes {
+		return outputEvalCommands(config, envResult, profileSnippet, cleanFile, out)
 	}
 
 	styles := tui.DefaultStyles()
@@ -508,17 +671,13 @@ func setupLongTermUnix(shareInfo *api.SharePublicInfo, config *studio.GPUEnvConf
 	}
 
 	if shellRC != "" && !out.IsJSON() {
-		shouldAdd := autoActivate
-		if !shouldAdd {
-			out.Println(styles.Subtitle.Render("Permanent Activation"))
-			out.Println()
-			out.Printf("Add GPU environment to %s? [Y/n]: ", filepath.Base(shellRC))
+		out.Println(styles.Subtitle.Render("Permanent Activation"))
+		out.Println()
+		out.Printf("Add GPU environment to %s for all new shells? [Y/n]: ", filepath.Base(shellRC))
 
-			reader := bufio.NewReader(os.Stdin)
-			response, _ := reader.ReadString('\n')
-			response = strings.TrimSpace(strings.ToLower(response))
-			shouldAdd = response == "" || response == "y" || response == "yes"
-		}
+		reader := bufio.NewReader(os.Stdin)
+		response, _ := reader.ReadString('\n')
+		shouldAdd := isYesResponse(response)
 
 		if shouldAdd {
 			sourceLine := fmt.Sprintf("\n# GPU Go environment\nsource %s\n", profileSnippet)
@@ -531,16 +690,14 @@ func setupLongTermUnix(shareInfo *api.SharePublicInfo, config *studio.GPUEnvConf
 				out.Printf("\n   source %s\n\n", shellRC)
 			}
 		}
-	}
 
-	if !out.IsJSON() {
 		out.Println()
-		out.Println(styles.Subtitle.Render("Manual Setup"))
+		out.Println(styles.Subtitle.Render("Current Shell Activation"))
 		out.Println()
-		out.Println("To activate in all new shells, add this to your shell profile:")
-		out.Printf("\n   source %s\n\n", profileSnippet)
-		out.Println("To clean up, run:")
-		out.Println("\n   ggo clean --all")
+		out.Println("To activate in your current shell now:")
+		out.Printf("\n   eval \"$(ggo use %s -y)\"\n\n", extractShortCode(shareInfo.WorkerID))
+		out.Println("To deactivate later:")
+		out.Println("\n   eval \"$(ggo clean -y)\"")
 		out.Println()
 	}
 
@@ -667,6 +824,95 @@ func (r *longTermEnvResultWindows) RenderTUI(out *tui.Output) {
 	// TUI output is handled in setupLongTermWindows
 }
 
+// cleanEnvEval outputs shell commands to restore environment for eval mode
+func cleanEnvEval(out *tui.Output) error {
+	var script strings.Builder
+
+	// Check if environment is active
+	script.WriteString("if [ -z \"$_GGO_ACTIVE\" ]; then\n")
+	script.WriteString("  echo 'GPU Go environment is not active' >&2\n")
+	script.WriteString("else\n")
+
+	// Restore original LD_LIBRARY_PATH
+	script.WriteString("  if [ -n \"$_GGO_ORIG_LD_LIBRARY_PATH\" ]; then\n")
+	script.WriteString("    export LD_LIBRARY_PATH=\"$_GGO_ORIG_LD_LIBRARY_PATH\"\n")
+	script.WriteString("  else\n")
+	script.WriteString("    unset LD_LIBRARY_PATH\n")
+	script.WriteString("  fi\n")
+
+	// Restore original LD_PRELOAD
+	script.WriteString("  if [ -n \"$_GGO_ORIG_LD_PRELOAD\" ]; then\n")
+	script.WriteString("    export LD_PRELOAD=\"$_GGO_ORIG_LD_PRELOAD\"\n")
+	script.WriteString("  else\n")
+	script.WriteString("    unset LD_PRELOAD\n")
+	script.WriteString("  fi\n")
+
+	// Restore original PATH
+	script.WriteString("  if [ -n \"$_GGO_ORIG_PATH\" ]; then\n")
+	script.WriteString("    export PATH=\"$_GGO_ORIG_PATH\"\n")
+	script.WriteString("  fi\n")
+
+	// Unset TensorFusion environment variables
+	script.WriteString("  unset TENSOR_FUSION_OPERATOR_CONNECTION_INFO\n")
+	script.WriteString("  unset TF_LOG_PATH\n")
+	script.WriteString("  unset TF_LOG_LEVEL\n")
+	script.WriteString("  unset TF_ENABLE_LOG\n")
+	script.WriteString("  unset TF_GPU_VENDOR\n")
+
+	// Unset internal tracking variables
+	script.WriteString("  unset _GGO_ORIG_LD_LIBRARY_PATH\n")
+	script.WriteString("  unset _GGO_ORIG_LD_PRELOAD\n")
+	script.WriteString("  unset _GGO_ORIG_PATH\n")
+	script.WriteString("  unset _GGO_ACTIVE\n")
+	script.WriteString("  unset _GGO_CACHE_PATH\n")
+	script.WriteString("  unset _GGO_CLEAN_FILE\n")
+
+	script.WriteString("  echo 'GPU Go environment deactivated' >&2\n")
+	script.WriteString("fi\n")
+
+	// Output to stdout for eval
+	fmt.Print(script.String())
+	return nil
+}
+
+// cleanCurrentEnv shows instructions for cleaning current shell environment
+func cleanCurrentEnv(out *tui.Output) error {
+	styles := tui.DefaultStyles()
+
+	if !out.IsJSON() {
+		out.Println()
+		out.Println(styles.Subtitle.Render("Clean GPU Go Environment"))
+		out.Println()
+		out.Printf("Would you like to deactivate GPU environment in your current shell? [Y/n]: ")
+
+		reader := bufio.NewReader(os.Stdin)
+		response, _ := reader.ReadString('\n')
+		shouldClean := isYesResponse(response)
+
+		if shouldClean {
+			out.Println()
+			out.Println(styles.Info.Render("To deactivate in your current shell, run:"))
+			out.Println()
+			out.Println("   eval \"$(ggo clean -y)\"")
+			out.Println()
+			out.Println(styles.Muted.Render("This will restore LD_PRELOAD, LD_LIBRARY_PATH, and PATH to their original values."))
+		} else {
+			out.Println()
+			out.Println("You can deactivate later by running:")
+			out.Println()
+			out.Println("   eval \"$(ggo clean -y)\"")
+		}
+
+		out.Println()
+		out.Println("To clean up all GPU Go connections (including shell profiles):")
+		out.Println()
+		out.Println("   ggo clean --all")
+		out.Println()
+	}
+
+	return nil
+}
+
 // cleanEnv cleans up a specific GPU environment
 func cleanEnv(shortCode string, out *tui.Output) error {
 	klog.Infof("Cleaning up GPU environment: short_link=%s", shortCode)
@@ -770,13 +1016,17 @@ func (r *cleanAllResult) RenderJSON() any {
 func (r *cleanAllResult) RenderTUI(out *tui.Output) {
 	out.Println("All GPU environments cleaned up successfully!")
 	out.Println()
-	out.Println("Note: Environment variables in your current shell are not affected.")
+	out.Println("Note: Environment variables in your current shell may still be set.")
+	out.Println()
 	if platform.IsWindows() {
 		out.Println("Start a new shell or run in PowerShell:")
 		out.Println("  Remove-Item Env:TENSOR_FUSION_OPERATOR_CONNECTION_INFO, Env:TF_LOG_PATH, Env:TF_LOG_LEVEL, Env:TF_ENABLE_LOG")
 	} else {
-		out.Println("Start a new shell or run:")
-		out.Println("  unset TENSOR_FUSION_OPERATOR_CONNECTION_INFO TF_LOG_PATH TF_LOG_LEVEL TF_ENABLE_LOG LD_PRELOAD")
+		out.Println("To clean up your current shell environment, run:")
+		out.Println()
+		out.Println("   eval \"$(ggo clean -y)\"")
+		out.Println()
+		out.Println("This will properly restore LD_PRELOAD, LD_LIBRARY_PATH, and PATH without breaking your shell.")
 	}
 	out.Println()
 }

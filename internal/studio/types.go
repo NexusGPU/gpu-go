@@ -184,6 +184,17 @@ type Backend interface {
 	Logs(ctx context.Context, envID string, follow bool) (<-chan string, error)
 }
 
+// AutoStartableBackend is an optional interface for backends that can be auto-started.
+// Backends implementing this interface can be selected even if not currently running,
+// as long as they are installed and can be started automatically.
+type AutoStartableBackend interface {
+	Backend
+	// IsInstalled checks if the backend software is installed (but not necessarily running)
+	IsInstalled(ctx context.Context) bool
+	// EnsureRunning ensures the backend is running, starting it if necessary
+	EnsureRunning(ctx context.Context) error
+}
+
 // SSHConfig represents an SSH configuration entry
 type SSHConfig struct {
 	Host         string

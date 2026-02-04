@@ -61,20 +61,33 @@ func (m *Manager) detectBestBackend() (Backend, error) {
 	// Platform-specific preference order
 	var preferenceOrder []Mode
 	switch runtime.GOOS {
-	case "windows":
+	case OSWindows:
 		preferenceOrder = []Mode{ModeWSL, ModeDocker, ModeKubernetes}
-	case "darwin":
+	case OSDarwin:
 		preferenceOrder = []Mode{ModeColima, ModeAppleContainer, ModeDocker, ModeKubernetes}
-	case "linux":
+	case OSLinux:
 		preferenceOrder = []Mode{ModeDocker, ModeColima, ModeKubernetes}
 	default:
 		preferenceOrder = []Mode{ModeDocker, ModeKubernetes}
 	}
 
+	// First pass: check for backends that are currently available (running)
 	for _, mode := range preferenceOrder {
 		if backend, ok := m.backends[mode]; ok {
 			if backend.IsAvailable(ctx) {
 				return backend, nil
+			}
+		}
+	}
+
+	// Second pass: check for auto-startable backends that are installed but not running
+	for _, mode := range preferenceOrder {
+		if backend, ok := m.backends[mode]; ok {
+			if autoStartable, ok := backend.(AutoStartableBackend); ok {
+				if autoStartable.IsInstalled(ctx) {
+					// Backend is installed and can be auto-started
+					return backend, nil
+				}
 			}
 		}
 	}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/NexusGPU/gpu-go/cmd/ggo/cmdutil"
 	"github.com/NexusGPU/gpu-go/internal/api"
+	"github.com/NexusGPU/gpu-go/internal/deps"
 	"github.com/NexusGPU/gpu-go/internal/studio"
 	"github.com/NexusGPU/gpu-go/internal/tui"
 	"github.com/spf13/cobra"
@@ -197,6 +198,13 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		}
 		klog.Infof("Resolved share link: worker_id=%s vendor=%s connection_url=%s",
 			shareInfo.WorkerID, shareInfo.HardwareVendor, shareInfo.ConnectionURL)
+
+		// Download required GPU client libraries before creating studio
+		if err := ensureRemoteGPUClientLibs(ctx, out); err != nil {
+			cmd.SilenceUsage = true
+			klog.Errorf("Failed to ensure GPU client libraries: error=%v", err)
+			return fmt.Errorf("failed to download GPU client libraries: %w", err)
+		}
 	}
 
 	opts, err := buildCreateOptions(name, shareInfo)
@@ -221,6 +229,69 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	return out.Render(&createResult{env: env, mgr: mgr, noSSH: noSSH})
+}
+
+// ensureRemoteGPUClientLibs downloads remote-gpu-client libraries if not already present
+func ensureRemoteGPUClientLibs(ctx context.Context, out *tui.Output) error {
+	depsMgr := deps.NewManager()
+
+	// Check if libs need to be downloaded
+	diff, err := depsMgr.ComputeUpdateDiff()
+	if err != nil {
+		// No deps manifest yet, need to sync first
+		klog.Info("No deps manifest found, syncing releases...")
+		if _, syncErr := depsMgr.SyncReleases(ctx, "", ""); syncErr != nil {
+			return fmt.Errorf("failed to sync releases: %w", syncErr)
+		}
+
+		// Update deps manifest
+		if _, _, updateErr := depsMgr.UpdateDepsManifest(ctx); updateErr != nil {
+			return fmt.Errorf("failed to update deps manifest: %w", updateErr)
+		}
+
+		diff, err = depsMgr.ComputeUpdateDiff()
+		if err != nil {
+			return fmt.Errorf("failed to compute update diff: %w", err)
+		}
+	}
+
+	// Filter to only remote-gpu-client libs
+	var toDownload []deps.Library
+	for _, lib := range diff.ToDownload {
+		if lib.Type == deps.LibraryTypeRemoteGPUClient || lib.Type == deps.LibraryTypeVGPULibrary {
+			toDownload = append(toDownload, lib)
+		}
+	}
+
+	if len(toDownload) == 0 {
+		klog.V(4).Info("All required GPU client libraries are already downloaded")
+		return nil
+	}
+
+	if !out.IsJSON() {
+		out.Printf("Downloading %d GPU client libraries...\n", len(toDownload))
+	}
+
+	// Download required libraries
+	for _, lib := range toDownload {
+		if err := depsMgr.DownloadLibrary(ctx, lib, func(downloaded, total int64) {
+			if !out.IsJSON() && total > 0 {
+				pct := float64(downloaded) / float64(total) * 100
+				fmt.Printf("\r  %s: %.1f%%", lib.Name, pct)
+			}
+		}); err != nil {
+			return fmt.Errorf("failed to download %s: %w", lib.Name, err)
+		}
+		if !out.IsJSON() {
+			fmt.Println()
+		}
+	}
+
+	if !out.IsJSON() {
+		out.Success("GPU client libraries downloaded successfully!")
+	}
+
+	return nil
 }
 
 // extractShortCode extracts the short code from a share link URL
