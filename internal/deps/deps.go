@@ -963,8 +963,9 @@ func (m *Manager) GetRemoteGPUWorkerPath(ctx context.Context) (string, error) {
 
 // EnsureLibrariesByTypes ensures ALL libraries of the specified types exist and are downloaded
 // This is different from EnsureLibraryByType which only returns one library
+// vendorSlug filters by vendor (e.g., "nvidia", "amd"). Empty string matches all vendors.
 // Returns the list of all libraries that were checked/downloaded
-func (m *Manager) EnsureLibrariesByTypes(ctx context.Context, libTypes []string, progressFn func(lib Library, downloaded, total int64)) ([]Library, error) {
+func (m *Manager) EnsureLibrariesByTypes(ctx context.Context, libTypes []string, vendorSlug string, progressFn func(lib Library, downloaded, total int64)) ([]Library, error) {
 	// Ensure deps manifest exists and is up to date
 	if err := m.ensureDepsManifest(ctx); err != nil {
 		return nil, err
@@ -984,12 +985,20 @@ func (m *Manager) EnsureLibrariesByTypes(ctx context.Context, libTypes []string,
 		typeSet[t] = true
 	}
 
-	// Find all libraries matching the specified types
+	// Normalize vendor slug for matching
+	normalizedVendor := strings.ToLower(vendorSlug)
+
+	// Find all libraries matching the specified types and vendor
 	var targetLibs []Library
 	for _, lib := range deps.Libraries {
-		if typeSet[lib.Type] {
-			targetLibs = append(targetLibs, lib)
+		if !typeSet[lib.Type] {
+			continue
 		}
+		// Filter by vendor if specified
+		if normalizedVendor != "" && lib.VendorSlug != normalizedVendor {
+			continue
+		}
+		targetLibs = append(targetLibs, lib)
 	}
 
 	if len(targetLibs) == 0 {

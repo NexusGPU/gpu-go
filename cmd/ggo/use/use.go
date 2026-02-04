@@ -110,7 +110,8 @@ Examples:
 			klog.Infof("Found GPU worker: worker_id=%s vendor=%s connection_url=%s", shareInfo.WorkerID, shareInfo.HardwareVendor, shareInfo.ConnectionURL)
 
 			// Download required libraries first (silent when -y is used for eval)
-			if err := ensureRemoteGPUClientLibs(ctx, out, yes); err != nil {
+			// Filter by vendor from share info to avoid downloading unnecessary libraries
+			if err := ensureRemoteGPUClientLibs(ctx, out, shareInfo.HardwareVendor, yes); err != nil {
 				cmd.SilenceUsage = true
 				klog.Errorf("Failed to ensure GPU client libraries: error=%v", err)
 				return fmt.Errorf("failed to download GPU client libraries: %w", err)
@@ -143,14 +144,15 @@ func isYesResponse(response string) bool {
 }
 
 // ensureRemoteGPUClientLibs downloads remote-gpu-client libraries if not already present
-func ensureRemoteGPUClientLibs(ctx context.Context, out *tui.Output, silent bool) error {
+// vendorSlug filters by vendor (e.g., "nvidia", "amd") to avoid downloading unnecessary libraries
+func ensureRemoteGPUClientLibs(ctx context.Context, out *tui.Output, vendorSlug string, silent bool) error {
 	depsMgr := deps.NewManager()
 
 	// Target library types that are needed for GPU client functionality
 	targetTypes := []string{deps.LibraryTypeRemoteGPUClient, deps.LibraryTypeVGPULibrary}
 
 	if !silent && !out.IsJSON() {
-		out.Printf("Downloading GPU client libraries...\n")
+		out.Printf("Downloading GPU client libraries for %s...\n", vendorSlug)
 	}
 
 	progressFn := func(lib deps.Library, downloaded, total int64) {
@@ -160,7 +162,7 @@ func ensureRemoteGPUClientLibs(ctx context.Context, out *tui.Output, silent bool
 		}
 	}
 
-	libs, err := depsMgr.EnsureLibrariesByTypes(ctx, targetTypes, progressFn)
+	libs, err := depsMgr.EnsureLibrariesByTypes(ctx, targetTypes, vendorSlug, progressFn)
 	if err != nil {
 		return fmt.Errorf("failed to ensure GPU client libraries: %w", err)
 	}

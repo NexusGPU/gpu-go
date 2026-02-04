@@ -238,6 +238,13 @@ func (r *Reconciler) needsUpdate(desired, actual *api.WorkerInfo) bool {
 				return true
 			}
 		}
+		// Check environment variables (including fractional GPU config)
+		if !maps.Equal(desired.WorkerRunningInfo.Env, actual.WorkerRunningInfo.Env) {
+			return true
+		}
+	} else if desired.WorkerRunningInfo != nil || actual.WorkerRunningInfo != nil {
+		// One is nil, the other is not - they differ
+		return true
 	}
 
 	return false

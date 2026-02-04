@@ -326,10 +326,12 @@ func (a *Agent) pullConfig() error {
 	workers := make([]config.WorkerConfig, len(resp.Workers))
 	for i, w := range resp.Workers {
 		workers[i] = config.WorkerConfig{
-			WorkerID:   w.WorkerID,
-			GPUIDs:     w.GPUIDs,
-			ListenPort: w.ListenPort,
-			Enabled:    w.Enabled,
+			WorkerID:       w.WorkerID,
+			GPUIDs:         w.GPUIDs,
+			VRAMMb:         w.VRAMMb,
+			ComputePercent: w.ComputePercent,
+			ListenPort:     w.ListenPort,
+			Enabled:        w.Enabled,
 		}
 	}
 	if err := a.config.SaveWorkers(workers); err != nil {

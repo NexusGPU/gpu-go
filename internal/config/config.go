@@ -41,13 +41,15 @@ type GPUConfig struct {
 
 // WorkerConfig represents worker configuration with runtime state
 type WorkerConfig struct {
-	WorkerID    string               `json:"worker_id"`
-	GPUIDs      []string             `json:"gpu_ids"`
-	ListenPort  int                  `json:"listen_port"`
-	Enabled     bool                 `json:"enabled"`
-	PID         int                  `json:"pid,omitempty"`
-	Status      string               `json:"status,omitempty"`
-	Connections []api.ConnectionInfo `json:"connections,omitempty"`
+	WorkerID       string               `json:"worker_id"`
+	GPUIDs         []string             `json:"gpu_ids"`
+	VRAMMb         int64                `json:"vram_mb,omitempty"`
+	ComputePercent int                  `json:"compute_percent,omitempty"`
+	ListenPort     int                  `json:"listen_port"`
+	Enabled        bool                 `json:"enabled"`
+	PID            int                  `json:"pid,omitempty"`
+	Status         string               `json:"status,omitempty"`
+	Connections    []api.ConnectionInfo `json:"connections,omitempty"`
 }
 
 // Manager manages configuration files

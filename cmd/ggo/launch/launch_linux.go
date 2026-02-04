@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/NexusGPU/gpu-go/cmd/ggo/cmdutil"
+	"github.com/NexusGPU/gpu-go/internal/api"
 	"github.com/NexusGPU/gpu-go/internal/deps"
 	"github.com/NexusGPU/gpu-go/internal/platform"
 	"github.com/NexusGPU/gpu-go/internal/studio"
@@ -22,75 +23,94 @@ import (
 // NewLaunchCmd creates the launch command (Linux)
 func NewLaunchCmd() *cobra.Command {
 	var (
-		verbose bool
+		verbose   bool
+		shareLink string
+		serverURL string
 	)
 
 	cmd := &cobra.Command{
-		Use:   "launch <program> [args...]",
+		Use:   "launch -s <share-link> <program> [args...]",
 		Short: "Launch a program with GPU libraries pre-loaded",
 		Long: `Launch a program with TensorFusion GPU libraries properly loaded.
 
 This command sets up LD_PRELOAD and LD_LIBRARY_PATH to ensure the GPU client
 libraries from the gpugo cache are loaded for the target program.
 
-Prerequisites:
-  - Run 'ggo use <share-link>' first to configure the GPU connection
+The -s flag is required to specify the share link for GPU connection.
 
 Examples:
   # Launch Python with remote GPU
-  ggo launch python train.py
+  ggo launch -s abc123 python train.py
 
   # Launch Jupyter notebook
-  ggo launch jupyter notebook
+  ggo launch -s https://go.gpu.tf/s/abc123 jupyter notebook
 
   # Launch with arguments
-  ggo launch python -c "import torch; print(torch.cuda.is_available())"
+  ggo launch -s abc123 python -c "import torch; print(torch.cuda.is_available())"
 
   # Launch any executable
-  ggo launch ./my-gpu-app --config config.yaml`,
-		Args:               cobra.MinimumNArgs(1),
-		DisableFlagParsing: true, // Allow passing all flags to the child process
+  ggo launch -s abc123 ./my-gpu-app --config config.yaml`,
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runLaunch(args, verbose)
+			if shareLink == "" {
+				return fmt.Errorf("share link is required, use -s <share-link>")
+			}
+			return runLaunch(args, shareLink, serverURL, verbose)
 		},
 	}
 
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Show verbose output")
+	cmd.Flags().StringVarP(&shareLink, "share", "s", "", "Share link or short code for GPU connection (required)")
+	cmd.Flags().StringVar(&serverURL, "server", api.GetDefaultBaseURL(), "Server URL (or set GPU_GO_ENDPOINT env var)")
+	_ = cmd.MarkFlagRequired("share")
 
 	return cmd
 }
 
-func runLaunch(args []string, verbose bool) error {
+// extractShortCode extracts the short code from a short link URL or returns the input as-is if it's already a code.
+// Supports formats: "abc123", "https://go.gpu.tf/s/abc123", "go.gpu.tf/s/abc123"
+func extractShortCode(input string) string {
+	input = strings.TrimSpace(input)
+
+	// If it looks like a URL, extract the last path segment
+	if strings.Contains(input, "/") {
+		parts := strings.Split(strings.TrimSuffix(input, "/"), "/")
+		if len(parts) > 0 {
+			return parts[len(parts)-1]
+		}
+	}
+
+	return input
+}
+
+func runLaunch(args []string, shareLink, serverURL string, verbose bool) error {
 	paths := platform.DefaultPaths()
 	out := cmdutil.NewOutput("table")
 	styles := tui.DefaultStyles()
 	ctx := context.Background()
 
-	// Check if TENSOR_FUSION_OPERATOR_CONNECTION_INFO is set
-	connectionInfo := os.Getenv("TENSOR_FUSION_OPERATOR_CONNECTION_INFO")
-	if connectionInfo == "" {
+	// Get share info from API
+	shortCode := extractShortCode(shareLink)
+	client := api.NewClient(api.WithBaseURL(serverURL))
+	shareInfo, err := client.GetSharePublic(ctx, shortCode)
+	if err != nil {
 		out.Println()
-		out.Warning("GPU connection not configured!")
+		out.Warning("Failed to get GPU share info!")
 		out.Println()
-		out.Println("Please run 'ggo use <share-link>' first to configure the GPU connection.")
+		out.Printf("Share link: %s\n", shareLink)
+		out.Printf("Error: %v\n", err)
 		out.Println()
-		out.Println("Example:")
-		out.Println("  ggo use abc123")
-		out.Println("  ggo launch python train.py")
-		out.Println()
-		return fmt.Errorf("TENSOR_FUSION_OPERATOR_CONNECTION_INFO not set")
+		return fmt.Errorf("failed to get share info: %w", err)
 	}
 
-	// Detect vendor from TF_GPU_VENDOR env var (set by ggo use)
-	vendorStr := os.Getenv("TF_GPU_VENDOR")
-	if vendorStr == "" {
-		vendorStr = "nvidia" // default
-	}
-	vendor := studio.ParseVendor(vendorStr)
+	klog.Infof("Found GPU worker: worker_id=%s vendor=%s connection_url=%s", shareInfo.WorkerID, shareInfo.HardwareVendor, shareInfo.ConnectionURL)
 
-	// Ensure required GPU client libraries exist (same as ggo use)
-	// This will auto-sync and download if needed
-	if err := ensureRemoteGPUClientLibs(ctx, out, verbose); err != nil {
+	connectionInfo := shareInfo.ConnectionURL
+	vendor := studio.ParseVendor(shareInfo.HardwareVendor)
+
+	// Ensure required GPU client libraries exist
+	// Filter by vendor from share info to avoid downloading unnecessary libraries
+	if err := ensureRemoteGPUClientLibs(ctx, out, shareInfo.HardwareVendor, verbose); err != nil {
 		return fmt.Errorf("failed to ensure GPU client libraries: %w", err)
 	}
 
@@ -136,6 +156,7 @@ func runLaunch(args []string, verbose bool) error {
 		out.Printf("%s Launching with GPU libraries from: %s\n",
 			styles.Info.Render("◐"), cacheDir)
 		out.Printf("   Connection: %s\n", connectionInfo)
+		out.Printf("   Vendor:     %s\n", vendor)
 		out.Printf("   Log Path:   %s\n", logPath)
 		out.Println()
 	}
@@ -170,7 +191,6 @@ func runLaunch(args []string, verbose bool) error {
 	env = setEnvVar(env, "TF_LOG_PATH", logPath)
 	env = setEnvVar(env, "TF_LOG_LEVEL", getEnvDefault("TF_LOG_LEVEL", "info"))
 	env = setEnvVar(env, "TF_ENABLE_LOG", getEnvDefault("TF_ENABLE_LOG", "0"))
-	env = setEnvVar(env, "TF_GPU_VENDOR", string(vendor))
 
 	// Build LD_LIBRARY_PATH
 	existingLDPath := os.Getenv("LD_LIBRARY_PATH")
@@ -208,16 +228,15 @@ func runLaunch(args []string, verbose bool) error {
 }
 
 // ensureRemoteGPUClientLibs downloads remote-gpu-client libraries if not already present
-// This is consistent with ggo use command behavior
-func ensureRemoteGPUClientLibs(ctx context.Context, out *tui.Output, verbose bool) error {
+// vendorSlug filters by vendor (e.g., "nvidia", "amd") to avoid downloading unnecessary libraries
+func ensureRemoteGPUClientLibs(ctx context.Context, out *tui.Output, vendorSlug string, verbose bool) error {
 	depsMgr := deps.NewManager()
 
 	// Target library types that are needed for GPU client functionality
-	// Same as ggo use command
 	targetTypes := []string{deps.LibraryTypeRemoteGPUClient, deps.LibraryTypeVGPULibrary}
 
 	if verbose {
-		out.Printf("Checking GPU client libraries...\n")
+		out.Printf("Checking GPU client libraries for %s...\n", vendorSlug)
 	}
 
 	progressFn := func(lib deps.Library, downloaded, total int64) {
@@ -227,7 +246,7 @@ func ensureRemoteGPUClientLibs(ctx context.Context, out *tui.Output, verbose boo
 		}
 	}
 
-	libs, err := depsMgr.EnsureLibrariesByTypes(ctx, targetTypes, progressFn)
+	libs, err := depsMgr.EnsureLibrariesByTypes(ctx, targetTypes, vendorSlug, progressFn)
 	if err != nil {
 		return fmt.Errorf("failed to ensure GPU client libraries: %w", err)
 	}

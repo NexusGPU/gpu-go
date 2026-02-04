@@ -210,7 +210,8 @@ func runCreate(cmd *cobra.Command, args []string) error {
 			shareInfo.WorkerID, shareInfo.HardwareVendor, shareInfo.ConnectionURL)
 
 		// Download required GPU client libraries before creating studio
-		if err := ensureRemoteGPUClientLibs(ctx, out); err != nil {
+		// Filter by vendor from share info to avoid downloading unnecessary libraries
+		if err := ensureRemoteGPUClientLibs(ctx, out, shareInfo.HardwareVendor); err != nil {
 			cmd.SilenceUsage = true
 			klog.Errorf("Failed to ensure GPU client libraries: error=%v", err)
 			return fmt.Errorf("failed to download GPU client libraries: %w", err)
@@ -242,14 +243,15 @@ func runCreate(cmd *cobra.Command, args []string) error {
 }
 
 // ensureRemoteGPUClientLibs downloads remote-gpu-client libraries if not already present
-func ensureRemoteGPUClientLibs(ctx context.Context, out *tui.Output) error {
+// vendorSlug filters by vendor (e.g., "nvidia", "amd") to avoid downloading unnecessary libraries
+func ensureRemoteGPUClientLibs(ctx context.Context, out *tui.Output, vendorSlug string) error {
 	depsMgr := deps.NewManager()
 
 	// Target library types that are needed for GPU client functionality
 	targetTypes := []string{deps.LibraryTypeRemoteGPUClient, deps.LibraryTypeVGPULibrary}
 
 	if !out.IsJSON() {
-		out.Printf("Downloading GPU client libraries...\n")
+		out.Printf("Downloading GPU client libraries for %s...\n", vendorSlug)
 	}
 
 	progressFn := func(lib deps.Library, downloaded, total int64) {
@@ -259,7 +261,7 @@ func ensureRemoteGPUClientLibs(ctx context.Context, out *tui.Output) error {
 		}
 	}
 
-	libs, err := depsMgr.EnsureLibrariesByTypes(ctx, targetTypes, progressFn)
+	libs, err := depsMgr.EnsureLibrariesByTypes(ctx, targetTypes, vendorSlug, progressFn)
 	if err != nil {
 		return fmt.Errorf("failed to ensure GPU client libraries: %w", err)
 	}
