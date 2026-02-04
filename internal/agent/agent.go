@@ -34,6 +34,13 @@ const (
 	workerStatusStopped  = "stopped"
 	workerStatusPending  = "pending"
 	workerStatusStopping = "stopping"
+
+	// Hard limiter environment variables for Fractional GPU support
+	// These only take effect when isolation_mode is "hard"
+	// HardSMLimiterEnv sets compute limit in percent (1-100)
+	HardSMLimiterEnv = "TF_CUDA_SM_PERCENT_LIMIT"
+	// HardMemLimiterEnv sets memory limit in megabytes
+	HardMemLimiterEnv = "TF_CUDA_MEMORY_LIMIT"
 )
 
 // workerSnapshot captures worker state for change detection
@@ -384,6 +391,19 @@ func (a *Agent) convertToWorkerInfos(apiWorkers []api.WorkerConfig) ([]*hvApi.Wo
 		envVars := make(map[string]string)
 		envVars["TF_LICENSE"] = cfg.License.Plain
 		envVars["TF_LICENSE_SIGN"] = cfg.License.Encrypted
+
+		// Set hard limiter environment variables for Fractional GPU support
+		// TODO: use MIG for partitioned
+		if w.ComputePercent > 0 {
+			envVars[HardSMLimiterEnv] = fmt.Sprintf("%d", w.ComputePercent)
+			klog.Infof("Worker %s: Setting compute limit to %d%% (%s=%d)",
+				w.WorkerID, w.ComputePercent, HardSMLimiterEnv, w.ComputePercent)
+		}
+		if w.VRAMMb > 0 {
+			envVars[HardMemLimiterEnv] = fmt.Sprintf("%d", w.VRAMMb)
+			klog.Infof("Worker %s: Setting memory limit to %d MB (%s=%d)",
+				w.WorkerID, w.VRAMMb, HardMemLimiterEnv, w.VRAMMb)
+		}
 
 		info.WorkerRunningInfo = &hvApi.WorkerRunningInfo{
 			Type:       hvApi.WorkerRuntimeTypeProcess,

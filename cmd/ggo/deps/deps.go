@@ -377,12 +377,18 @@ func (r *listResult) RenderTUI(out *tui.Output) {
 			typeStr = "-"
 		}
 
+		// Show "N/A" for size when file doesn't exist and size is 0
+		sizeStr := formatSize(dLib.Size)
+		if !dLib.FileExists && dLib.Size == 0 {
+			sizeStr = "N/A"
+		}
+
 		rows = append(rows, []string{
 			dLib.Name,
 			dLib.Version,
 			typeStr,
 			fmt.Sprintf("%s/%s", dLib.Platform, dLib.Arch),
-			formatSize(dLib.Size),
+			sizeStr,
 			style.Render(status),
 		})
 	}

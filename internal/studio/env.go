@@ -111,7 +111,7 @@ func SetupGPUEnv(paths *platform.Paths, config *GPUEnvConfig) (*GPUEnvResult, er
 	result.EnvVars["TENSOR_FUSION_OPERATOR_CONNECTION_INFO"] = config.ConnectionURL
 	result.EnvVars["TF_LOG_PATH"] = logPath
 	result.EnvVars["TF_LOG_LEVEL"] = getEnvDefault("TF_LOG_LEVEL", "info")
-	result.EnvVars["TF_ENABLE_LOG"] = getEnvDefault("TF_ENABLE_LOG", "1")
+	result.EnvVars["TF_ENABLE_LOG"] = getEnvDefault("TF_ENABLE_LOG", "0")
 
 	// Add cache path to PATH (for tensor-fusion-worker binary)
 	if config.IsContainer {

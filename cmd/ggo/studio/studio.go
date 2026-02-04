@@ -235,60 +235,32 @@ func runCreate(cmd *cobra.Command, args []string) error {
 func ensureRemoteGPUClientLibs(ctx context.Context, out *tui.Output) error {
 	depsMgr := deps.NewManager()
 
-	// Check if libs need to be downloaded
-	diff, err := depsMgr.ComputeUpdateDiff()
+	// Target library types that are needed for GPU client functionality
+	targetTypes := []string{deps.LibraryTypeRemoteGPUClient, deps.LibraryTypeVGPULibrary}
+
+	if !out.IsJSON() {
+		out.Printf("Downloading GPU client libraries...\n")
+	}
+
+	progressFn := func(lib deps.Library, downloaded, total int64) {
+		if !out.IsJSON() && total > 0 {
+			pct := float64(downloaded) / float64(total) * 100
+			fmt.Printf("\r  %s: %.1f%%", lib.Name, pct)
+		}
+	}
+
+	libs, err := depsMgr.EnsureLibrariesByTypes(ctx, targetTypes, progressFn)
 	if err != nil {
-		// No deps manifest yet, need to sync first
-		klog.Info("No deps manifest found, syncing releases...")
-		if _, syncErr := depsMgr.SyncReleases(ctx, "", ""); syncErr != nil {
-			return fmt.Errorf("failed to sync releases: %w", syncErr)
-		}
-
-		// Update deps manifest
-		if _, _, updateErr := depsMgr.UpdateDepsManifest(ctx); updateErr != nil {
-			return fmt.Errorf("failed to update deps manifest: %w", updateErr)
-		}
-
-		diff, err = depsMgr.ComputeUpdateDiff()
-		if err != nil {
-			return fmt.Errorf("failed to compute update diff: %w", err)
-		}
-	}
-
-	// Filter to only remote-gpu-client libs
-	var toDownload []deps.Library
-	for _, lib := range diff.ToDownload {
-		if lib.Type == deps.LibraryTypeRemoteGPUClient || lib.Type == deps.LibraryTypeVGPULibrary {
-			toDownload = append(toDownload, lib)
-		}
-	}
-
-	if len(toDownload) == 0 {
-		klog.V(4).Info("All required GPU client libraries are already downloaded")
-		return nil
+		return fmt.Errorf("failed to ensure GPU client libraries: %w", err)
 	}
 
 	if !out.IsJSON() {
-		out.Printf("Downloading %d GPU client libraries...\n", len(toDownload))
-	}
-
-	// Download required libraries
-	for _, lib := range toDownload {
-		if err := depsMgr.DownloadLibrary(ctx, lib, func(downloaded, total int64) {
-			if !out.IsJSON() && total > 0 {
-				pct := float64(downloaded) / float64(total) * 100
-				fmt.Printf("\r  %s: %.1f%%", lib.Name, pct)
-			}
-		}); err != nil {
-			return fmt.Errorf("failed to download %s: %w", lib.Name, err)
-		}
-		if !out.IsJSON() {
+		if len(libs) > 0 {
 			fmt.Println()
+			out.Success("GPU client libraries downloaded successfully!")
+		} else {
+			klog.V(4).Info("All required GPU client libraries are already downloaded")
 		}
-	}
-
-	if !out.IsJSON() {
-		out.Success("GPU client libraries downloaded successfully!")
 	}
 
 	return nil

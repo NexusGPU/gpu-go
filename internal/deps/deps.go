@@ -758,13 +758,18 @@ func (m *Manager) DownloadAllRequired(ctx context.Context, progressFn func(lib L
 		// Check if already downloaded with correct version
 		downloadedLib, exists := downloaded.Libraries[key]
 		filePath := filepath.Join(m.paths.CacheDir(), lib.Name)
-		fileExists := false
-		if _, err := os.Stat(filePath); err == nil {
-			fileExists = true
-		}
+		var fileInfo os.FileInfo
+		fileInfo, statErr := os.Stat(filePath)
+		fileExists := statErr == nil
 
 		if exists && downloadedLib.Version == lib.Version && fileExists {
 			result.Status = DownloadStatusExisting
+			// Use actual file size if available (API may return 0)
+			if fileInfo != nil && fileInfo.Size() > 0 {
+				result.Library.Size = fileInfo.Size()
+			} else if downloadedLib.Size > 0 {
+				result.Library.Size = downloadedLib.Size
+			}
 			results = append(results, result)
 			continue
 		}
@@ -954,6 +959,88 @@ func (m *Manager) ensureDepsManifest(ctx context.Context) error {
 // It ensures the library exists, downloading if necessary
 func (m *Manager) GetRemoteGPUWorkerPath(ctx context.Context) (string, error) {
 	return m.EnsureLibraryByType(ctx, LibraryTypeRemoteGPUWorker, "")
+}
+
+// EnsureLibrariesByTypes ensures ALL libraries of the specified types exist and are downloaded
+// This is different from EnsureLibraryByType which only returns one library
+// Returns the list of all libraries that were checked/downloaded
+func (m *Manager) EnsureLibrariesByTypes(ctx context.Context, libTypes []string, progressFn func(lib Library, downloaded, total int64)) ([]Library, error) {
+	// Ensure deps manifest exists and is up to date
+	if err := m.ensureDepsManifest(ctx); err != nil {
+		return nil, err
+	}
+
+	deps, err := m.LoadDepsManifest()
+	if err != nil {
+		return nil, err
+	}
+	if deps == nil {
+		return nil, fmt.Errorf("deps manifest is empty after sync")
+	}
+
+	// Create a set of target types for quick lookup
+	typeSet := make(map[string]bool)
+	for _, t := range libTypes {
+		typeSet[t] = true
+	}
+
+	// Find all libraries matching the specified types
+	var targetLibs []Library
+	for _, lib := range deps.Libraries {
+		if typeSet[lib.Type] {
+			targetLibs = append(targetLibs, lib)
+		}
+	}
+
+	if len(targetLibs) == 0 {
+		klog.Warningf("No libraries found for types: %v", libTypes)
+		return nil, nil
+	}
+
+	// Check which ones need to be downloaded
+	downloaded, _ := m.LoadDownloadedManifest()
+	if downloaded == nil {
+		downloaded = &DownloadedManifest{Libraries: make(map[string]Library)}
+	}
+
+	var toDownload []Library
+
+	for _, lib := range targetLibs {
+		filePath := m.GetLibraryPath(lib.Name)
+		downloadedLib, exists := downloaded.Libraries[lib.Key()]
+
+		needsDownload := false
+		if !exists {
+			needsDownload = true
+		} else if downloadedLib.Version != lib.Version {
+			needsDownload = true
+		} else if _, err := os.Stat(filePath); os.IsNotExist(err) {
+			needsDownload = true
+		} else if lib.SHA256 != "" && !m.VerifyLibrary(filePath, lib.SHA256) {
+			needsDownload = true
+		}
+
+		if needsDownload {
+			toDownload = append(toDownload, lib)
+		}
+	}
+
+	// Download missing libraries
+	for _, lib := range toDownload {
+		libProgressFn := func(d, t int64) {
+			if progressFn != nil {
+				progressFn(lib, d, t)
+			}
+		}
+
+		klog.Infof("Downloading library: name=%s version=%s type=%s", lib.Name, lib.Version, lib.Type)
+		if err := m.DownloadLibrary(ctx, lib, libProgressFn); err != nil {
+			return nil, fmt.Errorf("failed to download library %s: %w", lib.Name, err)
+		}
+	}
+
+	// Return all target libraries
+	return targetLibs, nil
 }
 
 // CheckUpdates checks if deps manifest has updates compared to downloaded manifest

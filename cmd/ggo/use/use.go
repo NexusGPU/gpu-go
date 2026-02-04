@@ -124,44 +124,13 @@ func isYesResponse(response string) bool {
 func ensureRemoteGPUClientLibs(ctx context.Context, out *tui.Output, silent bool) error {
 	depsMgr := deps.NewManager()
 
-	// Check if libs need to be downloaded
-	diff, err := depsMgr.ComputeUpdateDiff()
-	if err != nil {
-		// No deps manifest yet, need to sync first
-		klog.Info("No deps manifest found, syncing releases...")
-		if _, syncErr := depsMgr.SyncReleases(ctx, "", ""); syncErr != nil {
-			return fmt.Errorf("failed to sync releases: %w", syncErr)
-		}
-
-		// Update deps manifest
-		if _, _, updateErr := depsMgr.UpdateDepsManifest(ctx); updateErr != nil {
-			return fmt.Errorf("failed to update deps manifest: %w", updateErr)
-		}
-
-		diff, err = depsMgr.ComputeUpdateDiff()
-		if err != nil {
-			return fmt.Errorf("failed to compute update diff: %w", err)
-		}
-	}
-
-	// Filter to only remote-gpu-client libs
-	var toDownload []deps.Library
-	for _, lib := range diff.ToDownload {
-		if lib.Type == deps.LibraryTypeRemoteGPUClient || lib.Type == deps.LibraryTypeVGPULibrary {
-			toDownload = append(toDownload, lib)
-		}
-	}
-
-	if len(toDownload) == 0 {
-		klog.V(4).Info("All required GPU client libraries are already downloaded")
-		return nil
-	}
+	// Target library types that are needed for GPU client functionality
+	targetTypes := []string{deps.LibraryTypeRemoteGPUClient, deps.LibraryTypeVGPULibrary}
 
 	if !silent && !out.IsJSON() {
-		out.Printf("Downloading %d GPU client libraries...\n", len(toDownload))
+		out.Printf("Downloading GPU client libraries...\n")
 	}
 
-	// Download required libraries
 	progressFn := func(lib deps.Library, downloaded, total int64) {
 		if !silent && !out.IsJSON() && total > 0 {
 			pct := float64(downloaded) / float64(total) * 100
@@ -169,19 +138,18 @@ func ensureRemoteGPUClientLibs(ctx context.Context, out *tui.Output, silent bool
 		}
 	}
 
-	for _, lib := range toDownload {
-		if err := depsMgr.DownloadLibrary(ctx, lib, func(downloaded, total int64) {
-			progressFn(lib, downloaded, total)
-		}); err != nil {
-			return fmt.Errorf("failed to download %s: %w", lib.Name, err)
-		}
-		if !silent && !out.IsJSON() {
-			fmt.Println()
-		}
+	libs, err := depsMgr.EnsureLibrariesByTypes(ctx, targetTypes, progressFn)
+	if err != nil {
+		return fmt.Errorf("failed to ensure GPU client libraries: %w", err)
 	}
 
 	if !silent && !out.IsJSON() {
-		out.Success("GPU client libraries downloaded successfully!")
+		if len(libs) > 0 {
+			fmt.Println()
+			out.Success("GPU client libraries downloaded successfully!")
+		} else {
+			klog.V(4).Info("All required GPU client libraries are already downloaded")
+		}
 	}
 
 	return nil
@@ -198,8 +166,8 @@ func NewCleanCmd() *cobra.Command {
 		Long: `Clean up temporary or long-term remote GPU environment setup.
 
 Examples:
-  # Clean up current shell environment (recommended)
-  eval "$(ggo clean -y)"
+  # Clean up current shell environment (if activated with ggo use)
+  ggo clean
 
   # Clean up a specific connection (using code or link)
   ggo clean abc123
@@ -231,7 +199,7 @@ Examples:
 	}
 
 	cmd.Flags().BoolVar(&all, "all", false, "Clean up all GPU Go connections")
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Deactivate environment (use with eval: eval \"$(ggo clean -y)\")")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Deactivate environment non-interactively (use with eval: eval \"$(ggo clean -y)\")")
 
 	return cmd
 }
@@ -455,12 +423,24 @@ func outputEvalCommands(config *studio.GPUEnvConfig, envResult *studio.GPUEnvRes
 	script.WriteString(fmt.Sprintf("export _GGO_CACHE_PATH=\"%s\"\n", cachePath))
 	script.WriteString("\n")
 
+	// Define ggo wrapper function to handle clean command automatically
+	script.WriteString("# Define ggo wrapper function for automatic clean handling\n")
+	script.WriteString("_ggo_real=$(command -v ggo)\n")
+	script.WriteString("ggo() {\n")
+	script.WriteString("  if [ \"$1\" = \"clean\" ] && [ -z \"$2\" ]; then\n")
+	script.WriteString("    eval \"$($_ggo_real clean -y)\"\n")
+	script.WriteString("  else\n")
+	script.WriteString("    $_ggo_real \"$@\"\n")
+	script.WriteString("  fi\n")
+	script.WriteString("}\n")
+	script.WriteString("\n")
+
 	// Print activation message to stderr so it doesn't interfere with eval
 	script.WriteString("echo \"GPU Go environment activated for vendor: " + string(config.Vendor) + "\" >&2\n")
 	script.WriteString("echo \"Connection URL: " + config.ConnectionURL + "\" >&2\n")
 	script.WriteString("echo \"\" >&2\n")
 	script.WriteString("echo \"To deactivate and restore your environment, run:\" >&2\n")
-	script.WriteString("echo '  eval \"$(ggo clean --eval)\"' >&2\n")
+	script.WriteString("echo '  ggo clean' >&2\n")
 
 	// Output to stdout for eval
 	fmt.Print(script.String())
@@ -512,6 +492,11 @@ func generateCleanScript() string {
 	script.WriteString("unset _GGO_ACTIVE\n")
 	script.WriteString("unset _GGO_CACHE_PATH\n")
 	script.WriteString("unset _GGO_CLEAN_FILE\n\n")
+
+	// Remove ggo wrapper function
+	script.WriteString("# Remove ggo wrapper function\n")
+	script.WriteString("unset -f ggo 2>/dev/null\n")
+	script.WriteString("unset _ggo_real\n\n")
 
 	script.WriteString("echo \"GPU Go environment deactivated\"\n")
 
@@ -771,7 +756,7 @@ func setupLongTermUnix(shareInfo *api.SharePublicInfo, config *studio.GPUEnvConf
 		out.Println("To activate in your current shell now:")
 		out.Printf("\n   eval \"$(ggo use %s -y)\"\n\n", extractShortCode(shareInfo.WorkerID))
 		out.Println("To deactivate later:")
-		out.Println("\n   eval \"$(ggo clean -y)\"")
+		out.Println("\n   ggo clean")
 		out.Println()
 	}
 
@@ -941,6 +926,10 @@ func cleanEnvEval(out *tui.Output) error {
 	script.WriteString("  unset _GGO_CACHE_PATH\n")
 	script.WriteString("  unset _GGO_CLEAN_FILE\n")
 
+	// Remove ggo wrapper function
+	script.WriteString("  unset -f ggo 2>/dev/null\n")
+	script.WriteString("  unset _ggo_real\n")
+
 	script.WriteString("  echo 'GPU Go environment deactivated' >&2\n")
 	script.WriteString("fi\n")
 
@@ -949,39 +938,37 @@ func cleanEnvEval(out *tui.Output) error {
 	return nil
 }
 
-// cleanCurrentEnv shows instructions for cleaning current shell environment
+// cleanCurrentEnv shows instructions or outputs clean commands for cleaning current shell environment
+// When environment is activated (wrapper function defined), running "ggo clean" will automatically handle cleanup
 func cleanCurrentEnv(out *tui.Output) error {
 	styles := tui.DefaultStyles()
 
 	if !out.IsJSON() {
-		out.Println()
-		out.Println(styles.Subtitle.Render("Clean GPU Go Environment"))
-		out.Println()
-		out.Printf("Would you like to deactivate GPU environment in your current shell? [Y/n]: ")
+		// Print prompt to stderr so it doesn't interfere with eval
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(os.Stderr, styles.Subtitle.Render("Clean GPU Go Environment"))
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprint(os.Stderr, "Would you like to deactivate GPU environment in your current shell? [Y/n]: ")
 
 		reader := bufio.NewReader(os.Stdin)
 		response, _ := reader.ReadString('\n')
 		shouldClean := isYesResponse(response)
 
 		if shouldClean {
-			out.Println()
-			out.Println(styles.Info.Render("To deactivate in your current shell, run:"))
-			out.Println()
-			out.Println("   eval \"$(ggo clean -y)\"")
-			out.Println()
-			out.Println(styles.Muted.Render("This will restore LD_PRELOAD, LD_LIBRARY_PATH, and PATH to their original values."))
-		} else {
-			out.Println()
-			out.Println("You can deactivate later by running:")
-			out.Println()
-			out.Println("   eval \"$(ggo clean -y)\"")
+			// Output clean commands to stdout for eval
+			return cleanEnvEval(out)
 		}
 
-		out.Println()
-		out.Println("To clean up all GPU Go connections (including shell profiles):")
-		out.Println()
-		out.Println("   ggo clean --all")
-		out.Println()
+		// User chose not to clean, show how to clean later
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(os.Stderr, "You can deactivate later by running:")
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(os.Stderr, "   ggo clean    (if environment is activated)")
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(os.Stderr, "To clean up all GPU Go connections (including shell profiles):")
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(os.Stderr, "   ggo clean --all")
+		fmt.Fprintln(os.Stderr)
 	}
 
 	return nil
@@ -1098,9 +1085,9 @@ func (r *cleanAllResult) RenderTUI(out *tui.Output) {
 	} else {
 		out.Println("To clean up your current shell environment, run:")
 		out.Println()
-		out.Println("   eval \"$(ggo clean -y)\"")
+		out.Println("   ggo clean")
 		out.Println()
-		out.Println("This will properly restore LD_PRELOAD, LD_LIBRARY_PATH, and PATH without breaking your shell.")
+		out.Println("This will properly restore LD_PRELOAD, LD_LIBRARY_PATH, and PATH.")
 	}
 	out.Println()
 }
