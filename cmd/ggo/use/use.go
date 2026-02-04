@@ -309,7 +309,7 @@ func renderUnixEnv(shareInfo *api.SharePublicInfo, config *studio.GPUEnvConfig, 
 	if !out.IsJSON() {
 		out.Println(styles.Subtitle.Render("Activate Environment"))
 		out.Println()
-		out.Printf("Would you like to activate the GPU environment in your current shell? [Y/n]: ")
+		out.Printf("Would you like to activate the GPU environment in a new shell? [Y/n]: ")
 
 		reader := bufio.NewReader(os.Stdin)
 		response, _ := reader.ReadString('\n')
@@ -317,28 +317,102 @@ func renderUnixEnv(shareInfo *api.SharePublicInfo, config *studio.GPUEnvConfig, 
 
 		if shouldActivate {
 			out.Println()
-			out.Println(styles.Info.Render("To activate in your current shell, run:"))
+			out.Println(styles.Info.Render("Launching new shell with GPU environment..."))
 			out.Println()
-			out.Printf("   eval \"$(ggo use %s -y)\"\n", extractShortCode(shareInfo.WorkerID))
+
+			// Launch a new interactive shell with the environment set
+			if err := launchGPUShell(config, envResult, envFile); err != nil {
+				klog.Warningf("Failed to launch GPU shell: %v", err)
+				out.Warning("Failed to launch shell automatically.")
+				out.Println()
+				out.Println("You can manually activate by running:")
+				out.Printf("\n   source %s\n\n", envFile)
+				return nil
+			}
+
+			// After shell exits, show message
 			out.Println()
-			out.Println(styles.Muted.Render("This will set LD_PRELOAD, LD_LIBRARY_PATH and TensorFusion environment variables."))
-			out.Println()
-			out.Println("To deactivate later, run:")
-			out.Println()
-			out.Println("   eval \"$(ggo clean -y)\"")
+			out.Println(styles.Muted.Render("GPU shell session ended. Environment deactivated."))
 			out.Println()
 		} else {
 			out.Println()
 			out.Println(styles.Subtitle.Render("Manual Activation"))
 			out.Println()
 			out.Println("You can activate later by running:")
-			out.Printf("\n   eval \"$(ggo use %s -y)\"\n\n", extractShortCode(shareInfo.WorkerID))
-			out.Println("Or source the env file:")
 			out.Printf("\n   source %s\n\n", envFile)
 		}
 	}
 
 	return out.Render(&tempEnvResultUnix{shareInfo: shareInfo, envFile: envFile, envResult: envResult})
+}
+
+// launchGPUShell launches a new interactive shell with the GPU environment variables set
+func launchGPUShell(config *studio.GPUEnvConfig, envResult *studio.GPUEnvResult, envFile string) error {
+	// Determine the user's shell
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "/bin/sh"
+	}
+
+	cachePath := config.CachePath
+	if cachePath == "" {
+		cachePath = paths.CacheDir()
+	}
+
+	// Create the command
+	cmd := exec.Command(shell, "-i")
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	// Copy current environment and add GPU environment variables
+	env := os.Environ()
+
+	// Add TensorFusion environment variables
+	for k, v := range envResult.EnvVars {
+		env = append(env, fmt.Sprintf("%s=%s", k, v))
+	}
+
+	// Build LD_LIBRARY_PATH
+	existingLDPath := os.Getenv("LD_LIBRARY_PATH")
+	if existingLDPath != "" {
+		env = append(env, fmt.Sprintf("LD_LIBRARY_PATH=%s:%s", cachePath, existingLDPath))
+	} else {
+		env = append(env, fmt.Sprintf("LD_LIBRARY_PATH=%s", cachePath))
+	}
+
+	// Build LD_PRELOAD
+	libNames := studio.GetLibraryNames(config.Vendor)
+	if len(libNames) > 0 {
+		var preloadPaths []string
+		for _, lib := range libNames {
+			preloadPaths = append(preloadPaths, filepath.Join(cachePath, lib))
+		}
+		existingPreload := os.Getenv("LD_PRELOAD")
+		if existingPreload != "" {
+			env = append(env, fmt.Sprintf("LD_PRELOAD=%s:%s", strings.Join(preloadPaths, ":"), existingPreload))
+		} else {
+			env = append(env, fmt.Sprintf("LD_PRELOAD=%s", strings.Join(preloadPaths, ":")))
+		}
+	}
+
+	// Mark as GPU Go activated
+	env = append(env, "_GGO_ACTIVE=1")
+	env = append(env, fmt.Sprintf("_GGO_CACHE_PATH=%s", cachePath))
+
+	cmd.Env = env
+
+	// Print GPU environment banner
+	fmt.Printf("\n%s GPU environment activated %s\n", styles().Success.Render("✓"), styles().Muted.Render("(type 'exit' to deactivate)"))
+	fmt.Println()
+
+	// Run the shell and wait for it to exit
+	return cmd.Run()
+}
+
+// styles returns the default TUI styles
+func styles() *tui.Styles {
+	return tui.DefaultStyles()
 }
 
 // outputEvalCommands outputs shell commands for eval mode
