@@ -41,8 +41,14 @@ func init() {
 	rootCmd.AddCommand(agent.NewAgentCmd())
 	rootCmd.AddCommand(worker.NewWorkerCmd())
 	rootCmd.AddCommand(share.NewShareCmd())
-	rootCmd.AddCommand(use.NewUseCmd())
-	rootCmd.AddCommand(use.NewCleanCmd())
+	// Use command (disabled on macOS - returns nil)
+	if useCmd := use.NewUseCmd(); useCmd != nil {
+		rootCmd.AddCommand(useCmd)
+	}
+	// Clean command (disabled on macOS - returns nil)
+	if cleanCmd := use.NewCleanCmd(); cleanCmd != nil {
+		rootCmd.AddCommand(cleanCmd)
+	}
 	rootCmd.AddCommand(deps.NewDepsCmd())
 	rootCmd.AddCommand(studio.NewStudioCmd())
 	rootCmd.AddCommand(libs.NewLibsCmd())

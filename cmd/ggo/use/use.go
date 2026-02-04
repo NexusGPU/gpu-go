@@ -23,6 +23,12 @@ import (
 
 var paths = platform.DefaultPaths()
 
+// Windows shell type constants
+const (
+	shellPowerShell = "powershell"
+	shellCMD        = "cmd"
+)
+
 var (
 	serverURL    string
 	outputFormat string
@@ -45,7 +51,13 @@ func extractShortCode(input string) string {
 }
 
 // NewUseCmd creates the use command
+// Returns nil on macOS (use command is disabled on macOS)
 func NewUseCmd() *cobra.Command {
+	// Disable use command on macOS
+	if platform.IsDarwin() {
+		return nil
+	}
+
 	var (
 		longTerm  bool
 		outputDir string
@@ -166,7 +178,13 @@ func ensureRemoteGPUClientLibs(ctx context.Context, out *tui.Output, silent bool
 }
 
 // NewCleanCmd creates the clean command
+// Returns nil on macOS (clean command is disabled on macOS)
 func NewCleanCmd() *cobra.Command {
+	// Disable clean command on macOS
+	if platform.IsDarwin() {
+		return nil
+	}
+
 	var all bool
 	var yes bool
 
@@ -395,6 +413,14 @@ func styles() *tui.Styles {
 
 // outputEvalCommands outputs shell commands for eval mode
 func outputEvalCommands(config *studio.GPUEnvConfig, envResult *studio.GPUEnvResult, envFile, cleanFile string, out *tui.Output) error {
+	if platform.IsWindows() {
+		return outputEvalCommandsWindows(config, envResult, envFile, cleanFile, out)
+	}
+	return outputEvalCommandsUnix(config, envResult, envFile, cleanFile, out)
+}
+
+// outputEvalCommandsUnix outputs shell commands for eval mode (Unix/Linux)
+func outputEvalCommandsUnix(config *studio.GPUEnvConfig, envResult *studio.GPUEnvResult, envFile, cleanFile string, out *tui.Output) error {
 	cachePath := config.CachePath
 	if cachePath == "" {
 		cachePath = paths.CacheDir()
@@ -457,8 +483,147 @@ func outputEvalCommands(config *studio.GPUEnvConfig, envResult *studio.GPUEnvRes
 	return nil
 }
 
+// outputEvalCommandsWindows outputs shell commands for eval mode (Windows)
+// Detects PowerShell vs CMD and outputs appropriate commands
+func outputEvalCommandsWindows(config *studio.GPUEnvConfig, envResult *studio.GPUEnvResult, envFile, cleanFile string, out *tui.Output) error {
+	cachePath := config.CachePath
+	if cachePath == "" {
+		cachePath = paths.CacheDir()
+	}
+
+	// Detect shell type by checking COMSPEC and PSModulePath
+	// PowerShell sets PSModulePath, CMD doesn't
+	shell := detectWindowsShell()
+
+	if shell == shellPowerShell {
+		return outputEvalCommandsPowerShell(config, envResult, envFile, cleanFile, cachePath, out)
+	}
+	return outputEvalCommandsCMD(config, envResult, envFile, cleanFile, cachePath, out)
+}
+
+// detectWindowsShell detects whether we're in PowerShell or CMD
+// Returns shellPowerShell for Windows PowerShell and PowerShell Core (pwsh)
+// Returns shellCMD for Command Prompt
+func detectWindowsShell() string {
+	// Method 1: Check PSModulePath - always set in PowerShell sessions
+	if os.Getenv("PSModulePath") != "" {
+		return shellPowerShell
+	}
+
+	// Method 2: Check if running under Windows Terminal with PowerShell
+	// WT_SESSION is set by Windows Terminal
+	if os.Getenv("WT_SESSION") != "" {
+		// Check for PowerShell-specific markers
+		if os.Getenv("PSVersionTable") != "" {
+			return shellPowerShell
+		}
+	}
+
+	// Method 3: Check SHELL env (sometimes set by Git Bash or other tools)
+	shell := os.Getenv("SHELL")
+	if strings.Contains(strings.ToLower(shell), shellPowerShell) || strings.Contains(strings.ToLower(shell), "pwsh") {
+		return shellPowerShell
+	}
+
+	// Default to CMD - safer choice as CMD users can be explicitly guided
+	return shellCMD
+}
+
+// escapeForPowerShell escapes a string for safe use in PowerShell double-quoted strings
+func escapeForPowerShell(s string) string {
+	s = strings.ReplaceAll(s, "`", "``")   // Escape backticks first
+	s = strings.ReplaceAll(s, "$", "`$")   // Escape dollar signs
+	s = strings.ReplaceAll(s, "\"", "`\"") // Escape double quotes
+	return s
+}
+
+// outputEvalCommandsPowerShell outputs PowerShell commands for eval mode
+func outputEvalCommandsPowerShell(config *studio.GPUEnvConfig, envResult *studio.GPUEnvResult, envFile, cleanFile, cachePath string, out *tui.Output) error {
+	var script strings.Builder
+
+	// Save original values for later restoration
+	script.WriteString("# Save original environment for cleanup\n")
+	script.WriteString("$env:_GGO_ORIG_PATH = $env:PATH\n")
+	script.WriteString(fmt.Sprintf("$env:_GGO_CLEAN_FILE = \"%s\"\n", escapeForPowerShell(cleanFile)))
+	script.WriteString("\n")
+
+	// Export TensorFusion environment variables
+	for k, v := range envResult.EnvVars {
+		script.WriteString(fmt.Sprintf("$env:%s = \"%s\"\n", k, escapeForPowerShell(v)))
+	}
+
+	// Set GPU vendor
+	script.WriteString(fmt.Sprintf("$env:TF_GPU_VENDOR = \"%s\"\n", config.Vendor))
+
+	// Add cache path to PATH at the front
+	script.WriteString(fmt.Sprintf("$env:PATH = \"%s;\" + $env:PATH\n", escapeForPowerShell(cachePath)))
+
+	// Set CUDA_PATH
+	script.WriteString(fmt.Sprintf("$env:CUDA_PATH = \"%s\"\n", escapeForPowerShell(cachePath)))
+	script.WriteString(fmt.Sprintf("$env:CUDA_HOME = \"%s\"\n", escapeForPowerShell(cachePath)))
+
+	// Mark as activated
+	script.WriteString("$env:_GGO_ACTIVE = \"1\"\n")
+	script.WriteString(fmt.Sprintf("$env:_GGO_CACHE_PATH = \"%s\"\n", escapeForPowerShell(cachePath)))
+	script.WriteString("\n")
+
+	// Define ggo wrapper function for automatic clean handling
+	// Note: We use $MyArgs instead of $args since $args is an automatic variable
+	script.WriteString("# Define ggo wrapper function for automatic clean handling\n")
+	script.WriteString("$Global:_ggo_real = (Get-Command ggo -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source\n")
+	script.WriteString("if (-not $Global:_ggo_real) { $Global:_ggo_real = \"ggo\" }\n")
+	script.WriteString("function Global:ggo {\n")
+	script.WriteString("  if ($args.Count -eq 1 -and $args[0] -eq \"clean\") {\n")
+	script.WriteString("    & $Global:_ggo_real clean -y | Out-String | Invoke-Expression\n")
+	script.WriteString("  } else {\n")
+	script.WriteString("    & $Global:_ggo_real @args\n")
+	script.WriteString("  }\n")
+	script.WriteString("}\n")
+	script.WriteString("\n")
+
+	// Print activation message to stderr using [Console]::Error
+	script.WriteString("[Console]::Error.WriteLine(\"GPU Go environment activated for vendor: " + string(config.Vendor) + "\")\n")
+	script.WriteString("[Console]::Error.WriteLine(\"Connection URL: " + escapeForPowerShell(config.ConnectionURL) + "\")\n")
+	script.WriteString("[Console]::Error.WriteLine(\"\")\n")
+	script.WriteString("[Console]::Error.WriteLine(\"To deactivate and restore your environment, run:\")\n")
+	script.WriteString("[Console]::Error.WriteLine(\"  ggo clean\")\n")
+
+	// Output to stdout for eval
+	fmt.Print(script.String())
+	return nil
+}
+
+// outputEvalCommandsCMD outputs CMD batch commands for eval mode
+// Note: CMD doesn't support true eval like bash/PowerShell. Instead, we output
+// a message guiding users to use the generated batch file directly.
+func outputEvalCommandsCMD(config *studio.GPUEnvConfig, envResult *studio.GPUEnvResult, envFile, cleanFile, cachePath string, out *tui.Output) error {
+	// CMD doesn't support eval-style command execution like bash or PowerShell
+	// The best we can do is tell users to call the batch file directly
+	// Output message to stderr
+	fmt.Fprintf(os.Stderr, "CMD does not support eval-style activation.\n")
+	fmt.Fprintf(os.Stderr, "Please run the following command to activate GPU environment:\n")
+	fmt.Fprintf(os.Stderr, "\n")
+	fmt.Fprintf(os.Stderr, "  call \"%s\"\n", envFile)
+	fmt.Fprintf(os.Stderr, "\n")
+	fmt.Fprintf(os.Stderr, "Or use PowerShell for better experience:\n")
+	fmt.Fprintf(os.Stderr, "  powershell -Command \"ggo use %s -y | Out-String | Invoke-Expression\"\n", extractShortCode(config.ConnectionURL))
+	fmt.Fprintf(os.Stderr, "\n")
+
+	// Output the call command to stdout so user can copy-paste
+	fmt.Printf("call \"%s\"\n", envFile)
+	return nil
+}
+
 // generateCleanScript generates a shell script to clean up the GPU environment
 func generateCleanScript() string {
+	if platform.IsWindows() {
+		return generateCleanScriptWindows()
+	}
+	return generateCleanScriptUnix()
+}
+
+// generateCleanScriptUnix generates a Unix shell script to clean up the GPU environment
+func generateCleanScriptUnix() string {
 	var script strings.Builder
 	script.WriteString("#!/bin/bash\n")
 	script.WriteString("# GPU Go environment cleanup script\n")
@@ -513,8 +678,55 @@ func generateCleanScript() string {
 	return script.String()
 }
 
+// generateCleanScriptWindows generates PowerShell cleanup script
+func generateCleanScriptWindows() string {
+	var script strings.Builder
+	script.WriteString("# GPU Go environment cleanup script (PowerShell)\n")
+	script.WriteString("# Generated by ggo use\n")
+	script.WriteString("# Usage: . clean.ps1\n\n")
+
+	// Check if environment is active
+	script.WriteString("if (-not $env:_GGO_ACTIVE) {\n")
+	script.WriteString("  Write-Host 'GPU Go environment is not active' -ForegroundColor Yellow\n")
+	script.WriteString("  return\n")
+	script.WriteString("}\n\n")
+
+	// Restore original PATH
+	script.WriteString("# Restore PATH\n")
+	script.WriteString("if ($env:_GGO_ORIG_PATH) {\n")
+	script.WriteString("  $env:PATH = $env:_GGO_ORIG_PATH\n")
+	script.WriteString("}\n\n")
+
+	// Unset TensorFusion environment variables
+	script.WriteString("# Unset TensorFusion environment variables\n")
+	script.WriteString("Remove-Item Env:TENSOR_FUSION_OPERATOR_CONNECTION_INFO -ErrorAction SilentlyContinue\n")
+	script.WriteString("Remove-Item Env:TF_LOG_PATH -ErrorAction SilentlyContinue\n")
+	script.WriteString("Remove-Item Env:TF_LOG_LEVEL -ErrorAction SilentlyContinue\n")
+	script.WriteString("Remove-Item Env:TF_ENABLE_LOG -ErrorAction SilentlyContinue\n")
+	script.WriteString("Remove-Item Env:TF_GPU_VENDOR -ErrorAction SilentlyContinue\n")
+	script.WriteString("Remove-Item Env:CUDA_PATH -ErrorAction SilentlyContinue\n")
+	script.WriteString("Remove-Item Env:CUDA_HOME -ErrorAction SilentlyContinue\n\n")
+
+	// Unset internal tracking variables
+	script.WriteString("# Unset internal tracking variables\n")
+	script.WriteString("Remove-Item Env:_GGO_ORIG_PATH -ErrorAction SilentlyContinue\n")
+	script.WriteString("Remove-Item Env:_GGO_ACTIVE -ErrorAction SilentlyContinue\n")
+	script.WriteString("Remove-Item Env:_GGO_CACHE_PATH -ErrorAction SilentlyContinue\n")
+	script.WriteString("Remove-Item Env:_GGO_CLEAN_FILE -ErrorAction SilentlyContinue\n\n")
+
+	// Remove ggo wrapper function (Global scope)
+	script.WriteString("# Remove ggo wrapper function\n")
+	script.WriteString("Remove-Item Function:ggo -ErrorAction SilentlyContinue\n")
+	script.WriteString("Remove-Variable _ggo_real -Scope Global -ErrorAction SilentlyContinue\n\n")
+
+	script.WriteString("Write-Host 'GPU Go environment deactivated' -ForegroundColor Green\n")
+
+	return script.String()
+}
+
 // renderWindowsEnv renders and optionally activates the Windows environment
-func renderWindowsEnv(shareInfo *api.SharePublicInfo, config *studio.GPUEnvConfig, envResult *studio.GPUEnvResult, autoActivate bool, out *tui.Output) error {
+// When yes=true, outputs shell commands for eval (designed to be run via: eval "$(ggo use xxx -y)" in PowerShell or CMD)
+func renderWindowsEnv(shareInfo *api.SharePublicInfo, config *studio.GPUEnvConfig, envResult *studio.GPUEnvResult, yes bool, out *tui.Output) error {
 	// Generate PowerShell script
 	psScript, err := studio.GeneratePowerShellScript(config, paths)
 	if err != nil {
@@ -537,6 +749,25 @@ func renderWindowsEnv(shareInfo *api.SharePublicInfo, config *studio.GPUEnvConfi
 		return fmt.Errorf("failed to write batch file: %w", err)
 	}
 
+	// Generate and write clean scripts
+	cleanPSScript := generateCleanScriptWindows()
+	cleanPSFile := filepath.Join(paths.StudioConfigDir(config.StudioName), "clean.ps1")
+	if err := os.WriteFile(cleanPSFile, []byte(cleanPSScript), 0644); err != nil {
+		klog.Warningf("Failed to write PowerShell clean script: %v", err)
+	}
+
+	// Generate CMD clean script
+	cleanBatScript := generateCleanScriptCMD()
+	cleanBatFile := filepath.Join(paths.StudioConfigDir(config.StudioName), "clean.bat")
+	if err := os.WriteFile(cleanBatFile, []byte(cleanBatScript), 0644); err != nil {
+		klog.Warningf("Failed to write CMD clean script: %v", err)
+	}
+
+	// If -y flag, output shell commands for eval
+	if yes {
+		return outputEvalCommands(config, envResult, psFile, cleanPSFile, out)
+	}
+
 	styles := tui.DefaultStyles()
 
 	if !out.IsJSON() {
@@ -547,53 +778,103 @@ func renderWindowsEnv(shareInfo *api.SharePublicInfo, config *studio.GPUEnvConfi
 		out.Printf("   Hardware:       %s\n", shareInfo.HardwareVendor)
 		out.Printf("   Log Path:       %s\n", config.LogPath)
 		out.Println()
-
-		if autoActivate {
-			out.Println(styles.Info.Render("◐") + " Setting environment variables...")
-			// Set for current process
-			for k, v := range envResult.EnvVars {
-				if err := os.Setenv(k, v); err != nil {
-					klog.Warningf("Failed to set env var %s: %v", k, err)
-				}
-			}
-			// Also set PATH with cache dir at front
-			cachePath := config.CachePath
-			if cachePath == "" {
-				cachePath = paths.CacheDir()
-			}
-			if err := os.Setenv("PATH", cachePath+";"+os.Getenv("PATH")); err != nil {
-				klog.Warningf("Failed to set PATH: %v", err)
-			}
-			if err := os.Setenv("CUDA_PATH", cachePath); err != nil {
-				klog.Warningf("Failed to set CUDA_PATH: %v", err)
-			}
-			out.Println(styles.Success.Render("✓") + " Environment variables set")
-			out.Println()
-		}
-
-		out.Println(styles.Subtitle.Render("Activation"))
-		out.Println()
-		out.Println("  PowerShell:")
-		out.Printf("    . %s\n\n", psFile)
-		out.Println("  CMD:")
-		out.Printf("    %s\n\n", batFile)
-
-		// Windows-specific: recommend ggo launch for reliable DLL loading
-		out.Println(styles.Subtitle.Render("Recommended: Use ggo launch"))
-		out.Println()
-		out.Println(styles.Warning.Render("Note:") + " Windows loads System32 DLLs before PATH.")
-		out.Println("For reliable GPU library loading, use:")
-		out.Println()
-		out.Println("  ggo launch python train.py")
-		out.Println("  ggo launch jupyter notebook")
-		out.Println()
-
-		out.Println("To clean up, run:")
-		out.Println("\n   ggo clean")
-		out.Println()
 	}
 
-	return out.Render(&tempEnvResultWindows{shareInfo: shareInfo, psFile: psFile, batFile: batFile})
+	// Prompt user
+	if !out.IsJSON() {
+		out.Println(styles.Subtitle.Render("Activate Environment"))
+		out.Println()
+		out.Printf("Would you like to activate the GPU environment in a new shell? [Y/n]: ")
+
+		reader := bufio.NewReader(os.Stdin)
+		response, _ := reader.ReadString('\n')
+		shouldActivate := isYesResponse(response)
+
+		if shouldActivate {
+			out.Println()
+			out.Println(styles.Info.Render("Launching new shell with GPU environment..."))
+			out.Println()
+
+			// Launch a new interactive shell with the environment set
+			if err := launchGPUShellWindows(config, envResult, psFile, batFile); err != nil {
+				klog.Warningf("Failed to launch GPU shell: %v", err)
+				out.Warning("Failed to launch shell automatically.")
+				out.Println()
+				out.Println("You can manually activate by running:")
+				shell := detectWindowsShell()
+				if shell == shellPowerShell {
+					out.Printf("\n   . %s\n\n", psFile)
+				} else {
+					out.Printf("\n   %s\n\n", batFile)
+				}
+				return nil
+			}
+
+			// After shell exits, show message
+			out.Println()
+			out.Println(styles.Muted.Render("GPU shell session ended. Environment deactivated."))
+			out.Println()
+		} else {
+			out.Println()
+			out.Println(styles.Subtitle.Render("Manual Activation"))
+			out.Println()
+			out.Println("You can activate later by running:")
+			shell := detectWindowsShell()
+			if shell == shellPowerShell {
+				out.Printf("\n   . %s\n\n", psFile)
+			} else {
+				out.Printf("\n   %s\n\n", batFile)
+			}
+			out.Println("Or use eval mode (recommended):")
+			out.Println("\n   PowerShell: ggo use " + extractShortCode(shareInfo.WorkerID) + " -y | Out-String | Invoke-Expression")
+			out.Println("   CMD:        for /f \"delims=\" %i in ('ggo use " + extractShortCode(shareInfo.WorkerID) + " -y') do @%i")
+			out.Println()
+		}
+	}
+
+	return out.Render(&tempEnvResultWindows{shareInfo: shareInfo, psFile: psFile, batFile: batFile, envResult: envResult})
+}
+
+// generateCleanScriptCMD generates a CMD batch script to clean up the GPU environment
+func generateCleanScriptCMD() string {
+	var script strings.Builder
+	script.WriteString("@echo off\n")
+	script.WriteString("REM GPU Go environment cleanup script (CMD)\n")
+	script.WriteString("REM Generated by ggo use\n")
+	script.WriteString("REM Usage: call clean.bat\n\n")
+
+	// Check if environment is active
+	script.WriteString("if not defined _GGO_ACTIVE (\n")
+	script.WriteString("  echo GPU Go environment is not active\n")
+	script.WriteString("  goto :eof\n")
+	script.WriteString(")\n\n")
+
+	// Restore original PATH
+	script.WriteString("REM Restore PATH\n")
+	script.WriteString("if defined _GGO_ORIG_PATH (\n")
+	script.WriteString("  set \"PATH=%_GGO_ORIG_PATH%\"\n")
+	script.WriteString(")\n\n")
+
+	// Unset TensorFusion environment variables
+	script.WriteString("REM Unset TensorFusion environment variables\n")
+	script.WriteString("set \"TENSOR_FUSION_OPERATOR_CONNECTION_INFO=\"\n")
+	script.WriteString("set \"TF_LOG_PATH=\"\n")
+	script.WriteString("set \"TF_LOG_LEVEL=\"\n")
+	script.WriteString("set \"TF_ENABLE_LOG=\"\n")
+	script.WriteString("set \"TF_GPU_VENDOR=\"\n")
+	script.WriteString("set \"CUDA_PATH=\"\n")
+	script.WriteString("set \"CUDA_HOME=\"\n\n")
+
+	// Unset internal tracking variables
+	script.WriteString("REM Unset internal tracking variables\n")
+	script.WriteString("set \"_GGO_ORIG_PATH=\"\n")
+	script.WriteString("set \"_GGO_ACTIVE=\"\n")
+	script.WriteString("set \"_GGO_CACHE_PATH=\"\n")
+	script.WriteString("set \"_GGO_CLEAN_FILE=\"\n\n")
+
+	script.WriteString("echo GPU Go environment deactivated\n")
+
+	return script.String()
 }
 
 // tempEnvResultUnix implements Renderable for Unix temporary env setup
@@ -618,20 +899,84 @@ func (r *tempEnvResultUnix) RenderTUI(out *tui.Output) {
 	// TUI output is handled in renderUnixEnv
 }
 
+// launchGPUShellWindows launches a new interactive shell with the GPU environment variables set (Windows)
+func launchGPUShellWindows(config *studio.GPUEnvConfig, envResult *studio.GPUEnvResult, psFile, batFile string) error {
+	shell := detectWindowsShell()
+	cachePath := config.CachePath
+	if cachePath == "" {
+		cachePath = paths.CacheDir()
+	}
+
+	var cmd *exec.Cmd
+	if shell == shellPowerShell {
+		// Launch PowerShell with the environment script
+		cmd = exec.Command(shellPowerShell, "-NoExit", "-Command", fmt.Sprintf(". '%s'", psFile))
+	} else {
+		// Launch CMD with the environment script
+		cmd = exec.Command(shellCMD, "/k", batFile)
+	}
+
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	// Copy current environment and add GPU environment variables
+	env := os.Environ()
+
+	// Add TensorFusion environment variables
+	for k, v := range envResult.EnvVars {
+		env = append(env, fmt.Sprintf("%s=%s", k, v))
+	}
+
+	// Add cache path to PATH
+	existingPath := os.Getenv("PATH")
+	if existingPath != "" {
+		env = append(env, fmt.Sprintf("PATH=%s;%s", cachePath, existingPath))
+	} else {
+		env = append(env, fmt.Sprintf("PATH=%s", cachePath))
+	}
+
+	// Set CUDA_PATH
+	env = append(env, fmt.Sprintf("CUDA_PATH=%s", cachePath))
+	env = append(env, fmt.Sprintf("CUDA_HOME=%s", cachePath))
+
+	// Set GPU vendor
+	env = append(env, fmt.Sprintf("TF_GPU_VENDOR=%s", config.Vendor))
+
+	// Mark as GPU Go activated
+	env = append(env, "_GGO_ACTIVE=1")
+	env = append(env, fmt.Sprintf("_GGO_CACHE_PATH=%s", cachePath))
+
+	cmd.Env = env
+
+	// Print GPU environment banner
+	styles := tui.DefaultStyles()
+	fmt.Printf("\n%s GPU environment activated %s\n", styles.Success.Render("✓"), styles.Muted.Render("(type 'exit' to deactivate)"))
+	fmt.Println()
+
+	// Run the shell and wait for it to exit
+	return cmd.Run()
+}
+
 // tempEnvResultWindows implements Renderable for Windows temporary env setup
 type tempEnvResultWindows struct {
 	shareInfo *api.SharePublicInfo
 	psFile    string
 	batFile   string
+	envResult *studio.GPUEnvResult
 }
 
 func (r *tempEnvResultWindows) RenderJSON() any {
-	return map[string]any{
+	result := map[string]any{
 		"success":         true,
 		"powershell_file": r.psFile,
 		"batch_file":      r.batFile,
 		"share":           r.shareInfo,
 	}
+	if r.envResult != nil {
+		result["env_vars"] = r.envResult.EnvVars
+	}
+	return result
 }
 
 func (r *tempEnvResultWindows) RenderTUI(out *tui.Output) {
@@ -685,7 +1030,7 @@ func setupLongTermEnv(shareInfo *api.SharePublicInfo, outputDir string, yes bool
 	}
 
 	if platform.IsWindows() {
-		return setupLongTermWindows(shareInfo, config, envResult, outputDir, out)
+		return setupLongTermWindows(shareInfo, config, envResult, outputDir, yes, out)
 	}
 	return setupLongTermUnix(shareInfo, config, envResult, outputDir, yes, out)
 }
@@ -798,7 +1143,8 @@ func appendToFile(filePath, content, marker string) error {
 }
 
 // setupLongTermWindows sets up long-term environment for Windows
-func setupLongTermWindows(shareInfo *api.SharePublicInfo, config *studio.GPUEnvConfig, envResult *studio.GPUEnvResult, outputDir string, out *tui.Output) error {
+// When yes=true, outputs shell commands for eval
+func setupLongTermWindows(shareInfo *api.SharePublicInfo, config *studio.GPUEnvConfig, envResult *studio.GPUEnvResult, outputDir string, yes bool, out *tui.Output) error {
 	// Generate PowerShell profile
 	psProfile, err := studio.GeneratePowerShellScript(config, paths)
 	if err != nil {
@@ -817,6 +1163,10 @@ func setupLongTermWindows(shareInfo *api.SharePublicInfo, config *studio.GPUEnvC
 	batContent.WriteString("REM This will set permanent user environment variables\n\n")
 
 	for k, v := range envResult.EnvVars {
+		// Skip PATH for setx as it can cause path truncation or duplication
+		if k == "PATH" {
+			continue
+		}
 		batContent.WriteString(fmt.Sprintf("setx %s \"%s\"\n", k, v))
 	}
 	batContent.WriteString("\necho Environment variables set. Please restart your terminal.\n")
@@ -824,6 +1174,24 @@ func setupLongTermWindows(shareInfo *api.SharePublicInfo, config *studio.GPUEnvC
 	batFile := filepath.Join(outputDir, "setenv.bat")
 	if err := os.WriteFile(batFile, []byte(batContent.String()), 0644); err != nil {
 		return fmt.Errorf("failed to write batch file: %w", err)
+	}
+
+	// Generate clean scripts
+	cleanPSScript := generateCleanScriptWindows()
+	cleanPSFile := filepath.Join(outputDir, "clean.ps1")
+	if err := os.WriteFile(cleanPSFile, []byte(cleanPSScript), 0644); err != nil {
+		klog.Warningf("Failed to write PowerShell clean script: %v", err)
+	}
+
+	cleanBatScript := generateCleanScriptCMD()
+	cleanBatFile := filepath.Join(outputDir, "clean.bat")
+	if err := os.WriteFile(cleanBatFile, []byte(cleanBatScript), 0644); err != nil {
+		klog.Warningf("Failed to write CMD clean script: %v", err)
+	}
+
+	// If -y flag, output shell commands for eval
+	if yes {
+		return outputEvalCommands(config, envResult, psProfilePath, cleanPSFile, out)
 	}
 
 	styles := tui.DefaultStyles()
@@ -837,7 +1205,46 @@ func setupLongTermWindows(shareInfo *api.SharePublicInfo, config *studio.GPUEnvC
 		out.Printf("   Hardware:         %s\n", shareInfo.HardwareVendor)
 		out.Printf("   Log Path:         %s\n", config.LogPath)
 		out.Println()
+	}
 
+	// Detect shell and offer to add to profile
+	shell := detectWindowsShell()
+	if shell == shellPowerShell && !out.IsJSON() {
+		out.Println(styles.Subtitle.Render("Permanent Activation"))
+		out.Println()
+		out.Printf("Add GPU environment to PowerShell profile for all new shells? [Y/n]: ")
+
+		reader := bufio.NewReader(os.Stdin)
+		response, _ := reader.ReadString('\n')
+		shouldAdd := isYesResponse(response)
+
+		if shouldAdd {
+			profilePath := os.Getenv("PROFILE")
+			if profilePath == "" {
+				// Default PowerShell profile path
+				profilePath = filepath.Join(os.Getenv("USERPROFILE"), "Documents", "WindowsPowerShell", "Microsoft.PowerShell_profile.ps1")
+			}
+
+			sourceLine := fmt.Sprintf("\n# GPU Go environment\n. \"%s\"\n", psProfilePath)
+			if err := appendToFile(profilePath, sourceLine, psProfilePath); err != nil {
+				out.Warning(fmt.Sprintf("Failed to update PowerShell profile: %v", err))
+			} else {
+				out.Success(fmt.Sprintf("Added to PowerShell profile: %s", profilePath))
+				out.Println()
+				out.Println("Restart your terminal or run:")
+				out.Printf("\n   . $PROFILE\n\n")
+			}
+		}
+
+		out.Println()
+		out.Println(styles.Subtitle.Render("Current Shell Activation"))
+		out.Println()
+		out.Println("To activate in your current shell now:")
+		out.Printf("\n   ggo use %s -y | Out-String | Invoke-Expression\n\n", extractShortCode(shareInfo.WorkerID))
+		out.Println("To deactivate later:")
+		out.Println("\n   ggo clean")
+		out.Println()
+	} else if !out.IsJSON() {
 		out.Println(styles.Subtitle.Render("Permanent Activation"))
 		out.Println()
 		out.Println("To activate in all new PowerShell sessions, add to your profile:")
@@ -845,6 +1252,8 @@ func setupLongTermWindows(shareInfo *api.SharePublicInfo, config *studio.GPUEnvC
 		out.Printf("  Add: . \"%s\"\n\n", psProfilePath)
 		out.Println("Or set permanent environment variables:")
 		out.Printf("  %s\n\n", batFile)
+		out.Println("To activate in current CMD session:")
+		out.Printf("\n   for /f \"delims=\" %%i in ('ggo use %s -y') do @%%i\n\n", extractShortCode(shareInfo.WorkerID))
 		out.Println("To clean up, run:")
 		out.Println("\n   ggo clean --all")
 		out.Println()
@@ -895,6 +1304,14 @@ func (r *longTermEnvResultWindows) RenderTUI(out *tui.Output) {
 
 // cleanEnvEval outputs shell commands to restore environment for eval mode
 func cleanEnvEval(out *tui.Output) error {
+	if platform.IsWindows() {
+		return cleanEnvEvalWindows(out)
+	}
+	return cleanEnvEvalUnix(out)
+}
+
+// cleanEnvEvalUnix outputs shell commands to restore environment for eval mode (Unix/Linux)
+func cleanEnvEvalUnix(out *tui.Output) error {
 	var script strings.Builder
 
 	// Check if environment is active
@@ -948,6 +1365,78 @@ func cleanEnvEval(out *tui.Output) error {
 	return nil
 }
 
+// cleanEnvEvalWindows outputs shell commands to restore environment for eval mode (Windows)
+func cleanEnvEvalWindows(out *tui.Output) error {
+	shell := detectWindowsShell()
+	if shell == shellPowerShell {
+		return cleanEnvEvalPowerShell(out)
+	}
+	return cleanEnvEvalCMD(out)
+}
+
+// cleanEnvEvalPowerShell outputs PowerShell commands to restore environment
+func cleanEnvEvalPowerShell(out *tui.Output) error {
+	var script strings.Builder
+
+	// Check if environment is active
+	script.WriteString("if (-not $env:_GGO_ACTIVE) {\n")
+	script.WriteString("  [Console]::Error.WriteLine('GPU Go environment is not active')\n")
+	script.WriteString("} else {\n")
+
+	// Restore original PATH
+	script.WriteString("  if ($env:_GGO_ORIG_PATH) {\n")
+	script.WriteString("    $env:PATH = $env:_GGO_ORIG_PATH\n")
+	script.WriteString("  }\n\n")
+
+	// Unset TensorFusion environment variables
+	script.WriteString("  Remove-Item Env:TENSOR_FUSION_OPERATOR_CONNECTION_INFO -ErrorAction SilentlyContinue\n")
+	script.WriteString("  Remove-Item Env:TF_LOG_PATH -ErrorAction SilentlyContinue\n")
+	script.WriteString("  Remove-Item Env:TF_LOG_LEVEL -ErrorAction SilentlyContinue\n")
+	script.WriteString("  Remove-Item Env:TF_ENABLE_LOG -ErrorAction SilentlyContinue\n")
+	script.WriteString("  Remove-Item Env:TF_GPU_VENDOR -ErrorAction SilentlyContinue\n")
+	script.WriteString("  Remove-Item Env:CUDA_PATH -ErrorAction SilentlyContinue\n")
+	script.WriteString("  Remove-Item Env:CUDA_HOME -ErrorAction SilentlyContinue\n\n")
+
+	// Unset internal tracking variables
+	script.WriteString("  Remove-Item Env:_GGO_ORIG_PATH -ErrorAction SilentlyContinue\n")
+	script.WriteString("  Remove-Item Env:_GGO_ACTIVE -ErrorAction SilentlyContinue\n")
+	script.WriteString("  Remove-Item Env:_GGO_CACHE_PATH -ErrorAction SilentlyContinue\n")
+	script.WriteString("  Remove-Item Env:_GGO_CLEAN_FILE -ErrorAction SilentlyContinue\n\n")
+
+	// Remove ggo wrapper function (use Global scope since we defined it as Global)
+	script.WriteString("  Remove-Item Function:ggo -ErrorAction SilentlyContinue\n")
+	script.WriteString("  Remove-Variable _ggo_real -Scope Global -ErrorAction SilentlyContinue\n\n")
+
+	script.WriteString("  [Console]::Error.WriteLine('GPU Go environment deactivated')\n")
+	script.WriteString("}\n")
+
+	// Output to stdout for eval
+	fmt.Print(script.String())
+	return nil
+}
+
+// cleanEnvEvalCMD outputs guidance for CMD users to restore environment
+// Note: CMD doesn't support eval-style command execution
+func cleanEnvEvalCMD(out *tui.Output) error {
+	// Check if clean script exists
+	cleanFile := os.Getenv("_GGO_CLEAN_FILE")
+	if cleanFile == "" {
+		fmt.Fprintf(os.Stderr, "GPU Go environment is not active or clean file not found.\n")
+		return nil
+	}
+
+	// Output message to stderr
+	fmt.Fprintf(os.Stderr, "CMD does not support eval-style deactivation.\n")
+	fmt.Fprintf(os.Stderr, "Please run the following command to deactivate GPU environment:\n")
+	fmt.Fprintf(os.Stderr, "\n")
+	fmt.Fprintf(os.Stderr, "  call \"%s\"\n", cleanFile)
+	fmt.Fprintf(os.Stderr, "\n")
+
+	// Output the call command to stdout so user can copy-paste
+	fmt.Printf("call \"%s\"\n", cleanFile)
+	return nil
+}
+
 // cleanCurrentEnv shows instructions or outputs clean commands for cleaning current shell environment
 // When environment is activated (wrapper function defined), running "ggo clean" will automatically handle cleanup
 func cleanCurrentEnv(out *tui.Output) error {
@@ -970,13 +1459,36 @@ func cleanCurrentEnv(out *tui.Output) error {
 			fmt.Fprintln(os.Stderr)
 			fmt.Fprintln(os.Stderr, styles.Subtitle.Render("To deactivate, run:"))
 			fmt.Fprintln(os.Stderr)
-			fmt.Fprintln(os.Stderr, "   eval \"$(ggo clean -y)\"")
-			fmt.Fprintln(os.Stderr)
-			fmt.Fprintln(os.Stderr, "Or if you activated via 'eval \"$(ggo use ...)\"', just run:")
-			fmt.Fprintln(os.Stderr)
-			fmt.Fprintln(os.Stderr, "   ggo clean")
-			fmt.Fprintln(os.Stderr)
-			fmt.Fprintln(os.Stderr, "(The wrapper function will handle it automatically)")
+			if platform.IsWindows() {
+				shell := detectWindowsShell()
+				if shell == shellPowerShell {
+					fmt.Fprintln(os.Stderr, "   ggo clean -y | Out-String | Invoke-Expression")
+					fmt.Fprintln(os.Stderr)
+					fmt.Fprintln(os.Stderr, "Or if you activated via 'ggo use ... -y | Out-String | Invoke-Expression', just run:")
+					fmt.Fprintln(os.Stderr)
+					fmt.Fprintln(os.Stderr, "   ggo clean")
+					fmt.Fprintln(os.Stderr)
+					fmt.Fprintln(os.Stderr, "(The wrapper function will handle it automatically)")
+				} else {
+					// CMD user - guide to use clean.bat
+					cleanFile := os.Getenv("_GGO_CLEAN_FILE")
+					if cleanFile != "" {
+						fmt.Fprintf(os.Stderr, "   call \"%s\"\n", cleanFile)
+					} else {
+						fmt.Fprintln(os.Stderr, "   call clean.bat (in ggo config directory)")
+					}
+					fmt.Fprintln(os.Stderr)
+					fmt.Fprintln(os.Stderr, "Or switch to PowerShell for better experience.")
+				}
+			} else {
+				fmt.Fprintln(os.Stderr, "   eval \"$(ggo clean -y)\"")
+				fmt.Fprintln(os.Stderr)
+				fmt.Fprintln(os.Stderr, "Or if you activated via 'eval \"$(ggo use ...)\"', just run:")
+				fmt.Fprintln(os.Stderr)
+				fmt.Fprintln(os.Stderr, "   ggo clean")
+				fmt.Fprintln(os.Stderr)
+				fmt.Fprintln(os.Stderr, "(The wrapper function will handle it automatically)")
+			}
 			fmt.Fprintln(os.Stderr)
 			return nil
 		}
@@ -985,7 +1497,21 @@ func cleanCurrentEnv(out *tui.Output) error {
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "You can deactivate later by running:")
 		fmt.Fprintln(os.Stderr)
-		fmt.Fprintln(os.Stderr, "   ggo clean    (if environment is activated)")
+		if platform.IsWindows() {
+			shell := detectWindowsShell()
+			if shell == shellPowerShell {
+				fmt.Fprintln(os.Stderr, "   ggo clean    (if environment is activated)")
+			} else {
+				cleanFile := os.Getenv("_GGO_CLEAN_FILE")
+				if cleanFile != "" {
+					fmt.Fprintf(os.Stderr, "   call \"%s\"\n", cleanFile)
+				} else {
+					fmt.Fprintln(os.Stderr, "   call clean.bat (in ggo config directory)")
+				}
+			}
+		} else {
+			fmt.Fprintln(os.Stderr, "   ggo clean    (if environment is activated)")
+		}
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "To clean up all GPU Go connections (including shell profiles):")
 		fmt.Fprintln(os.Stderr)
@@ -1037,11 +1563,21 @@ func cleanAllEnv(out *tui.Output) error {
 	// Try to remove source lines from shell profiles
 	removeFromShellProfiles()
 
+	// On Windows, also clean up permanent environment variables set by setx
+	if platform.IsWindows() {
+		removePermanentWinEnv()
+	}
+
 	return out.Render(&cleanAllResult{})
 }
 
 // removeFromShellProfiles removes GPU Go source lines from shell profiles
 func removeFromShellProfiles() {
+	if platform.IsWindows() {
+		removeFromPowerShellProfile()
+		return
+	}
+
 	home := os.Getenv("HOME")
 	if home == "" {
 		return
@@ -1056,6 +1592,73 @@ func removeFromShellProfiles() {
 	marker := "# GPU Go environment"
 	for _, profile := range profiles {
 		removeLineFromFile(profile, marker)
+	}
+}
+
+// removeFromPowerShellProfile removes GPU Go source lines from PowerShell profile
+func removeFromPowerShellProfile() {
+	// Check standard PowerShell profile locations
+	// 1. Current User, All Hosts
+	// 2. Current User, Current Host
+
+	// We primarily target the one we added to, which is likely $PROFILE (Current User, Current Host)
+	// But we can check standard paths.
+
+	// Get My Documents path
+	home := os.Getenv("USERPROFILE")
+	if home == "" {
+		return
+	}
+
+	docs := filepath.Join(home, "Documents")
+	// Check for OneDrive
+	oneDriveDocs := filepath.Join(home, "OneDrive", "Documents")
+
+	candidates := []string{
+		filepath.Join(docs, "WindowsPowerShell", "Microsoft.PowerShell_profile.ps1"),
+		filepath.Join(docs, "PowerShell", "Microsoft.PowerShell_profile.ps1"),
+		filepath.Join(oneDriveDocs, "WindowsPowerShell", "Microsoft.PowerShell_profile.ps1"),
+		filepath.Join(oneDriveDocs, "PowerShell", "Microsoft.PowerShell_profile.ps1"),
+	}
+
+	// Also check $PROFILE env if set and distinct
+	if profileEnv := os.Getenv("PROFILE"); profileEnv != "" {
+		candidates = append(candidates, profileEnv)
+	}
+
+	marker := "# GPU Go environment"
+	seen := make(map[string]bool)
+
+	for _, profile := range candidates {
+		if seen[profile] {
+			continue
+		}
+		seen[profile] = true
+
+		// removeLineFromFile handles file reading/existence checks
+		removeLineFromFile(profile, marker)
+	}
+}
+
+// removePermanentWinEnv removes permanent environment variables on Windows
+func removePermanentWinEnv() {
+	// List of variables we set in setenv.bat
+	vars := []string{
+		"TENSOR_FUSION_OPERATOR_CONNECTION_INFO",
+		"TF_LOG_PATH",
+		"TF_LOG_LEVEL",
+		"TF_ENABLE_LOG",
+		"TF_GPU_VENDOR",
+		"CUDA_PATH",
+		"CUDA_HOME",
+	}
+
+	for _, v := range vars {
+		// Use reg delete to remove from HKCU\Environment
+		// reg delete HKCU\Environment /F /V VariableName
+		cmd := exec.Command("reg", "delete", "HKCU\\Environment", "/F", "/V", v)
+		// We ignore errors as the variable might not exist
+		_ = cmd.Run()
 	}
 }
 
@@ -1075,7 +1678,9 @@ func removeLineFromFile(filePath, marker string) {
 			skipNext = true // Skip this line and the source line that follows
 			continue
 		}
-		if skipNext && strings.HasPrefix(strings.TrimSpace(line), "source ") {
+		trimmed := strings.TrimSpace(line)
+		// Support both Unix "source" and PowerShell "." (dot sourcing)
+		if skipNext && (strings.HasPrefix(trimmed, "source ") || strings.HasPrefix(trimmed, ".")) {
 			skipNext = false
 			continue
 		}
@@ -1102,8 +1707,15 @@ func (r *cleanAllResult) RenderTUI(out *tui.Output) {
 	out.Println("Note: Environment variables in your current shell may still be set.")
 	out.Println()
 	if platform.IsWindows() {
-		out.Println("Start a new shell or run in PowerShell:")
-		out.Println("  Remove-Item Env:TENSOR_FUSION_OPERATOR_CONNECTION_INFO, Env:TF_LOG_PATH, Env:TF_LOG_LEVEL, Env:TF_ENABLE_LOG")
+		shell := detectWindowsShell()
+		if shell == shellPowerShell {
+			out.Println("Start a new shell or run:")
+			out.Println()
+			out.Println("   ggo clean -y | Out-String | Invoke-Expression")
+			out.Println()
+		} else {
+			out.Println("Start a new CMD window to get a clean environment.")
+		}
 	} else {
 		out.Println("To clean up your current shell environment, run:")
 		out.Println()
