@@ -47,6 +47,33 @@ func (b *ColimaBackend) SetDockerHost(dockerHost string) {
 	b.dockerBackend = NewDockerBackend()
 }
 
+// pullImageWithProgress pulls a Docker image with progress output to stderr
+func (b *ColimaBackend) pullImageWithProgress(ctx context.Context, image string) error {
+	// Check if image already exists locally
+	checkCmd := exec.CommandContext(ctx, "docker", "image", "inspect", image)
+	checkCmd.Env = append(os.Environ(), fmt.Sprintf("DOCKER_HOST=%s", b.dockerHost))
+	if err := checkCmd.Run(); err == nil {
+		return nil // Image exists
+	}
+
+	// Image doesn't exist, pull it with progress
+	fmt.Fprintf(os.Stderr, "\n   Pulling image: %s\n", image)
+	fmt.Fprintf(os.Stderr, "   This may take a few minutes for large images...\n\n")
+
+	pullCmd := exec.CommandContext(ctx, "docker", "pull", image)
+	pullCmd.Env = append(os.Environ(), fmt.Sprintf("DOCKER_HOST=%s", b.dockerHost))
+	// Stream output to stderr so user can see progress
+	pullCmd.Stdout = os.Stderr
+	pullCmd.Stderr = os.Stderr
+
+	if err := pullCmd.Run(); err != nil {
+		return fmt.Errorf("failed to pull image %s: %w", image, err)
+	}
+
+	fmt.Fprintf(os.Stderr, "\n   Image pulled successfully!\n\n")
+	return nil
+}
+
 func (b *ColimaBackend) Name() string {
 	return "colima"
 }
@@ -253,6 +280,11 @@ func (b *ColimaBackend) EnsureRunning(ctx context.Context) error {
 		cpuCount = 1 // Minimum 1 CPU
 	}
 
+	// Inform user that Colima is starting (this can take several minutes for first time)
+	fmt.Fprintf(os.Stderr, "\n   Starting Colima VM (profile: %s)...\n", b.profile)
+	fmt.Fprintf(os.Stderr, "   Resources: %d CPUs, %dGB memory, %dGB disk\n", cpuCount, memAllocated, diskAllocated)
+	fmt.Fprintf(os.Stderr, "   This may take a few minutes on first run...\n\n")
+
 	// Start Colima with the specified profile
 	// - CPU: use all available cores (no limit)
 	// - Memory: 60% of system memory (minimum 2GB)
@@ -265,11 +297,15 @@ func (b *ColimaBackend) EnsureRunning(ctx context.Context) error {
 		"--disk", fmt.Sprintf("%d", diskAllocated),
 		"--dns", "1.1.1.1",
 	)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to start Colima profile '%s': %w, output: %s", b.profile, err, string(output))
+	// Stream output to stderr so user can see progress
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to start Colima profile '%s': %w", b.profile, err)
 	}
 
+	fmt.Fprintf(os.Stderr, "\n   Colima VM started successfully!\n\n")
 	return nil
 }
 
@@ -336,6 +372,11 @@ func (b *ColimaBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 		image = DefaultImageStudioTorch
 	}
 	args = append(args, image)
+
+	// Pull image first with progress visible to user
+	if err := b.pullImageWithProgress(ctx, image); err != nil {
+		return nil, fmt.Errorf("failed to pull image: %w", err)
+	}
 
 	// Run with Colima's docker context
 	cmd := exec.CommandContext(ctx, "docker", args...)

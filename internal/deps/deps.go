@@ -351,6 +351,23 @@ func (m *Manager) saveReleaseManifest(manifest *ReleaseManifest) error {
 // FetchReleaseManifest loads the release manifest, and syncs from API if not available or outdated
 // Returns (manifest, synced, error) where synced is true if auto-sync was performed
 func (m *Manager) FetchReleaseManifest(ctx context.Context) (*ReleaseManifest, bool, error) {
+	return m.FetchReleaseManifestForPlatform(ctx, "", "")
+}
+
+// FetchReleaseManifestForPlatform loads the release manifest for a specific platform
+// If targetOS and targetArch are empty, uses the current platform
+// Returns (manifest, synced, error) where synced is true if auto-sync was performed
+func (m *Manager) FetchReleaseManifestForPlatform(ctx context.Context, targetOS, targetArch string) (*ReleaseManifest, bool, error) {
+	// Determine actual platform values
+	actualOS := targetOS
+	actualArch := targetArch
+	if actualOS == "" {
+		actualOS = runtime.GOOS
+	}
+	if actualArch == "" {
+		actualArch = runtime.GOARCH
+	}
+
 	// Try to load from cache first
 	manifest, err := m.LoadReleaseManifest()
 	if err != nil {
@@ -358,14 +375,30 @@ func (m *Manager) FetchReleaseManifest(ctx context.Context) (*ReleaseManifest, b
 	}
 
 	synced := false
-	// If no cached manifest, or it's outdated, sync from API
-	if manifest == nil || time.Since(manifest.UpdatedAt) > AutoSyncInterval {
+	// Check if manifest needs refresh:
+	// 1. No cached manifest
+	// 2. Manifest is outdated
+	// 3. Manifest doesn't have libraries for the target platform
+	needsSync := manifest == nil || time.Since(manifest.UpdatedAt) > AutoSyncInterval
+	if !needsSync && manifest != nil {
+		// Check if we have libraries for the target platform
+		hasTargetPlatform := false
+		for _, lib := range manifest.Libraries {
+			if lib.Platform == actualOS && lib.Arch == actualArch {
+				hasTargetPlatform = true
+				break
+			}
+		}
+		needsSync = !hasTargetPlatform
+	}
+
+	if needsSync {
 		lastSync := "never"
 		if manifest != nil {
 			lastSync = manifest.UpdatedAt.Format(time.RFC3339)
 		}
-		klog.Infof("Release manifest missing or outdated (last sync: %s), syncing from API...", lastSync)
-		newManifest, err := m.SyncReleases(ctx, "", "")
+		klog.Infof("Release manifest missing, outdated, or missing platform %s/%s (last sync: %s), syncing from API...", actualOS, actualArch, lastSync)
+		newManifest, err := m.SyncReleases(ctx, actualOS, actualArch)
 		if err != nil {
 			if manifest != nil {
 				klog.Warningf("Failed to sync releases, using stale manifest: %v", err)
@@ -974,8 +1007,14 @@ func (m *Manager) EnsureLibraryByType(ctx context.Context, libType string, vendo
 
 // ensureDepsManifest ensures deps manifest exists by syncing releases and selecting required deps
 func (m *Manager) ensureDepsManifest(ctx context.Context) error {
-	// Sync releases first
-	releaseManifest, _, err := m.FetchReleaseManifest(ctx)
+	return m.ensureDepsManifestForPlatform(ctx, "", "")
+}
+
+// ensureDepsManifestForPlatform ensures deps manifest exists for a specific platform
+// If targetOS and targetArch are empty, uses the current platform
+func (m *Manager) ensureDepsManifestForPlatform(ctx context.Context, targetOS, targetArch string) error {
+	// Sync releases first for the target platform
+	releaseManifest, _, err := m.FetchReleaseManifestForPlatform(ctx, targetOS, targetArch)
 	if err != nil {
 		return err
 	}
@@ -998,8 +1037,16 @@ func (m *Manager) GetRemoteGPUWorkerPath(ctx context.Context) (string, error) {
 // vendorSlug filters by vendor (e.g., "nvidia", "amd"). Empty string matches all vendors.
 // Returns the list of all libraries that were checked/downloaded
 func (m *Manager) EnsureLibrariesByTypes(ctx context.Context, libTypes []string, vendorSlug string, progressFn func(lib Library, downloaded, total int64)) ([]Library, error) {
-	// Ensure deps manifest exists and is up to date
-	if err := m.ensureDepsManifest(ctx); err != nil {
+	return m.EnsureLibrariesByTypesForPlatform(ctx, libTypes, vendorSlug, "", "", progressFn)
+}
+
+// EnsureLibrariesByTypesForPlatform ensures ALL libraries of the specified types exist and are downloaded for a specific platform
+// targetOS and targetArch specify the target platform (e.g., "linux", "arm64")
+// If both are empty, uses the current platform
+// This is useful when running on macOS but needing Linux libraries for containers
+func (m *Manager) EnsureLibrariesByTypesForPlatform(ctx context.Context, libTypes []string, vendorSlug, targetOS, targetArch string, progressFn func(lib Library, downloaded, total int64)) ([]Library, error) {
+	// Ensure deps manifest exists and is up to date for the target platform
+	if err := m.ensureDepsManifestForPlatform(ctx, targetOS, targetArch); err != nil {
 		return nil, err
 	}
 

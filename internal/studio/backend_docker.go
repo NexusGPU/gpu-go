@@ -64,6 +64,34 @@ func (b *DockerBackend) setDockerEnv(cmd *exec.Cmd) {
 	}
 }
 
+// pullImageWithProgress pulls a Docker image with progress output to stderr
+func (b *DockerBackend) pullImageWithProgress(ctx context.Context, image string) error {
+	// Check if image already exists locally
+	checkCmd := exec.CommandContext(ctx, b.dockerCmd, "image", "inspect", image)
+	b.setDockerEnv(checkCmd)
+	if err := checkCmd.Run(); err == nil {
+		klog.V(2).Infof("Image %s already exists locally", image)
+		return nil // Image exists
+	}
+
+	// Image doesn't exist, pull it with progress
+	fmt.Fprintf(os.Stderr, "\n   Pulling image: %s\n", image)
+	fmt.Fprintf(os.Stderr, "   This may take a few minutes for large images...\n\n")
+
+	pullCmd := exec.CommandContext(ctx, b.dockerCmd, "pull", image)
+	b.setDockerEnv(pullCmd)
+	// Stream output to stderr so user can see progress
+	pullCmd.Stdout = os.Stderr
+	pullCmd.Stderr = os.Stderr
+
+	if err := pullCmd.Run(); err != nil {
+		return fmt.Errorf("failed to pull image %s: %w", image, err)
+	}
+
+	fmt.Fprintf(os.Stderr, "\n   Image pulled successfully!\n\n")
+	return nil
+}
+
 func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Environment, error) {
 	paths := platform.DefaultPaths()
 
@@ -173,6 +201,11 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	args = append(args, image)
 
 	klog.V(2).Infof("Running docker command: %s %v", b.dockerCmd, args)
+
+	// Pull image first with progress visible to user
+	if err := b.pullImageWithProgress(ctx, image); err != nil {
+		return nil, fmt.Errorf("failed to pull image: %w", err)
+	}
 
 	// Run container
 	cmd := exec.CommandContext(ctx, b.dockerCmd, args...)

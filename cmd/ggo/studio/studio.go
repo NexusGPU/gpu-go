@@ -244,6 +244,8 @@ func runCreate(cmd *cobra.Command, args []string) error {
 
 // ensureRemoteGPUClientLibs downloads remote-gpu-client libraries if not already present
 // vendorSlug filters by vendor (e.g., "nvidia", "amd") to avoid downloading unnecessary libraries
+// Note: Studio environments run in Linux containers, so we always download Linux libraries
+// using the current CPU architecture (arm64 or amd64)
 func ensureRemoteGPUClientLibs(ctx context.Context, out *tui.Output, vendorSlug string) error {
 	depsMgr := deps.NewManager()
 
@@ -261,7 +263,9 @@ func ensureRemoteGPUClientLibs(ctx context.Context, out *tui.Output, vendorSlug 
 		}
 	}
 
-	libs, err := depsMgr.EnsureLibrariesByTypes(ctx, targetTypes, vendorSlug, progressFn)
+	// Studio environments always run in Linux containers, so we need Linux libraries
+	// Use current CPU architecture (arm64/amd64) since container arch matches host
+	libs, err := depsMgr.EnsureLibrariesByTypesForPlatform(ctx, targetTypes, vendorSlug, "linux", "", progressFn)
 	if err != nil {
 		return fmt.Errorf("failed to ensure GPU client libraries: %w", err)
 	}
