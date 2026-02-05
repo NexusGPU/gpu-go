@@ -71,21 +71,49 @@ func (b *DockerBackend) setDockerEnv(cmd *exec.Cmd) {
 	}
 }
 
+// GetHostArch returns the architecture of the Docker host
+// Returns "amd64", "arm64", or empty string if detection fails
+func (b *DockerBackend) GetHostArch(ctx context.Context) string {
+	cmd := exec.CommandContext(ctx, b.dockerCmd, "info", "--format", "{{.Architecture}}")
+	b.setDockerEnv(cmd)
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+
+	arch := strings.TrimSpace(string(output))
+	return NormalizeArch(arch)
+}
+
 // pullImageWithProgress pulls a Docker image with progress output to stderr
-func (b *DockerBackend) pullImageWithProgress(ctx context.Context, image string) error {
+// If platform is specified, it will use --platform flag
+func (b *DockerBackend) pullImageWithProgress(ctx context.Context, image, platform string) error {
 	// Check if image already exists locally
 	checkCmd := exec.CommandContext(ctx, b.dockerCmd, "image", "inspect", image)
 	b.setDockerEnv(checkCmd)
 	if err := checkCmd.Run(); err == nil {
-		klog.V(2).Infof("Image %s already exists locally", image)
-		return nil // Image exists
+		// Image exists, but we should re-pull if platform is specified
+		// to ensure we get the right architecture
+		if platform == "" {
+			klog.V(2).Infof("Image %s already exists locally", image)
+			return nil // Image exists and no specific platform requested
+		}
 	}
 
-	// Image doesn't exist, pull it with progress
+	// Image doesn't exist or we need to ensure correct platform, pull it with progress
 	fmt.Fprintf(os.Stderr, "\n   Pulling image: %s\n", image)
+	if platform != "" {
+		fmt.Fprintf(os.Stderr, "   Platform: %s\n", platform)
+	}
 	fmt.Fprintf(os.Stderr, "   This may take a few minutes for large images...\n\n")
 
-	pullCmd := exec.CommandContext(ctx, b.dockerCmd, "pull", image)
+	pullArgs := []string{"pull"}
+	if platform != "" {
+		pullArgs = append(pullArgs, "--platform", platform)
+	}
+	pullArgs = append(pullArgs, image)
+
+	pullCmd := exec.CommandContext(ctx, b.dockerCmd, pullArgs...)
 	b.setDockerEnv(pullCmd)
 	// Stream output to stderr so user can see progress
 	pullCmd.Stdout = os.Stderr
@@ -100,11 +128,28 @@ func (b *DockerBackend) pullImageWithProgress(ctx context.Context, image string)
 }
 
 func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Environment, error) {
+	// Determine the platform to use
+	// If user specified platform, use it; otherwise detect from host
+	platform := opts.Platform
+	if platform == "" {
+		// Auto-detect host architecture
+		hostArch := b.GetHostArch(ctx)
+		if hostArch != "" {
+			platform = "linux/" + hostArch
+			fmt.Fprintf(os.Stderr, "   Auto-detected host architecture: %s\n", platform)
+		}
+	}
+
 	// Generate container name with random suffix to avoid conflicts
 	containerName := GenerateContainerName(opts.Name)
 
 	// Build docker run command
 	args := []string{"run", "-d", "--name", containerName}
+
+	// Add platform flag if specified
+	if platform != "" {
+		args = append(args, "--platform", platform)
+	}
 
 	// Add labels
 	args = append(args, "--label", "ggo.managed=true")
@@ -209,7 +254,7 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	klog.V(2).Infof("Running docker command: %s %v", b.dockerCmd, args)
 
 	// Pull image first with progress visible to user
-	if err := b.pullImageWithProgress(ctx, image); err != nil {
+	if err := b.pullImageWithProgress(ctx, image, platform); err != nil {
 		return nil, fmt.Errorf("failed to pull image: %w", err)
 	}
 

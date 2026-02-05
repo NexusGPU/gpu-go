@@ -47,20 +47,63 @@ func (b *ColimaBackend) SetDockerHost(dockerHost string) {
 	b.dockerBackend = NewDockerBackend()
 }
 
+// GetVMArch returns the architecture of the Colima VM
+// Returns "amd64", "arm64", or empty string if detection fails
+func (b *ColimaBackend) GetVMArch(ctx context.Context) string {
+	// Use colima status to get VM info
+	cmd := exec.CommandContext(ctx, "colima", "status", "-p", b.profile, "--json")
+	output, err := cmd.Output()
+	if err != nil {
+		// Fallback: try running uname -m inside docker
+		unameCmd := exec.CommandContext(ctx, "docker", "run", "--rm", "alpine", "uname", "-m")
+		unameCmd.Env = append(os.Environ(), fmt.Sprintf("DOCKER_HOST=%s", b.dockerHost))
+		unameOutput, unameErr := unameCmd.Output()
+		if unameErr == nil {
+			arch := strings.TrimSpace(string(unameOutput))
+			return NormalizeArch(arch)
+		}
+		return ""
+	}
+
+	var status struct {
+		Arch string `json:"arch"`
+	}
+
+	if err := json.Unmarshal(output, &status); err != nil {
+		return ""
+	}
+
+	return NormalizeArch(status.Arch)
+}
+
 // pullImageWithProgress pulls a Docker image with progress output to stderr
-func (b *ColimaBackend) pullImageWithProgress(ctx context.Context, image string) error {
-	// Check if image already exists locally
+// If platform is specified, it will use --platform flag
+func (b *ColimaBackend) pullImageWithProgress(ctx context.Context, image, platform string) error {
+	// Check if image already exists locally with correct platform
 	checkCmd := exec.CommandContext(ctx, "docker", "image", "inspect", image)
 	checkCmd.Env = append(os.Environ(), fmt.Sprintf("DOCKER_HOST=%s", b.dockerHost))
 	if err := checkCmd.Run(); err == nil {
-		return nil // Image exists
+		// Image exists, but we should re-pull if platform is specified
+		// to ensure we get the right architecture
+		if platform == "" {
+			return nil // Image exists and no specific platform requested
+		}
 	}
 
-	// Image doesn't exist, pull it with progress
+	// Image doesn't exist or we need to ensure correct platform, pull it with progress
 	fmt.Fprintf(os.Stderr, "\n   Pulling image: %s\n", image)
+	if platform != "" {
+		fmt.Fprintf(os.Stderr, "   Platform: %s\n", platform)
+	}
 	fmt.Fprintf(os.Stderr, "   This may take a few minutes for large images...\n\n")
 
-	pullCmd := exec.CommandContext(ctx, "docker", "pull", image)
+	pullArgs := []string{"pull"}
+	if platform != "" {
+		pullArgs = append(pullArgs, "--platform", platform)
+	}
+	pullArgs = append(pullArgs, image)
+
+	pullCmd := exec.CommandContext(ctx, "docker", pullArgs...)
 	pullCmd.Env = append(os.Environ(), fmt.Sprintf("DOCKER_HOST=%s", b.dockerHost))
 	// Stream output to stderr so user can see progress
 	pullCmd.Stdout = os.Stderr
@@ -315,11 +358,28 @@ func (b *ColimaBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 		return nil, err
 	}
 
+	// Determine the platform to use
+	// If user specified platform, use it; otherwise detect from VM
+	platform := opts.Platform
+	if platform == "" {
+		// Auto-detect VM architecture
+		vmArch := b.GetVMArch(ctx)
+		if vmArch != "" {
+			platform = "linux/" + vmArch
+			fmt.Fprintf(os.Stderr, "   Auto-detected VM architecture: %s\n", platform)
+		}
+	}
+
 	// Generate container name with random suffix to avoid conflicts
 	containerName := GenerateContainerName(opts.Name)
 
 	// Build docker run command
 	args := []string{"run", "-d", "--name", containerName}
+
+	// Add platform flag if specified
+	if platform != "" {
+		args = append(args, "--platform", platform)
+	}
 
 	// Add labels
 	args = append(args, "--label", "ggo.managed=true")
@@ -417,7 +477,7 @@ func (b *ColimaBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	}
 
 	// Pull image first with progress visible to user
-	if err := b.pullImageWithProgress(ctx, image); err != nil {
+	if err := b.pullImageWithProgress(ctx, image, platform); err != nil {
 		return nil, fmt.Errorf("failed to pull image: %w", err)
 	}
 

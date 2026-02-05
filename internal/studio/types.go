@@ -104,6 +104,26 @@ const (
 	OSWindows = "windows"
 )
 
+// Architecture constants for CPU architecture detection
+const (
+	ArchX86_64  = "x86_64"
+	ArchAarch64 = "aarch64"
+	ArchAmd64   = "amd64"
+	ArchArm64   = "arm64"
+)
+
+// NormalizeArch normalizes architecture names to Docker/OCI format (amd64, arm64)
+func NormalizeArch(arch string) string {
+	switch arch {
+	case ArchX86_64:
+		return ArchAmd64
+	case ArchAarch64:
+		return ArchArm64
+	default:
+		return arch
+	}
+}
+
 // Docker-related constants
 const (
 	DefaultProtocolTCP      = "tcp"
@@ -135,6 +155,9 @@ type CreateOptions struct {
 	Command []string `json:"command,omitempty"`
 	// Endpoint overrides the GPU worker endpoint URL
 	Endpoint string `json:"endpoint,omitempty"`
+	// Platform specifies the container image platform (e.g., linux/amd64, linux/arm64)
+	// If empty, auto-detect from VM/host architecture
+	Platform string `json:"platform,omitempty"`
 }
 
 // PortMapping represents a port mapping

@@ -335,8 +335,11 @@ func setupSSHAuthorizedKeys(paths *platform.Paths, studioName string) (string, e
 
 // getSSHVolumeMounts returns volume mounts for SSH access to the container
 // This includes:
-// 1. User's .ssh directory mounted to /root/.ssh (read-only for security)
+// 1. Individual SSH key files mounted to /root/.ssh/ (for git operations etc.)
 // 2. Generated authorized_keys file mounted to /root/.ssh/authorized_keys
+//
+// Note: We mount individual files instead of the entire .ssh directory to avoid
+// conflicts when also mounting authorized_keys (can't mount a file inside a read-only directory mount)
 func getSSHVolumeMounts(paths *platform.Paths, studioName string) []VolumeMount {
 	var mounts []VolumeMount
 
@@ -352,24 +355,38 @@ func getSSHVolumeMounts(paths *platform.Paths, studioName string) []VolumeMount 
 		return mounts
 	}
 
-	// Mount user's .ssh directory to /root/.ssh (read-only for security)
-	// This allows the container to use user's SSH keys for git operations etc.
-	mounts = append(mounts, VolumeMount{
-		HostPath:      sshDir,
-		ContainerPath: "/root/.ssh",
-		ReadOnly:      true,
-	})
+	// Mount individual SSH key files (for git operations etc.)
+	// These are mounted as read-only for security
+	sshKeyFiles := []string{
+		"id_ed25519",
+		"id_ecdsa",
+		"id_rsa",
+		"id_dsa",
+		"config",
+		"known_hosts",
+	}
+
+	for _, keyFile := range sshKeyFiles {
+		keyPath := filepath.Join(sshDir, keyFile)
+		if _, err := os.Stat(keyPath); err == nil {
+			mounts = append(mounts, VolumeMount{
+				HostPath:      keyPath,
+				ContainerPath: "/root/.ssh/" + keyFile,
+				ReadOnly:      true,
+			})
+			klog.V(2).Infof("Mounting SSH file: %s", keyFile)
+		}
+	}
 
 	// Create and mount authorized_keys for SSH access to the container
 	authorizedKeysPath, err := setupSSHAuthorizedKeys(paths, studioName)
 	if err != nil {
 		klog.V(2).Infof("Could not setup authorized_keys: %v (SSH access to container may require password)", err)
 	} else {
-		// Mount authorized_keys file - this overwrites the read-only .ssh mount for this specific file
 		mounts = append(mounts, VolumeMount{
 			HostPath:      authorizedKeysPath,
 			ContainerPath: "/root/.ssh/authorized_keys",
-			ReadOnly:      true,
+			ReadOnly:      false, // needs to be writable for SSH daemon to read
 		})
 	}
 

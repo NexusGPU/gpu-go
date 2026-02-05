@@ -33,6 +33,7 @@ var (
 	outputFormat  string
 	command       []string
 	endpoint      string
+	platform      string // container platform (e.g., linux/amd64, linux/arm64)
 )
 
 // NewStudioCmd creates the studio command
@@ -193,6 +194,7 @@ Examples:
 	cmd.Flags().StringVar(&dockerHost, "docker-host", "", "Custom Docker socket path (e.g., unix:///path/to/docker.sock)")
 	cmd.Flags().StringArrayVarP(&command, "command", "c", nil, "Container startup command or ENTRYPOINT args (can be specified multiple times)")
 	cmd.Flags().StringVar(&endpoint, "endpoint", "", "Override GPU worker endpoint URL")
+	cmd.Flags().StringVar(&platform, "platform", "", "Container image platform (e.g., linux/amd64, linux/arm64). Default: auto-detect from VM/host")
 
 	return cmd
 }
@@ -359,6 +361,7 @@ func buildCreateOptions(name string, shareInfo *api.SharePublicInfo) (*studio.Cr
 		},
 		Command:  command,
 		Endpoint: endpointOverride,
+		Platform: platform,
 	}, nil
 }
 
