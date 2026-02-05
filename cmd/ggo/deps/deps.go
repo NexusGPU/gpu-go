@@ -236,7 +236,7 @@ func buildMergedDisplayLibraries(libs []deps.Library, depsManifest *deps.DepsMan
 
 		// Sort by version descending to get latest first
 		sort.Slice(libGroup, func(i, j int) bool {
-			return libGroup[i].Version > libGroup[j].Version
+			return deps.CompareVersions(libGroup[i].Version, libGroup[j].Version)
 		})
 
 		// Use latest version as the primary display
@@ -297,12 +297,21 @@ func buildMergedDisplayLibraries(libs []deps.Library, depsManifest *deps.DepsMan
 		displayLibs = append(displayLibs, dLib)
 	}
 
-	// Sort by name
+	// Sort by version (descending), then type (descending)
 	slices.SortFunc(displayLibs, func(a, b DisplayLibrary) int {
-		if a.Name != b.Name {
-			return compareStrings(a.Name, b.Name)
+		// Version descending: if a > b, return -1 (a comes first)
+		if deps.CompareVersions(a.Version, b.Version) {
+			return -1
 		}
-		return compareStrings(a.Platform, b.Platform)
+		if deps.CompareVersions(b.Version, a.Version) {
+			return 1
+		}
+		// Type descending: if a > b, return -1 (a comes first)
+		if a.Type != b.Type {
+			return -compareStrings(a.Type, b.Type)
+		}
+		// Secondary sort by name for stability
+		return compareStrings(a.Name, b.Name)
 	})
 
 	return displayLibs

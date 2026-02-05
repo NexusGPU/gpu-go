@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/NexusGPU/gpu-go/internal/api"
 	"github.com/NexusGPU/gpu-go/internal/platform"
+	"github.com/blang/semver/v4"
 	"k8s.io/klog/v2"
 )
 
@@ -408,6 +410,36 @@ func (m *Manager) GetAllLibraries(manifest *ReleaseManifest) []Library {
 	return manifest.Libraries
 }
 
+var versionPrefixRegex = regexp.MustCompile(`^\w+-`)
+
+// CompareVersions compares two version strings using semantic versioning rules
+// Returns true if v1 > v2, false otherwise
+// Handles versions like "2.7.9", "2.7.10", "rgpu-2.6.3", etc.
+// Removes any \w- prefix (word characters followed by hyphen) before comparison
+func CompareVersions(v1, v2 string) bool {
+	// Remove any \w- prefix (word characters followed by hyphen) for comparison
+	v1Clean := versionPrefixRegex.ReplaceAllString(v1, "")
+	v2Clean := versionPrefixRegex.ReplaceAllString(v2, "")
+
+	// Parse versions using semver
+	sv1, err1 := semver.Parse(v1Clean)
+	sv2, err2 := semver.Parse(v2Clean)
+
+	// If both parse successfully, use semver comparison
+	if err1 == nil && err2 == nil {
+		return sv1.GT(sv2)
+	}
+
+	// If one fails to parse, fall back to string comparison
+	// This handles edge cases where version format doesn't match semver
+	if err1 != nil || err2 != nil {
+		return v1Clean > v2Clean
+	}
+
+	// Should not reach here, but fallback to string comparison
+	return v1Clean > v2Clean
+}
+
 // SelectRequiredDeps selects the required dependencies from release manifest
 // For each library type, it selects all artifacts from the latest version
 // This ensures that types with multiple files (like remote-gpu-client) get all files
@@ -437,9 +469,9 @@ func (m *Manager) SelectRequiredDeps(manifest *ReleaseManifest) *DepsManifest {
 		for v := range versionLibs {
 			versions = append(versions, v)
 		}
-		// Sort versions in descending order (simple string comparison works for semver-like versions)
+		// Sort versions in descending order using semantic version comparison
 		sort.Slice(versions, func(i, j int) bool {
-			return versions[i] > versions[j]
+			return CompareVersions(versions[i], versions[j])
 		})
 
 		if len(versions) == 0 {
