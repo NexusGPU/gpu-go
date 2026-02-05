@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/NexusGPU/gpu-go/internal/errors"
@@ -141,10 +140,8 @@ func (m *Manager) Start(config WorkerConfig) error {
 		"WORKER_ID="+workerID,
 	)
 
-	// Set process group for proper cleanup
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true,
-	}
+	// Set platform-specific process attributes for proper cleanup
+	setSysProcAttr(cmd)
 
 	// Redirect output to logs
 	logFile, err := m.createLogFile(workerID)
@@ -200,10 +197,10 @@ func (m *Manager) Stop(workerID string) error {
 	exitCh := m.exitChannels[workerID]
 	m.mu.Unlock()
 
-	// Send SIGTERM first for graceful shutdown
+	// Send termination signal first for graceful shutdown
 	if cmd.Process != nil {
-		if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
-			klog.Warningf("Failed to send SIGTERM: worker_id=%s error=%v", workerID, err)
+		if err := sendTermSignal(cmd.Process); err != nil {
+			klog.Warningf("Failed to send termination signal: worker_id=%s error=%v", workerID, err)
 		}
 	}
 

@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/NexusGPU/gpu-go/internal/utils"
@@ -236,15 +235,10 @@ func (m *Manager) Stop() error {
 			for !allExited && time.Now().Before(deadline) {
 				allExited = true
 				for _, pid := range workerPIDs {
-					// Check if process is still running by sending signal 0
-					process, err := os.FindProcess(pid)
-					if err == nil {
-						// On Unix, FindProcess always succeeds, so check with signal 0
-						if err := process.Signal(syscall.Signal(0)); err == nil {
-							// Process is still running
-							allExited = false
-							break
-						}
+					if isProcessRunning(pid) {
+						// Process is still running
+						allExited = false
+						break
 					}
 				}
 				if !allExited {
@@ -254,24 +248,9 @@ func (m *Manager) Stop() error {
 
 			if !allExited {
 				klog.Warningf("Some worker processes did not exit within timeout, force killing remaining processes")
-				// Force kill any remaining processes - kill entire process group to include child processes
+				// Force kill any remaining processes
 				for _, pid := range workerPIDs {
-					// First check if the main process is still running
-					if err := syscall.Kill(pid, syscall.Signal(0)); err == nil {
-						// Process is still running, force kill the entire process group
-						// Using negative PID kills all processes in the process group
-						if killErr := syscall.Kill(-pid, syscall.SIGKILL); killErr != nil {
-							// If process group kill fails (e.g., not a process group leader), try killing just the process
-							klog.V(4).Infof("Process group kill failed (pid=%d), trying single process kill: %v", pid, killErr)
-							if killErr := syscall.Kill(pid, syscall.SIGKILL); killErr != nil {
-								klog.Warningf("Failed to force kill worker process: pid=%d error=%v", pid, killErr)
-							} else {
-								klog.Infof("Force killed worker process: pid=%d", pid)
-							}
-						} else {
-							klog.Infof("Force killed worker process group: pgid=%d", pid)
-						}
-					}
+					forceKillWorkerProcess(pid)
 				}
 				// Give processes a moment to exit after SIGKILL
 				time.Sleep(500 * time.Millisecond)
