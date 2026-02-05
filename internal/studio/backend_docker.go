@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
+	"net"
 	"os"
 	"os/exec"
 	"strconv"
@@ -12,6 +14,12 @@ import (
 	"time"
 
 	"k8s.io/klog/v2"
+)
+
+// SSH port range constants
+const (
+	SSHPortRangeMin = 12000
+	SSHPortRangeMax = 18000
 )
 
 // DockerBackend implements the Backend interface using Docker
@@ -116,9 +124,9 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 		}
 	}
 
-	// Add default SSH port if not specified
+	// Add default SSH port if not specified (use random port in 12000-18000 range)
 	if sshPort == 0 {
-		sshPort = findAvailablePort(2222)
+		sshPort = findAvailablePort(0)
 		args = append(args, "-p", fmt.Sprintf("%d:22/tcp", sshPort))
 	}
 
@@ -482,8 +490,7 @@ func (b *DockerBackend) Logs(ctx context.Context, envID string, follow bool) (<-
 // Helper functions
 
 func parseSSHPort(ports string) int {
-	// Parse "0.0.0.0:2222->22/tcp, ..." format
-	for _, part := range strings.Split(ports, ",") {
+	for part := range strings.SplitSeq(ports, ",") {
 		part = strings.TrimSpace(part)
 		if strings.Contains(part, "->22/tcp") {
 			// Extract host port
@@ -502,9 +509,24 @@ func parseSSHPort(ports string) int {
 	return 22
 }
 
-func findAvailablePort(start int) int {
-	// Simple implementation - in production, actually check if port is available
-	return start
+// findAvailablePort finds an available port in the SSH port range (12000-18000)
+// The start parameter is ignored; a random port in the range is selected
+func findAvailablePort(_ int) int {
+	// Try to find an available port in the range
+	for i := 0; i < 100; i++ {
+		// Generate random port in range [SSHPortRangeMin, SSHPortRangeMax]
+		port := SSHPortRangeMin + rand.Intn(SSHPortRangeMax-SSHPortRangeMin+1)
+
+		// Check if port is available by trying to listen on it
+		listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+		if err == nil {
+			_ = listener.Close()
+			return port
+		}
+	}
+
+	// Fallback: return a random port in range without checking availability
+	return SSHPortRangeMin + rand.Intn(SSHPortRangeMax-SSHPortRangeMin+1)
 }
 
 var _ Backend = (*DockerBackend)(nil)

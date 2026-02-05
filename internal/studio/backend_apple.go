@@ -78,9 +78,9 @@ func (b *AppleContainerBackend) Create(ctx context.Context, opts *CreateOptions)
 		}
 	}
 
-	// Add default SSH port if not specified
+	// Add default SSH port if not specified (use random port in 12000-18000 range)
 	if sshPort == 0 {
-		sshPort = findAvailablePort(2222)
+		sshPort = findAvailablePort(0)
 		args = append(args, "-p", fmt.Sprintf("%d:22/tcp", sshPort))
 	}
 

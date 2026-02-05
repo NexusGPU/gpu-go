@@ -117,6 +117,12 @@ Examples:
 				return fmt.Errorf("failed to download GPU client libraries: %w", err)
 			}
 
+			// Download GPU binary (like nvidia-smi) if available for this vendor
+			if err := ensureGPUBinary(ctx, out, shareInfo.HardwareVendor, yes); err != nil {
+				// Non-fatal: GPU binary is optional
+				klog.Warningf("Failed to ensure GPU binary: %v (continuing without it)", err)
+			}
+
 			if longTerm {
 				return setupLongTermEnv(shareInfo, outputDir, yes, out)
 			}
@@ -177,6 +183,30 @@ func ensureRemoteGPUClientLibs(ctx context.Context, out *tui.Output, vendorSlug 
 	}
 
 	return nil
+}
+
+// ensureGPUBinary downloads GPU binary tools (like nvidia-smi) if available for the vendor
+func ensureGPUBinary(ctx context.Context, out *tui.Output, vendorSlug string, silent bool) error {
+	binPath, err := deps.EnsureGPUBinary(ctx, paths, vendorSlug)
+	if err != nil {
+		return err
+	}
+	if binPath == "" {
+		klog.V(2).Infof("No GPU binary available for vendor %s", vendorSlug)
+		return nil
+	}
+
+	if !silent && !out.IsJSON() {
+		binaryName := deps.GetGPUBinaryName(vendorSlug)
+		out.Printf("GPU binary %s is available at %s\n", binaryName, binPath)
+	}
+
+	return nil
+}
+
+// getGPUBinDir returns the directory containing GPU binaries
+func getGPUBinDir() string {
+	return filepath.Join(paths.CacheDir(), "bin")
 }
 
 // NewCleanCmd creates the clean command
@@ -352,10 +382,14 @@ func launchGPUShell(config *studio.GPUEnvConfig, envResult *studio.GPUEnvResult,
 		shell = "/bin/sh"
 	}
 
-	cachePath := config.CachePath
-	if cachePath == "" {
-		cachePath = paths.CacheDir()
+	// LibsPath is for .so files (used for LD_LIBRARY_PATH, LD_PRELOAD)
+	libsPath := config.LibsPath
+	if libsPath == "" {
+		libsPath = paths.LibsDir()
 	}
+
+	// BinDir is for GPU binaries like nvidia-smi
+	binDir := getGPUBinDir()
 
 	// Create the command
 	cmd := exec.Command(shell, "-i")
@@ -371,20 +405,28 @@ func launchGPUShell(config *studio.GPUEnvConfig, envResult *studio.GPUEnvResult,
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
 
-	// Build LD_LIBRARY_PATH
+	// Build LD_LIBRARY_PATH - use libs directory (contains only .so files)
 	existingLDPath := os.Getenv("LD_LIBRARY_PATH")
 	if existingLDPath != "" {
-		env = append(env, fmt.Sprintf("LD_LIBRARY_PATH=%s:%s", cachePath, existingLDPath))
+		env = append(env, fmt.Sprintf("LD_LIBRARY_PATH=%s:%s", libsPath, existingLDPath))
 	} else {
-		env = append(env, fmt.Sprintf("LD_LIBRARY_PATH=%s", cachePath))
+		env = append(env, fmt.Sprintf("LD_LIBRARY_PATH=%s", libsPath))
 	}
 
-	// Build LD_PRELOAD
+	// Add GPU bin directory to PATH (for nvidia-smi, amdsmi, etc.)
+	existingPath := os.Getenv("PATH")
+	if existingPath != "" {
+		env = append(env, fmt.Sprintf("PATH=%s:%s", binDir, existingPath))
+	} else {
+		env = append(env, fmt.Sprintf("PATH=%s", binDir))
+	}
+
+	// Build LD_PRELOAD - use libs directory
 	libNames := studio.GetLibraryNames(config.Vendor)
 	if len(libNames) > 0 {
 		var preloadPaths []string
 		for _, lib := range libNames {
-			preloadPaths = append(preloadPaths, filepath.Join(cachePath, lib))
+			preloadPaths = append(preloadPaths, filepath.Join(libsPath, lib))
 		}
 		existingPreload := os.Getenv("LD_PRELOAD")
 		if existingPreload != "" {
@@ -396,7 +438,8 @@ func launchGPUShell(config *studio.GPUEnvConfig, envResult *studio.GPUEnvResult,
 
 	// Mark as GPU Go activated
 	env = append(env, "_GGO_ACTIVE=1")
-	env = append(env, fmt.Sprintf("_GGO_CACHE_PATH=%s", cachePath))
+	env = append(env, fmt.Sprintf("_GGO_LIBS_PATH=%s", libsPath))
+	env = append(env, fmt.Sprintf("_GGO_BIN_PATH=%s", binDir))
 
 	cmd.Env = env
 
@@ -423,10 +466,14 @@ func outputEvalCommands(config *studio.GPUEnvConfig, envResult *studio.GPUEnvRes
 
 // outputEvalCommandsUnix outputs shell commands for eval mode (Unix/Linux)
 func outputEvalCommandsUnix(config *studio.GPUEnvConfig, envResult *studio.GPUEnvResult, envFile, cleanFile string, out *tui.Output) error {
-	cachePath := config.CachePath
-	if cachePath == "" {
-		cachePath = paths.CacheDir()
+	// LibsPath is for .so files (used for LD_LIBRARY_PATH, LD_PRELOAD)
+	libsPath := config.LibsPath
+	if libsPath == "" {
+		libsPath = paths.LibsDir()
 	}
+
+	// BinDir is for GPU binaries like nvidia-smi
+	binDir := getGPUBinDir()
 
 	var script strings.Builder
 
@@ -443,22 +490,26 @@ func outputEvalCommandsUnix(config *studio.GPUEnvConfig, envResult *studio.GPUEn
 		script.WriteString(fmt.Sprintf("export %s=\"%s\"\n", k, v))
 	}
 
-	// Add LD_LIBRARY_PATH
-	script.WriteString(fmt.Sprintf("export LD_LIBRARY_PATH=\"%s${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\"\n", cachePath))
+	// Add LD_LIBRARY_PATH - use libs directory (contains only .so files)
+	script.WriteString(fmt.Sprintf("export LD_LIBRARY_PATH=\"%s${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\"\n", libsPath))
 
-	// Add LD_PRELOAD based on vendor
+	// Add GPU bin directory to PATH (for nvidia-smi, amdsmi, etc.)
+	script.WriteString(fmt.Sprintf("export PATH=\"%s${PATH:+:$PATH}\"\n", binDir))
+
+	// Add LD_PRELOAD based on vendor - use libs directory
 	libNames := studio.GetLibraryNames(config.Vendor)
 	if len(libNames) > 0 {
 		var preloadPaths []string
 		for _, lib := range libNames {
-			preloadPaths = append(preloadPaths, filepath.Join(cachePath, lib))
+			preloadPaths = append(preloadPaths, filepath.Join(libsPath, lib))
 		}
 		script.WriteString(fmt.Sprintf("export LD_PRELOAD=\"%s${LD_PRELOAD:+:$LD_PRELOAD}\"\n", strings.Join(preloadPaths, ":")))
 	}
 
 	// Mark as activated
 	script.WriteString("export _GGO_ACTIVE=1\n")
-	script.WriteString(fmt.Sprintf("export _GGO_CACHE_PATH=\"%s\"\n", cachePath))
+	script.WriteString(fmt.Sprintf("export _GGO_LIBS_PATH=\"%s\"\n", libsPath))
+	script.WriteString(fmt.Sprintf("export _GGO_BIN_PATH=\"%s\"\n", binDir))
 	script.WriteString("\n")
 
 	// Define ggo wrapper function to handle clean command automatically
@@ -488,9 +539,10 @@ func outputEvalCommandsUnix(config *studio.GPUEnvConfig, envResult *studio.GPUEn
 // outputEvalCommandsWindows outputs shell commands for eval mode (Windows)
 // Detects PowerShell vs CMD and outputs appropriate commands
 func outputEvalCommandsWindows(config *studio.GPUEnvConfig, envResult *studio.GPUEnvResult, envFile, cleanFile string, out *tui.Output) error {
-	cachePath := config.CachePath
-	if cachePath == "" {
-		cachePath = paths.CacheDir()
+	// LibsPath is for .dll files (used for PATH on Windows)
+	libsPath := config.LibsPath
+	if libsPath == "" {
+		libsPath = paths.LibsDir()
 	}
 
 	// Detect shell type by checking COMSPEC and PSModulePath
@@ -498,9 +550,9 @@ func outputEvalCommandsWindows(config *studio.GPUEnvConfig, envResult *studio.GP
 	shell := detectWindowsShell()
 
 	if shell == shellPowerShell {
-		return outputEvalCommandsPowerShell(config, envResult, envFile, cleanFile, cachePath, out)
+		return outputEvalCommandsPowerShell(config, envResult, envFile, cleanFile, libsPath, out)
 	}
-	return outputEvalCommandsCMD(config, envResult, envFile, cleanFile, cachePath, out)
+	return outputEvalCommandsCMD(config, envResult, envFile, cleanFile, libsPath, out)
 }
 
 // detectWindowsShell detects whether we're in PowerShell or CMD
@@ -540,7 +592,10 @@ func escapeForPowerShell(s string) string {
 }
 
 // outputEvalCommandsPowerShell outputs PowerShell commands for eval mode
-func outputEvalCommandsPowerShell(config *studio.GPUEnvConfig, envResult *studio.GPUEnvResult, envFile, cleanFile, cachePath string, out *tui.Output) error {
+func outputEvalCommandsPowerShell(config *studio.GPUEnvConfig, envResult *studio.GPUEnvResult, envFile, cleanFile, libsPath string, out *tui.Output) error {
+	// BinDir is for GPU binaries like nvidia-smi
+	binDir := getGPUBinDir()
+
 	var script strings.Builder
 
 	// Save original values for later restoration
@@ -557,16 +612,17 @@ func outputEvalCommandsPowerShell(config *studio.GPUEnvConfig, envResult *studio
 	// Set GPU vendor
 	script.WriteString(fmt.Sprintf("$env:TF_GPU_VENDOR = \"%s\"\n", config.Vendor))
 
-	// Add cache path to PATH at the front
-	script.WriteString(fmt.Sprintf("$env:PATH = \"%s;\" + $env:PATH\n", escapeForPowerShell(cachePath)))
+	// Add libs path and bin path to PATH at the front
+	script.WriteString(fmt.Sprintf("$env:PATH = \"%s;%s;\" + $env:PATH\n", escapeForPowerShell(binDir), escapeForPowerShell(libsPath)))
 
-	// Set CUDA_PATH
-	script.WriteString(fmt.Sprintf("$env:CUDA_PATH = \"%s\"\n", escapeForPowerShell(cachePath)))
-	script.WriteString(fmt.Sprintf("$env:CUDA_HOME = \"%s\"\n", escapeForPowerShell(cachePath)))
+	// Set CUDA_PATH - point to libs directory
+	script.WriteString(fmt.Sprintf("$env:CUDA_PATH = \"%s\"\n", escapeForPowerShell(libsPath)))
+	script.WriteString(fmt.Sprintf("$env:CUDA_HOME = \"%s\"\n", escapeForPowerShell(libsPath)))
 
 	// Mark as activated
 	script.WriteString("$env:_GGO_ACTIVE = \"1\"\n")
-	script.WriteString(fmt.Sprintf("$env:_GGO_CACHE_PATH = \"%s\"\n", escapeForPowerShell(cachePath)))
+	script.WriteString(fmt.Sprintf("$env:_GGO_LIBS_PATH = \"%s\"\n", escapeForPowerShell(libsPath)))
+	script.WriteString(fmt.Sprintf("$env:_GGO_BIN_PATH = \"%s\"\n", escapeForPowerShell(binDir)))
 	script.WriteString("\n")
 
 	// Define ggo wrapper function for automatic clean handling
@@ -598,7 +654,7 @@ func outputEvalCommandsPowerShell(config *studio.GPUEnvConfig, envResult *studio
 // outputEvalCommandsCMD outputs CMD batch commands for eval mode
 // Note: CMD doesn't support true eval like bash/PowerShell. Instead, we output
 // a message guiding users to use the generated batch file directly.
-func outputEvalCommandsCMD(config *studio.GPUEnvConfig, envResult *studio.GPUEnvResult, envFile, cleanFile, cachePath string, out *tui.Output) error {
+func outputEvalCommandsCMD(config *studio.GPUEnvConfig, envResult *studio.GPUEnvResult, envFile, cleanFile, libsPath string, out *tui.Output) error {
 	// CMD doesn't support eval-style command execution like bash or PowerShell
 	// The best we can do is tell users to call the batch file directly
 	// Output message to stderr
@@ -667,7 +723,7 @@ func generateCleanScriptUnix() string {
 	script.WriteString("unset _GGO_ORIG_LD_PRELOAD\n")
 	script.WriteString("unset _GGO_ORIG_PATH\n")
 	script.WriteString("unset _GGO_ACTIVE\n")
-	script.WriteString("unset _GGO_CACHE_PATH\n")
+	script.WriteString("unset _GGO_LIBS_PATH\n")
 	script.WriteString("unset _GGO_CLEAN_FILE\n\n")
 
 	// Remove ggo wrapper function
@@ -713,7 +769,7 @@ func generateCleanScriptWindows() string {
 	script.WriteString("# Unset internal tracking variables\n")
 	script.WriteString("Remove-Item Env:_GGO_ORIG_PATH -ErrorAction SilentlyContinue\n")
 	script.WriteString("Remove-Item Env:_GGO_ACTIVE -ErrorAction SilentlyContinue\n")
-	script.WriteString("Remove-Item Env:_GGO_CACHE_PATH -ErrorAction SilentlyContinue\n")
+	script.WriteString("Remove-Item Env:_GGO_LIBS_PATH -ErrorAction SilentlyContinue\n")
 	script.WriteString("Remove-Item Env:_GGO_CLEAN_FILE -ErrorAction SilentlyContinue\n\n")
 
 	// Remove ggo wrapper function (Global scope)
@@ -871,7 +927,7 @@ func generateCleanScriptCMD() string {
 	script.WriteString("REM Unset internal tracking variables\n")
 	script.WriteString("set \"_GGO_ORIG_PATH=\"\n")
 	script.WriteString("set \"_GGO_ACTIVE=\"\n")
-	script.WriteString("set \"_GGO_CACHE_PATH=\"\n")
+	script.WriteString("set \"_GGO_LIBS_PATH=\"\n")
 	script.WriteString("set \"_GGO_CLEAN_FILE=\"\n\n")
 
 	script.WriteString("echo GPU Go environment deactivated\n")
@@ -904,9 +960,10 @@ func (r *tempEnvResultUnix) RenderTUI(out *tui.Output) {
 // launchGPUShellWindows launches a new interactive shell with the GPU environment variables set (Windows)
 func launchGPUShellWindows(config *studio.GPUEnvConfig, envResult *studio.GPUEnvResult, psFile, batFile string) error {
 	shell := detectWindowsShell()
-	cachePath := config.CachePath
-	if cachePath == "" {
-		cachePath = paths.CacheDir()
+	// LibsPath is for .dll files (used for PATH on Windows)
+	libsPath := config.LibsPath
+	if libsPath == "" {
+		libsPath = paths.LibsDir()
 	}
 
 	var cmd *exec.Cmd
@@ -930,24 +987,24 @@ func launchGPUShellWindows(config *studio.GPUEnvConfig, envResult *studio.GPUEnv
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
 
-	// Add cache path to PATH
+	// Add libs path to PATH - libs directory contains only .dll files
 	existingPath := os.Getenv("PATH")
 	if existingPath != "" {
-		env = append(env, fmt.Sprintf("PATH=%s;%s", cachePath, existingPath))
+		env = append(env, fmt.Sprintf("PATH=%s;%s", libsPath, existingPath))
 	} else {
-		env = append(env, fmt.Sprintf("PATH=%s", cachePath))
+		env = append(env, fmt.Sprintf("PATH=%s", libsPath))
 	}
 
-	// Set CUDA_PATH
-	env = append(env, fmt.Sprintf("CUDA_PATH=%s", cachePath))
-	env = append(env, fmt.Sprintf("CUDA_HOME=%s", cachePath))
+	// Set CUDA_PATH - point to libs directory
+	env = append(env, fmt.Sprintf("CUDA_PATH=%s", libsPath))
+	env = append(env, fmt.Sprintf("CUDA_HOME=%s", libsPath))
 
 	// Set GPU vendor
 	env = append(env, fmt.Sprintf("TF_GPU_VENDOR=%s", config.Vendor))
 
 	// Mark as GPU Go activated
 	env = append(env, "_GGO_ACTIVE=1")
-	env = append(env, fmt.Sprintf("_GGO_CACHE_PATH=%s", cachePath))
+	env = append(env, fmt.Sprintf("_GGO_LIBS_PATH=%s", libsPath))
 
 	cmd.Env = env
 
@@ -1352,7 +1409,7 @@ func cleanEnvEvalUnix(out *tui.Output) error {
 	script.WriteString("  unset _GGO_ORIG_LD_PRELOAD\n")
 	script.WriteString("  unset _GGO_ORIG_PATH\n")
 	script.WriteString("  unset _GGO_ACTIVE\n")
-	script.WriteString("  unset _GGO_CACHE_PATH\n")
+	script.WriteString("  unset _GGO_LIBS_PATH\n")
 	script.WriteString("  unset _GGO_CLEAN_FILE\n")
 
 	// Remove ggo wrapper function

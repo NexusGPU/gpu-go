@@ -649,7 +649,7 @@ func (m *Manager) ComputeUpdateDiff() (*UpdateDiff, error) {
 			diff.ToDownload = append(diff.ToDownload, lib)
 		} else {
 			// Also verify the file actually exists
-			filePath := filepath.Join(m.paths.CacheDir(), lib.Name)
+			filePath := m.GetLibraryPath(lib.Name)
 			if _, err := os.Stat(filePath); os.IsNotExist(err) {
 				diff.ToDownload = append(diff.ToDownload, lib)
 			} else {
@@ -676,8 +676,14 @@ func (m *Manager) downloadLibraryUnsafe(ctx context.Context, lib Library, progre
 		return fmt.Errorf("failed to create cache directory: %w", err)
 	}
 
-	// Destination path
-	destPath := filepath.Join(cacheDir, lib.Name)
+	// Ensure libs directory exists for shared libraries
+	libsDir := m.paths.LibsDir()
+	if err := os.MkdirAll(libsDir, 0755); err != nil {
+		return fmt.Errorf("failed to create libs directory: %w", err)
+	}
+
+	// Destination path - shared libraries go to libs dir, binaries to cache dir
+	destPath := m.GetLibraryPath(lib.Name)
 	tmpPath := destPath + ".tmp"
 
 	// Check if already downloaded with correct version
@@ -822,7 +828,7 @@ func (m *Manager) DownloadAllRequired(ctx context.Context, progressFn func(lib L
 
 		// Check if already downloaded with correct version
 		downloadedLib, exists := downloaded.Libraries[key]
-		filePath := filepath.Join(m.paths.CacheDir(), lib.Name)
+		filePath := m.GetLibraryPath(lib.Name)
 		var fileInfo os.FileInfo
 		fileInfo, statErr := os.Stat(filePath)
 		fileExists := statErr == nil
@@ -895,8 +901,33 @@ func (m *Manager) verifyLibraryUnsafe(path, expectedHash string) bool {
 }
 
 // GetLibraryPath returns the path to a library in cache
+// For .so/.dll files, returns path in libs subdirectory
+// For binaries (executables), returns path in cache root directory
 func (m *Manager) GetLibraryPath(name string) string {
+	if isSharedLibrary(name) {
+		return filepath.Join(m.paths.LibsDir(), name)
+	}
 	return filepath.Join(m.paths.CacheDir(), name)
+}
+
+// GetLibsDir returns the directory for .so/.dll library files
+// This directory is used for LD_LIBRARY_PATH, ld.so.conf, and ld.so.preload
+func (m *Manager) GetLibsDir() string {
+	return m.paths.LibsDir()
+}
+
+// isSharedLibrary returns true if the filename is a shared library (.so or .dll)
+func isSharedLibrary(name string) bool {
+	nameLower := strings.ToLower(name)
+	// Check for .so or .dll extension
+	if strings.HasSuffix(nameLower, ".so") || strings.HasSuffix(nameLower, ".dll") {
+		return true
+	}
+	// Check for versioned .so files (e.g., libcuda.so.1, libnvidia-ml.so.525.60.13)
+	if strings.Contains(nameLower, ".so.") {
+		return true
+	}
+	return false
 }
 
 // CleanCache removes all cached downloads
@@ -1112,6 +1143,8 @@ func (m *Manager) EnsureLibrariesByTypesForPlatform(ctx context.Context, libType
 			toDownload = append(toDownload, lib)
 		}
 	}
+
+	klog.V(4).Infof("Libraries to download: %d out of %d total (libs will go to: %s)", len(toDownload), len(targetLibs), m.paths.LibsDir())
 
 	// Download missing libraries
 	for _, lib := range toDownload {

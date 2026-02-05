@@ -67,6 +67,14 @@ func (p *Paths) LibDir() string {
 	return filepath.Join(p.userDir, "lib")
 }
 
+// LibsDir returns the directory for downloaded .so/.dll library files
+// This is separate from CacheDir which contains all downloaded files (including binaries)
+// The libs directory is used for LD_LIBRARY_PATH, ld.so.conf, and ld.so.preload
+// All platforms: ~/.gpugo/cache/libs (or CacheDir/libs)
+func (p *Paths) LibsDir() string {
+	return filepath.Join(p.cacheDir, "libs")
+}
+
 // BinDir returns the directory for binaries
 // All platforms: ~/.gpugo/bin (or UserDir/bin)
 func (p *Paths) BinDir() string {
@@ -169,7 +177,7 @@ func (p *Paths) WithStateDir(dir string) *Paths {
 
 // EnsureAllDirs creates all required directories
 func (p *Paths) EnsureAllDirs() error {
-	dirs := []string{p.configDir, p.stateDir, p.cacheDir, p.userDir}
+	dirs := []string{p.configDir, p.stateDir, p.cacheDir, p.userDir, p.LibsDir()}
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return err

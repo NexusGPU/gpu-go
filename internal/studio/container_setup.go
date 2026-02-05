@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 
 	"github.com/NexusGPU/gpu-go/internal/deps"
@@ -105,7 +106,54 @@ func SetupContainerGPUEnv(ctx context.Context, config *ContainerSetupConfig) (*C
 		}
 	}
 
+	// Step 4: Setup SSH volume mounts for container SSH access
+	sshMounts := getSSHVolumeMounts(paths, config.StudioName)
+	result.VolumeMounts = append(result.VolumeMounts, sshMounts...)
+	if len(sshMounts) > 0 {
+		klog.V(2).Infof("SSH mounts configured for studio %s: %d mounts", config.StudioName, len(sshMounts))
+	}
+
+	// Step 5: Download and mount GPU binary (like nvidia-smi) to /usr/local/bin/
+	if config.GPUWorkerURL != "" && config.HardwareVendor != "" {
+		gpuBinMount, err := ensureAndMountGPUBinary(ctx, paths, config.HardwareVendor)
+		if err != nil {
+			klog.Warningf("Failed to setup GPU binary mount: %v (continuing without it)", err)
+		} else if gpuBinMount != nil {
+			result.VolumeMounts = append(result.VolumeMounts, *gpuBinMount)
+			klog.Infof("GPU binary mount configured: %s -> %s", gpuBinMount.HostPath, gpuBinMount.ContainerPath)
+		}
+	}
+
 	return result, nil
+}
+
+// ensureAndMountGPUBinary downloads GPU binary (like nvidia-smi) and returns a volume mount
+// The binary is mounted to /usr/local/bin/ in the container
+func ensureAndMountGPUBinary(ctx context.Context, paths *platform.Paths, vendorSlug string) (*VolumeMount, error) {
+	// Studios run in Linux containers, so download Linux binary with host CPU arch
+	binPath, err := deps.EnsureGPUBinaryForPlatform(ctx, paths, vendorSlug, "linux", runtime.GOARCH)
+	if err != nil {
+		return nil, fmt.Errorf("failed to ensure GPU binary: %w", err)
+	}
+	if binPath == "" {
+		// No binary available for this vendor/platform combination
+		return nil, nil
+	}
+
+	// Get the binary name (e.g., "nvidia-smi")
+	binaryName := deps.GetGPUBinaryName(vendorSlug)
+	if binaryName == "" {
+		return nil, nil
+	}
+
+	// Mount the binary to /usr/local/bin/
+	containerPath := fmt.Sprintf("/usr/local/bin/%s", binaryName)
+
+	return &VolumeMount{
+		HostPath:      binPath,
+		ContainerPath: containerPath,
+		ReadOnly:      true,
+	}, nil
 }
 
 // ensureGPUClientLibraries downloads GPU client libraries for Linux containers
@@ -220,4 +268,110 @@ func MergeVolumeMounts(setupVolumes, userVolumes []VolumeMount) []VolumeMount {
 	}
 
 	return merged
+}
+
+// SSH public key file names to search for (in priority order)
+var sshPublicKeyNames = []string{
+	"id_ed25519.pub",
+	"id_ecdsa.pub",
+	"id_rsa.pub",
+	"id_dsa.pub",
+}
+
+// findUserSSHPublicKey finds the user's SSH public key
+// Returns the public key content and the path to the key file
+func findUserSSHPublicKey() (string, string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get user home directory: %w", err)
+	}
+
+	sshDir := filepath.Join(homeDir, ".ssh")
+	if _, err := os.Stat(sshDir); os.IsNotExist(err) {
+		return "", "", fmt.Errorf("SSH directory not found: %s", sshDir)
+	}
+
+	// Search for public key files in priority order
+	for _, keyName := range sshPublicKeyNames {
+		keyPath := filepath.Join(sshDir, keyName)
+		if content, err := os.ReadFile(keyPath); err == nil {
+			klog.V(2).Infof("Found SSH public key: %s", keyPath)
+			return string(content), keyPath, nil
+		}
+	}
+
+	return "", "", fmt.Errorf("no SSH public key found in %s", sshDir)
+}
+
+// SSHAuthorizedKeysPath returns the path to store authorized_keys for a studio
+func SSHAuthorizedKeysPath(paths *platform.Paths, studioName string) string {
+	normalizedName := platform.NormalizeName(studioName)
+	return filepath.Join(paths.StudioConfigDir(normalizedName), "authorized_keys")
+}
+
+// setupSSHAuthorizedKeys creates the authorized_keys file for a studio
+// Returns the path to the created file, or empty string if no public key found
+func setupSSHAuthorizedKeys(paths *platform.Paths, studioName string) (string, error) {
+	publicKey, _, err := findUserSSHPublicKey()
+	if err != nil {
+		return "", err
+	}
+
+	authorizedKeysPath := SSHAuthorizedKeysPath(paths, studioName)
+
+	// Ensure directory exists
+	if err := os.MkdirAll(filepath.Dir(authorizedKeysPath), 0755); err != nil {
+		return "", fmt.Errorf("failed to create directory for authorized_keys: %w", err)
+	}
+
+	// Write authorized_keys file with proper permissions
+	if err := os.WriteFile(authorizedKeysPath, []byte(publicKey), 0600); err != nil {
+		return "", fmt.Errorf("failed to write authorized_keys: %w", err)
+	}
+
+	klog.V(2).Infof("Created authorized_keys for studio %s: %s", studioName, authorizedKeysPath)
+	return authorizedKeysPath, nil
+}
+
+// getSSHVolumeMounts returns volume mounts for SSH access to the container
+// This includes:
+// 1. User's .ssh directory mounted to /root/.ssh (read-only for security)
+// 2. Generated authorized_keys file mounted to /root/.ssh/authorized_keys
+func getSSHVolumeMounts(paths *platform.Paths, studioName string) []VolumeMount {
+	var mounts []VolumeMount
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		klog.Warningf("Failed to get user home directory for SSH mounts: %v", err)
+		return mounts
+	}
+
+	sshDir := filepath.Join(homeDir, ".ssh")
+	if _, err := os.Stat(sshDir); os.IsNotExist(err) {
+		klog.V(2).Infof("SSH directory not found, skipping SSH mounts: %s", sshDir)
+		return mounts
+	}
+
+	// Mount user's .ssh directory to /root/.ssh (read-only for security)
+	// This allows the container to use user's SSH keys for git operations etc.
+	mounts = append(mounts, VolumeMount{
+		HostPath:      sshDir,
+		ContainerPath: "/root/.ssh",
+		ReadOnly:      true,
+	})
+
+	// Create and mount authorized_keys for SSH access to the container
+	authorizedKeysPath, err := setupSSHAuthorizedKeys(paths, studioName)
+	if err != nil {
+		klog.V(2).Infof("Could not setup authorized_keys: %v (SSH access to container may require password)", err)
+	} else {
+		// Mount authorized_keys file - this overwrites the read-only .ssh mount for this specific file
+		mounts = append(mounts, VolumeMount{
+			HostPath:      authorizedKeysPath,
+			ContainerPath: "/root/.ssh/authorized_keys",
+			ReadOnly:      true,
+		})
+	}
+
+	return mounts
 }

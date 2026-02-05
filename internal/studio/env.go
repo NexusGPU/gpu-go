@@ -38,7 +38,8 @@ func ParseVendor(vendor string) GPUVendor {
 type GPUEnvConfig struct {
 	Vendor        GPUVendor
 	ConnectionURL string // TENSOR_FUSION_OPERATOR_CONNECTION_INFO value
-	CachePath     string // Path to gpugo cache directory
+	CachePath     string // Path to gpugo cache directory (for binaries like tensor-fusion-worker)
+	LibsPath      string // Path to gpugo libs directory (for .so/.dll files, used in LD paths)
 	LogPath       string // Path to logs directory
 	StudioName    string // Name of the studio (for creating config files)
 	IsContainer   bool   // Whether this is for a container (affects paths)
@@ -161,6 +162,12 @@ func SetupGPUEnv(paths *platform.Paths, config *GPUEnvConfig) (*GPUEnvResult, er
 		cachePath = paths.CacheDir()
 	}
 
+	// LibsPath is for .so/.dll files (used for LD_LIBRARY_PATH, ld.so.conf, ld.so.preload)
+	libsPath := config.LibsPath
+	if libsPath == "" {
+		libsPath = paths.LibsDir()
+	}
+
 	logPath := config.LogPath
 	if logPath == "" {
 		logPath = paths.StudioLogsDir(config.StudioName)
@@ -185,26 +192,26 @@ func SetupGPUEnv(paths *platform.Paths, config *GPUEnvConfig) (*GPUEnvResult, er
 		result.EnvVars["PATH"] = cachePath + ":" + os.Getenv("PATH")
 	}
 
-	// Create ld.so.conf file (contains cache directory for LD_LIBRARY_PATH effect)
+	// Create ld.so.conf file (contains libs directory for LD_LIBRARY_PATH effect)
 	ldConfPath := paths.LDSoConfPath(config.StudioName)
 	if err := os.MkdirAll(filepath.Dir(ldConfPath), 0755); err != nil {
 		return nil, fmt.Errorf("failed to create ld.so.conf.d directory: %w", err)
 	}
 
-	// Content for ld.so.conf.d file
-	ldConfContent := fmt.Sprintf("# TensorFusion GPU libraries\n%s\n", cachePath)
+	// Content for ld.so.conf.d file - points to libs directory (only .so/.dll files)
+	ldConfContent := fmt.Sprintf("# TensorFusion GPU libraries\n%s\n", libsPath)
 	if config.IsContainer {
-		// In container, use the mounted path
-		ldConfContent = "# TensorFusion GPU libraries\n/opt/gpugo/cache\n"
+		// In container, use the mounted libs path
+		ldConfContent = "# TensorFusion GPU libraries\n/opt/gpugo/libs\n"
 	}
 	if err := os.WriteFile(ldConfPath, []byte(ldConfContent), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write ld.so.conf: %w", err)
 	}
 	result.LDSoConfPath = ldConfPath
 
-	// Create ld.so.preload file based on vendor
+	// Create ld.so.preload file based on vendor - uses libs directory
 	ldPreloadPath := paths.LDSoPreloadPath(config.StudioName)
-	ldPreloadContent := generateLDPreloadContent(config.Vendor, cachePath, config.IsContainer)
+	ldPreloadContent := generateLDPreloadContent(config.Vendor, libsPath, config.IsContainer)
 	if err := os.WriteFile(ldPreloadPath, []byte(ldPreloadContent), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write ld.so.preload: %w", err)
 	}
@@ -212,7 +219,14 @@ func SetupGPUEnv(paths *platform.Paths, config *GPUEnvConfig) (*GPUEnvResult, er
 
 	// Set up volume mounts for container mode
 	if config.IsContainer {
-		// Mount cache directory
+		// Mount libs directory (contains only .so files for LD_LIBRARY_PATH/LD_PRELOAD)
+		result.VolumeMounts = append(result.VolumeMounts, VolumeMount{
+			HostPath:      libsPath,
+			ContainerPath: "/opt/gpugo/libs",
+			ReadOnly:      true,
+		})
+
+		// Mount cache directory (for binaries like tensor-fusion-worker if needed)
 		result.VolumeMounts = append(result.VolumeMounts, VolumeMount{
 			HostPath:      cachePath,
 			ContainerPath: "/opt/gpugo/cache",
@@ -248,17 +262,18 @@ func SetupGPUEnv(paths *platform.Paths, config *GPUEnvConfig) (*GPUEnvResult, er
 }
 
 // generateLDPreloadContent generates the content for ld.so.preload based on vendor
-// It first tries to find actual library files in the cache, falling back to canonical names
-func generateLDPreloadContent(vendor GPUVendor, cachePath string, isContainer bool) string {
-	// Find actual library files in cache directory
-	libNames := FindActualLibraryFiles(cachePath, vendor)
+// It first tries to find actual library files in the libs directory, falling back to canonical names
+// libsPath is the path to the libs directory (contains only .so/.dll files)
+func generateLDPreloadContent(vendor GPUVendor, libsPath string, isContainer bool) string {
+	// Find actual library files in libs directory
+	libNames := FindActualLibraryFiles(libsPath, vendor)
 	if len(libNames) == 0 {
 		return "# No GPU libraries to preload\n"
 	}
 
-	basePath := cachePath
+	basePath := libsPath
 	if isContainer {
-		basePath = "/opt/gpugo/cache"
+		basePath = "/opt/gpugo/libs"
 	}
 
 	var lines []string
@@ -276,9 +291,10 @@ func GenerateEnvScript(config *GPUEnvConfig, paths *platform.Paths) (string, err
 		return "", err
 	}
 
-	cachePath := config.CachePath
-	if cachePath == "" {
-		cachePath = paths.CacheDir()
+	// LibsPath is for .so/.dll files (used for LD_LIBRARY_PATH, LD_PRELOAD)
+	libsPath := config.LibsPath
+	if libsPath == "" {
+		libsPath = paths.LibsDir()
 	}
 
 	var script strings.Builder
@@ -291,16 +307,16 @@ func GenerateEnvScript(config *GPUEnvConfig, paths *platform.Paths) (string, err
 		script.WriteString(fmt.Sprintf("export %s=\"%s\"\n", k, v))
 	}
 
-	// Add LD_LIBRARY_PATH
+	// Add LD_LIBRARY_PATH - use libs directory (only contains .so files)
 	script.WriteString("\n# Add GPU libraries to library path\n")
-	script.WriteString(fmt.Sprintf("export LD_LIBRARY_PATH=\"%s:$LD_LIBRARY_PATH\"\n", cachePath))
+	script.WriteString(fmt.Sprintf("export LD_LIBRARY_PATH=\"%s:$LD_LIBRARY_PATH\"\n", libsPath))
 
-	// Add LD_PRELOAD based on vendor
+	// Add LD_PRELOAD based on vendor - use libs directory
 	libNames := GetLibraryNames(config.Vendor)
 	if len(libNames) > 0 {
 		var preloadPaths []string
 		for _, lib := range libNames {
-			preloadPaths = append(preloadPaths, filepath.Join(cachePath, lib))
+			preloadPaths = append(preloadPaths, filepath.Join(libsPath, lib))
 		}
 		script.WriteString("\n# Preload GPU libraries\n")
 		script.WriteString(fmt.Sprintf("export LD_PRELOAD=\"%s${LD_PRELOAD:+:$LD_PRELOAD}\"\n", strings.Join(preloadPaths, ":")))
@@ -320,9 +336,10 @@ func GeneratePowerShellScript(config *GPUEnvConfig, paths *platform.Paths) (stri
 		return "", err
 	}
 
-	cachePath := config.CachePath
-	if cachePath == "" {
-		cachePath = paths.CacheDir()
+	// LibsPath is for .dll files (used for PATH on Windows)
+	libsPath := config.LibsPath
+	if libsPath == "" {
+		libsPath = paths.LibsDir()
 	}
 
 	var script strings.Builder
@@ -343,19 +360,20 @@ func GeneratePowerShellScript(config *GPUEnvConfig, paths *platform.Paths) (stri
 	// Set GPU vendor for ggo launch to detect correct DLLs
 	script.WriteString(fmt.Sprintf("$env:TF_GPU_VENDOR = \"%s\"\n", config.Vendor))
 
-	// Add cache path to PATH at the FRONT (best effort for DLL loading)
+	// Add libs path to PATH at the FRONT (best effort for DLL loading)
+	// libs directory contains only .dll files
 	script.WriteString("\n# Add GPU libraries to PATH (prepend for priority)\n")
-	script.WriteString(fmt.Sprintf("$env:PATH = \"%s;$env:PATH\"\n", cachePath))
+	script.WriteString(fmt.Sprintf("$env:PATH = \"%s;$env:PATH\"\n", libsPath))
 
-	// Set CUDA_PATH for applications that check it
+	// Set CUDA_PATH for applications that check it - point to libs directory
 	script.WriteString("\n# Set CUDA_PATH for CUDA-aware applications\n")
-	script.WriteString(fmt.Sprintf("$env:CUDA_PATH = \"%s\"\n", cachePath))
-	script.WriteString(fmt.Sprintf("$env:CUDA_HOME = \"%s\"\n", cachePath))
+	script.WriteString(fmt.Sprintf("$env:CUDA_PATH = \"%s\"\n", libsPath))
+	script.WriteString(fmt.Sprintf("$env:CUDA_HOME = \"%s\"\n", libsPath))
 
 	// List required DLLs for this vendor
 	windowsDLLs := GetWindowsLibraryNames(config.Vendor)
 	if len(windowsDLLs) > 0 {
-		script.WriteString("\n# Required DLLs for this vendor (should be in cache directory)\n")
+		script.WriteString("\n# Required DLLs for this vendor (should be in libs directory)\n")
 		for _, dll := range windowsDLLs {
 			script.WriteString(fmt.Sprintf("# - %s\n", dll))
 		}
@@ -378,9 +396,10 @@ func GenerateBatchScript(config *GPUEnvConfig, paths *platform.Paths) (string, e
 		return "", err
 	}
 
-	cachePath := config.CachePath
-	if cachePath == "" {
-		cachePath = paths.CacheDir()
+	// LibsPath is for .dll files (used for PATH on Windows)
+	libsPath := config.LibsPath
+	if libsPath == "" {
+		libsPath = paths.LibsDir()
 	}
 
 	var script strings.Builder
@@ -402,19 +421,19 @@ func GenerateBatchScript(config *GPUEnvConfig, paths *platform.Paths) (string, e
 	// Set GPU vendor for ggo launch to detect correct DLLs
 	script.WriteString(fmt.Sprintf("set TF_GPU_VENDOR=%s\n", config.Vendor))
 
-	// Add cache path to PATH at the FRONT
+	// Add libs path to PATH at the FRONT - libs directory contains only .dll files
 	script.WriteString("\nREM Add GPU libraries to PATH (prepend for priority)\n")
-	script.WriteString(fmt.Sprintf("set PATH=%s;%%PATH%%\n", cachePath))
+	script.WriteString(fmt.Sprintf("set PATH=%s;%%PATH%%\n", libsPath))
 
-	// Set CUDA_PATH
+	// Set CUDA_PATH - point to libs directory
 	script.WriteString("\nREM Set CUDA_PATH for CUDA-aware applications\n")
-	script.WriteString(fmt.Sprintf("set CUDA_PATH=%s\n", cachePath))
-	script.WriteString(fmt.Sprintf("set CUDA_HOME=%s\n", cachePath))
+	script.WriteString(fmt.Sprintf("set CUDA_PATH=%s\n", libsPath))
+	script.WriteString(fmt.Sprintf("set CUDA_HOME=%s\n", libsPath))
 
 	// List required DLLs for this vendor
 	windowsDLLs := GetWindowsLibraryNames(config.Vendor)
 	if len(windowsDLLs) > 0 {
-		script.WriteString("\nREM Required DLLs for this vendor (should be in cache directory)\n")
+		script.WriteString("\nREM Required DLLs for this vendor (should be in libs directory)\n")
 		for _, dll := range windowsDLLs {
 			script.WriteString(fmt.Sprintf("REM - %s\n", dll))
 		}
