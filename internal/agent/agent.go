@@ -40,7 +40,7 @@ const (
 	// HardSMLimiterEnv sets compute limit in percent (1-100)
 	HardSMLimiterEnv = "TF_CUDA_SM_PERCENT_LIMIT"
 	// HardMemLimiterEnv sets memory limit in megabytes
-	HardMemLimiterEnv = "TF_CUDA_MEMORY_LIMIT"
+	HardMemLimiterEnv = "TF_GPU_MEMORY_LIMIT"
 
 	// GPU visibility environment variables
 	envCUDAVisibleDevices = "CUDA_VISIBLE_DEVICES"
