@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/NexusGPU/gpu-go/internal/utils"
@@ -194,14 +195,102 @@ func (m *Manager) Start() error {
 
 // Stop gracefully shuts down all hypervisor components
 func (m *Manager) Stop() error {
+	m.mu.RLock()
+	if !m.started {
+		m.mu.RUnlock()
+		return nil
+	}
+
+	// Get list of all workers before stopping
+	var workers []*api.WorkerInfo
+	if m.backend != nil {
+		workers = m.backend.ListWorkers()
+	}
+	m.mu.RUnlock()
+
+	// Stop all workers explicitly and wait for their processes to exit
+	if len(workers) > 0 {
+		klog.Infof("Stopping %d worker(s) before shutting down hypervisor manager", len(workers))
+
+		// Collect PIDs of running workers
+		var workerPIDs []int
+		for _, w := range workers {
+			if w.WorkerRunningInfo != nil && w.WorkerRunningInfo.IsRunning {
+				pid := int(w.WorkerRunningInfo.PID)
+				if pid > 0 {
+					workerPIDs = append(workerPIDs, pid)
+					// Stop the worker (this sends SIGTERM)
+					if err := m.StopWorker(w.WorkerUID); err != nil {
+						klog.Warningf("Failed to stop worker during shutdown: worker_uid=%s error=%v", w.WorkerUID, err)
+					}
+				}
+			}
+		}
+
+		// Wait for all worker processes to exit (with timeout)
+		if len(workerPIDs) > 0 {
+			timeout := 20 * time.Second
+			deadline := time.Now().Add(timeout)
+			allExited := false
+
+			for !allExited && time.Now().Before(deadline) {
+				allExited = true
+				for _, pid := range workerPIDs {
+					// Check if process is still running by sending signal 0
+					process, err := os.FindProcess(pid)
+					if err == nil {
+						// On Unix, FindProcess always succeeds, so check with signal 0
+						if err := process.Signal(syscall.Signal(0)); err == nil {
+							// Process is still running
+							allExited = false
+							break
+						}
+					}
+				}
+				if !allExited {
+					time.Sleep(100 * time.Millisecond)
+				}
+			}
+
+			if !allExited {
+				klog.Warningf("Some worker processes did not exit within timeout, force killing remaining processes")
+				// Force kill any remaining processes - kill entire process group to include child processes
+				for _, pid := range workerPIDs {
+					// First check if the main process is still running
+					if err := syscall.Kill(pid, syscall.Signal(0)); err == nil {
+						// Process is still running, force kill the entire process group
+						// Using negative PID kills all processes in the process group
+						if killErr := syscall.Kill(-pid, syscall.SIGKILL); killErr != nil {
+							// If process group kill fails (e.g., not a process group leader), try killing just the process
+							klog.V(4).Infof("Process group kill failed (pid=%d), trying single process kill: %v", pid, killErr)
+							if killErr := syscall.Kill(pid, syscall.SIGKILL); killErr != nil {
+								klog.Warningf("Failed to force kill worker process: pid=%d error=%v", pid, killErr)
+							} else {
+								klog.Infof("Force killed worker process: pid=%d", pid)
+							}
+						} else {
+							klog.Infof("Force killed worker process group: pgid=%d", pid)
+						}
+					}
+				}
+				// Give processes a moment to exit after SIGKILL
+				time.Sleep(500 * time.Millisecond)
+			} else {
+				klog.Infof("All worker processes exited gracefully")
+			}
+		}
+	}
+
+	// Now stop the components
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// Double-check started state (might have changed)
 	if !m.started {
 		return nil
 	}
 
-	klog.Info("Stopping hypervisor manager")
+	klog.Info("Stopping hypervisor manager components")
 
 	var errs []error
 
