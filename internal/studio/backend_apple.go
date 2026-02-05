@@ -122,8 +122,22 @@ func (b *AppleContainerBackend) Create(ctx context.Context, opts *CreateOptions)
 	if opts.Resources.CPUs > 0 {
 		args = append(args, "--cpus", fmt.Sprintf("%.2f", opts.Resources.CPUs))
 	}
-	if opts.Resources.Memory != "" {
-		args = append(args, "--memory", opts.Resources.Memory)
+
+	// Set default memory to 1/4 of system memory if not specified
+	memoryLimit := opts.Resources.Memory
+	if memoryLimit == "" {
+		memGB, err := getSystemMemoryGB()
+		if err == nil && memGB > 0 {
+			// Calculate 1/4 of system memory (round up)
+			memAllocated := (memGB + 3) / 4 // Round up division
+			if memAllocated < 1 {
+				memAllocated = 1 // Minimum 1GB
+			}
+			memoryLimit = fmt.Sprintf("%dGi", memAllocated)
+		}
+	}
+	if memoryLimit != "" {
+		args = append(args, "--memory", memoryLimit)
 	}
 
 	// Add working directory
