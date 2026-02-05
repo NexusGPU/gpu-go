@@ -260,3 +260,64 @@ func TestManager_ListAvailableBackends(t *testing.T) {
 	assert.Len(t, backends, 1)
 	assert.Equal(t, ModeDocker, backends[0].Mode())
 }
+
+func TestFormatContainerCommand(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []string
+		expected []string
+	}{
+		{
+			name:     "empty command",
+			input:    []string{},
+			expected: nil,
+		},
+		{
+			name:     "nil command",
+			input:    nil,
+			expected: nil,
+		},
+		{
+			name:     "multiple args - passed as-is",
+			input:    []string{"sh", "-c", "sleep 1d"},
+			expected: []string{"sh", "-c", "sleep 1d"},
+		},
+		{
+			name:     "single simple command without shell chars",
+			input:    []string{"sleep"},
+			expected: []string{"sleep"},
+		},
+		{
+			name:     "single shell command with space - wrapped",
+			input:    []string{"sh -c 'sleep 1d'"},
+			expected: []string{"sh", "-c", "sh -c 'sleep 1d'"},
+		},
+		{
+			name:     "single command with pipe - wrapped",
+			input:    []string{"echo hello | cat"},
+			expected: []string{"sh", "-c", "echo hello | cat"},
+		},
+		{
+			name:     "single command with && - wrapped",
+			input:    []string{"sleep 1d && echo done"},
+			expected: []string{"sh", "-c", "sleep 1d && echo done"},
+		},
+		{
+			name:     "single command with semicolon - wrapped",
+			input:    []string{"echo hello; sleep 1d"},
+			expected: []string{"sh", "-c", "echo hello; sleep 1d"},
+		},
+		{
+			name:     "single command with quotes - wrapped",
+			input:    []string{`echo "hello world"`},
+			expected: []string{"sh", "-c", `echo "hello world"`},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := FormatContainerCommand(tc.input)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+}

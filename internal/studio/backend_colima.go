@@ -248,14 +248,14 @@ func (b *ColimaBackend) EnsureRunning(ctx context.Context) error {
 		return nil
 	}
 
-	// Detect system resources and calculate 60% allocation
+	// Detect system resources and calculate 1/4 allocation for VM
 	memGB, err := getSystemMemoryGB()
 	if err != nil {
 		// Fallback to 8GB if detection fails
 		memGB = 8
 	}
-	// Calculate 60% and round up to ensure sufficient memory
-	memAllocated := int(float64(memGB)*0.6 + 0.5)
+	// Calculate 1/4 of system memory (round up)
+	memAllocated := (memGB + 3) / 4
 	if memAllocated < 2 {
 		memAllocated = 2 // Minimum 2GB
 	}
@@ -287,8 +287,8 @@ func (b *ColimaBackend) EnsureRunning(ctx context.Context) error {
 
 	// Start Colima with the specified profile
 	// - CPU: use all available cores (no limit)
-	// - Memory: 60% of system memory (minimum 2GB)
-	// - Disk: 60% of available disk space (minimum 500GB)
+	// - Memory: 1/4 of system memory (minimum 2GB)
+	// - Disk: 60% of available disk space (minimum 200GB)
 	// - DNS: configure DNS servers to fix Docker pull issues
 	cmd := exec.CommandContext(ctx, "colima", "start",
 		"-p", b.profile,
@@ -315,8 +315,8 @@ func (b *ColimaBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 		return nil, err
 	}
 
-	// Generate container name
-	containerName := fmt.Sprintf("ggo-%s", opts.Name)
+	// Generate container name with random suffix to avoid conflicts
+	containerName := GenerateContainerName(opts.Name)
 
 	// Build docker run command
 	args := []string{"run", "-d", "--name", containerName}
@@ -326,31 +326,54 @@ func (b *ColimaBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	args = append(args, "--label", fmt.Sprintf("ggo.name=%s", opts.Name))
 	args = append(args, "--label", "ggo.mode=colima")
 
-	// Find available SSH port
-	sshPort := findAvailablePort(2222)
-	args = append(args, "-p", fmt.Sprintf("%d:22", sshPort))
-
-	// Add additional port mappings
+	// Add port mappings
+	sshPort := 0
 	for _, port := range opts.Ports {
 		protocol := port.Protocol
 		if protocol == "" {
-			protocol = "tcp"
+			protocol = DefaultProtocolTCP
 		}
 		args = append(args, "-p", fmt.Sprintf("%d:%d/%s", port.HostPort, port.ContainerPort, protocol))
+		if port.ContainerPort == 22 {
+			sshPort = port.HostPort
+		}
 	}
 
-	// Add environment variables
-	if opts.GPUWorkerURL != "" {
-		args = append(args, "-e", fmt.Sprintf("GPU_GO_CONNECTION_URL=%s", opts.GPUWorkerURL))
-		args = append(args, "-e", "CUDA_VISIBLE_DEVICES=0")
+	// Add default SSH port if not specified
+	if sshPort == 0 {
+		sshPort = findAvailablePort(2222)
+		args = append(args, "-p", fmt.Sprintf("%d:22/tcp", sshPort))
 	}
 
-	for k, v := range opts.Envs {
+	// Use endpoint override if specified
+	gpuWorkerURL := opts.GPUWorkerURL
+	if opts.Endpoint != "" {
+		gpuWorkerURL = opts.Endpoint
+	}
+
+	// Setup container GPU environment using common abstraction
+	// This downloads GPU client libraries and sets up env vars, volumes
+	setupConfig := &ContainerSetupConfig{
+		StudioName:     opts.Name,
+		GPUWorkerURL:   gpuWorkerURL,
+		HardwareVendor: opts.HardwareVendor,
+		MountUserHome:  !opts.NoUserVolume,
+	}
+
+	setupResult, err := SetupContainerGPUEnv(ctx, setupConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to setup container environment: %w", err)
+	}
+
+	// Merge setup env vars with user env vars (user takes precedence)
+	mergedEnvs := MergeEnvVars(setupResult.EnvVars, opts.Envs)
+	for k, v := range mergedEnvs {
 		args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
 	}
 
-	// Add volume mounts
-	for _, vol := range opts.Volumes {
+	// Merge setup volumes with user volumes (user takes precedence)
+	mergedVolumes := MergeVolumeMounts(setupResult.VolumeMounts, opts.Volumes)
+	for _, vol := range mergedVolumes {
 		mountOpt := fmt.Sprintf("%s:%s", vol.HostPath, vol.ContainerPath)
 		if vol.ReadOnly {
 			mountOpt += MountOptionReadOnly
@@ -362,8 +385,22 @@ func (b *ColimaBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	if opts.Resources.CPUs > 0 {
 		args = append(args, "--cpus", fmt.Sprintf("%.2f", opts.Resources.CPUs))
 	}
-	if opts.Resources.Memory != "" {
-		args = append(args, "--memory", opts.Resources.Memory)
+
+	// Set default memory to 1/4 of system memory if not specified
+	memoryLimit := opts.Resources.Memory
+	if memoryLimit == "" {
+		memGB, err := getSystemMemoryGB()
+		if err == nil && memGB > 0 {
+			// Calculate 1/4 of system memory (round up)
+			memAllocated := (memGB + 3) / 4 // Round up division
+			if memAllocated < 1 {
+				memAllocated = 1 // Minimum 1GB
+			}
+			memoryLimit = fmt.Sprintf("%dg", memAllocated)
+		}
+	}
+	if memoryLimit != "" {
+		args = append(args, "--memory", memoryLimit)
 	}
 
 	// Add image
@@ -372,6 +409,12 @@ func (b *ColimaBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 		image = DefaultImageStudioTorch
 	}
 	args = append(args, image)
+
+	// Add command args (supplements ENTRYPOINT or overrides CMD)
+	// FormatContainerCommand handles wrapping single shell commands with "sh -c"
+	if formattedCmd := FormatContainerCommand(opts.Command); len(formattedCmd) > 0 {
+		args = append(args, formattedCmd...)
+	}
 
 	// Pull image first with progress visible to user
 	if err := b.pullImageWithProgress(ctx, image); err != nil {
@@ -397,7 +440,7 @@ func (b *ColimaBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 		SSHHost:      "localhost",
 		SSHPort:      sshPort,
 		SSHUser:      "root",
-		GPUWorkerURL: opts.GPUWorkerURL,
+		GPUWorkerURL: gpuWorkerURL,
 		CreatedAt:    time.Now(),
 		Labels:       opts.Labels,
 	}
@@ -456,18 +499,23 @@ func (b *ColimaBackend) List(ctx context.Context) ([]*Environment, error) {
 		}
 
 		var container struct {
-			ID    string `json:"ID"`
-			Names string `json:"Names"`
-			Image string `json:"Image"`
-			State string `json:"State"`
-			Ports string `json:"Ports"`
+			ID     string `json:"ID"`
+			Names  string `json:"Names"`
+			Image  string `json:"Image"`
+			State  string `json:"State"`
+			Ports  string `json:"Ports"`
+			Labels string `json:"Labels"`
 		}
 
 		if err := json.Unmarshal([]byte(line), &container); err != nil {
 			continue
 		}
 
+		// Parse name from labels if available, otherwise strip prefix
 		name := strings.TrimPrefix(container.Names, "ggo-")
+		if labelName := extractLabelValue(container.Labels, "ggo.name"); labelName != "" {
+			name = labelName
+		}
 		sshPort := parseSSHPort(container.Ports)
 
 		status := StatusStopped

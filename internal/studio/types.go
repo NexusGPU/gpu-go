@@ -4,6 +4,9 @@ package studio
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"strings"
 	"time"
 )
 
@@ -126,6 +129,12 @@ type CreateOptions struct {
 	Volumes        []VolumeMount     `json:"volumes,omitempty"`
 	Resources      ResourceSpec      `json:"resources,omitempty"`
 	Labels         map[string]string `json:"labels,omitempty"`
+	// NoUserVolume disables automatic mounting of user's home directory
+	NoUserVolume bool `json:"no_user_volume,omitempty"`
+	// Command specifies the container startup command or supplements ENTRYPOINT args
+	Command []string `json:"command,omitempty"`
+	// Endpoint overrides the GPU worker endpoint URL
+	Endpoint string `json:"endpoint,omitempty"`
 }
 
 // PortMapping represents a port mapping
@@ -220,4 +229,67 @@ func (c *SSHConfig) GenerateSSHConfigEntry() string {
 		entry += "    " + k + " " + v + "\n"
 	}
 	return entry
+}
+
+// GenerateContainerName generates a unique container name with random suffix
+func GenerateContainerName(name string) string {
+	suffix := generateRandomSuffix(4)
+	return "ggo-" + name + "-" + suffix
+}
+
+// generateRandomSuffix generates a random hex string of specified length
+func generateRandomSuffix(length int) string {
+	bytes := make([]byte, (length+1)/2)
+	if _, err := rand.Read(bytes); err != nil {
+		// Fallback to timestamp-based suffix if random fails
+		return hex.EncodeToString([]byte{byte(time.Now().UnixNano() & 0xFF)})[:length]
+	}
+	return hex.EncodeToString(bytes)[:length]
+}
+
+// extractLabelValue extracts a label value from docker ps Labels format (comma-separated key=value pairs)
+func extractLabelValue(labels, key string) string {
+	for _, label := range strings.Split(labels, ",") {
+		parts := strings.SplitN(strings.TrimSpace(label), "=", 2)
+		if len(parts) == 2 && parts[0] == key {
+			return parts[1]
+		}
+	}
+	return ""
+}
+
+// FormatContainerCommand formats the command slice for docker/container execution.
+// If a single command string is passed that looks like a shell command (contains spaces
+// or shell metacharacters), it wraps with "sh -c" to ensure proper shell interpretation.
+// This handles cases like: -c "sh -c 'sleep 1d'" or -c "sleep 1d && echo done"
+func FormatContainerCommand(command []string) []string {
+	if len(command) == 0 {
+		return nil
+	}
+
+	// If multiple arguments, pass as-is (user specified proper arguments)
+	if len(command) > 1 {
+		return command
+	}
+
+	// Single argument - check if it needs shell interpretation
+	cmd := command[0]
+
+	// If the single command contains shell metacharacters, wrap with sh -c
+	// This handles: "sh -c 'sleep 1d'", "sleep 1d && echo done", etc.
+	shellMetaChars := []string{" ", ";", "&", "|", ">", "<", "$", "`", "(", ")", "{", "}", "'", "\""}
+	needsShell := false
+	for _, meta := range shellMetaChars {
+		if strings.Contains(cmd, meta) {
+			needsShell = true
+			break
+		}
+	}
+
+	if needsShell {
+		return []string{"sh", "-c", cmd}
+	}
+
+	// Simple command without shell metacharacters, pass as-is
+	return command
 }

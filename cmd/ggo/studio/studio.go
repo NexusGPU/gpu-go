@@ -31,6 +31,8 @@ var (
 	wslDistro     string
 	dockerHost    string
 	outputFormat  string
+	command       []string
+	endpoint      string
 )
 
 // NewStudioCmd creates the studio command
@@ -164,7 +166,13 @@ Examples:
   ggo studio create my-env -s abc123 -p 8888:8888 -v ~/projects:/workspace
 
   # Best practice: mount user data directory to prevent data loss on studio rebuild
-  ggo studio create my-env -s abc123 -v ~/data:/data`,
+  ggo studio create my-env -s abc123 -v ~/data:/data
+
+  # Create with custom startup command (supplements ENTRYPOINT args)
+  ggo studio create my-env -s abc123 -c /bin/bash -c "echo hello"
+
+  # Create with endpoint override (override GPU worker endpoint)
+  ggo studio create my-env -s abc123 --endpoint "https://custom-worker.example.com:9001"`,
 		Args: cobra.ExactArgs(1),
 		RunE: runCreate,
 	}
@@ -183,6 +191,8 @@ Examples:
 	cmd.Flags().StringVar(&colimaProfile, "colima-profile", "", "Colima profile name (default: 'default')")
 	cmd.Flags().StringVar(&wslDistro, "wsl-distro", "", "WSL distribution name (default: use default distro)")
 	cmd.Flags().StringVar(&dockerHost, "docker-host", "", "Custom Docker socket path (e.g., unix:///path/to/docker.sock)")
+	cmd.Flags().StringArrayVarP(&command, "command", "c", nil, "Container startup command or ENTRYPOINT args (can be specified multiple times)")
+	cmd.Flags().StringVar(&endpoint, "endpoint", "", "Override GPU worker endpoint URL")
 
 	return cmd
 }
@@ -323,6 +333,16 @@ func buildCreateOptions(name string, shareInfo *api.SharePublicInfo) (*studio.Cr
 		hardwareVendor = shareInfo.HardwareVendor
 	}
 
+	// Allow --endpoint to override the connection URL
+	endpointOverride := ""
+	if endpoint != "" {
+		endpointOverride = endpoint
+		// If endpoint is specified but no share link, use endpoint as gpuWorkerURL
+		if gpuWorkerURL == "" {
+			gpuWorkerURL = endpoint
+		}
+	}
+
 	return &studio.CreateOptions{
 		Name:           name,
 		Mode:           studioMode,
@@ -337,6 +357,8 @@ func buildCreateOptions(name string, shareInfo *api.SharePublicInfo) (*studio.Cr
 			CPUs:   cpus,
 			Memory: memory,
 		},
+		Command:  command,
+		Endpoint: endpointOverride,
 	}, nil
 }
 

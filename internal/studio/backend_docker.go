@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NexusGPU/gpu-go/internal/platform"
 	"k8s.io/klog/v2"
 )
 
@@ -93,11 +92,8 @@ func (b *DockerBackend) pullImageWithProgress(ctx context.Context, image string)
 }
 
 func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Environment, error) {
-	paths := platform.DefaultPaths()
-
-	// Generate container name
-	containerName := fmt.Sprintf("ggo-%s", opts.Name)
-	normalizedName := platform.NormalizeName(opts.Name)
+	// Generate container name with random suffix to avoid conflicts
+	containerName := GenerateContainerName(opts.Name)
 
 	// Build docker run command
 	args := []string{"run", "-d", "--name", containerName}
@@ -112,9 +108,12 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	for _, port := range opts.Ports {
 		protocol := port.Protocol
 		if protocol == "" {
-			protocol = "tcp"
+			protocol = DefaultProtocolTCP
 		}
 		args = append(args, "-p", fmt.Sprintf("%d:%d/%s", port.HostPort, port.ContainerPort, protocol))
+		if port.ContainerPort == 22 {
+			sshPort = port.HostPort
+		}
 	}
 
 	// Add default SSH port if not specified
@@ -123,59 +122,38 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 		args = append(args, "-p", fmt.Sprintf("%d:22/tcp", sshPort))
 	}
 
-	// Setup GPU environment if GPU worker URL is provided
-	if opts.GPUWorkerURL != "" {
-		vendor := ParseVendor(opts.HardwareVendor)
-
-		// Create GPU environment config
-		gpuConfig := &GPUEnvConfig{
-			Vendor:        vendor,
-			ConnectionURL: opts.GPUWorkerURL,
-			CachePath:     paths.CacheDir(),
-			LogPath:       paths.StudioLogsDir(normalizedName),
-			StudioName:    normalizedName,
-			IsContainer:   true,
-		}
-
-		// Setup GPU environment (creates config files)
-		envResult, err := SetupGPUEnv(paths, gpuConfig)
-		if err != nil {
-			return nil, fmt.Errorf("failed to setup GPU environment: %w", err)
-		}
-
-		klog.Infof("Setting up GPU environment for studio %s: vendor=%s connection_url=%s",
-			opts.Name, vendor, opts.GPUWorkerURL)
-
-		// Add environment variables
-		for k, v := range envResult.EnvVars {
-			args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
-		}
-
-		// Add CUDA_VISIBLE_DEVICES for NVIDIA
-		if vendor == VendorNvidia {
-			args = append(args, "-e", "CUDA_VISIBLE_DEVICES=0")
-		}
-
-		// Add volume mounts from GPU env setup
-		for _, vol := range envResult.VolumeMounts {
-			mountOpt := fmt.Sprintf("%s:%s", vol.HostPath, vol.ContainerPath)
-			if vol.ReadOnly {
-				mountOpt += MountOptionReadOnly
-			}
-			args = append(args, "-v", mountOpt)
-		}
+	// Use endpoint override if specified
+	gpuWorkerURL := opts.GPUWorkerURL
+	if opts.Endpoint != "" {
+		gpuWorkerURL = opts.Endpoint
 	}
 
-	// Add user-specified environment variables
-	for k, v := range opts.Envs {
+	// Setup container GPU environment using common abstraction
+	// This downloads GPU client libraries and sets up env vars, volumes
+	setupConfig := &ContainerSetupConfig{
+		StudioName:     opts.Name,
+		GPUWorkerURL:   gpuWorkerURL,
+		HardwareVendor: opts.HardwareVendor,
+		MountUserHome:  !opts.NoUserVolume,
+	}
+
+	setupResult, err := SetupContainerGPUEnv(ctx, setupConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to setup container environment: %w", err)
+	}
+
+	// Merge setup env vars with user env vars (user takes precedence)
+	mergedEnvs := MergeEnvVars(setupResult.EnvVars, opts.Envs)
+	for k, v := range mergedEnvs {
 		args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
 	}
 
-	// Add user-specified volume mounts
-	for _, vol := range opts.Volumes {
+	// Merge setup volumes with user volumes (user takes precedence)
+	mergedVolumes := MergeVolumeMounts(setupResult.VolumeMounts, opts.Volumes)
+	for _, vol := range mergedVolumes {
 		mountOpt := fmt.Sprintf("%s:%s", vol.HostPath, vol.ContainerPath)
 		if vol.ReadOnly {
-			mountOpt += ":ro"
+			mountOpt += MountOptionReadOnly
 		}
 		args = append(args, "-v", mountOpt)
 	}
@@ -184,8 +162,22 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	if opts.Resources.CPUs > 0 {
 		args = append(args, "--cpus", fmt.Sprintf("%.2f", opts.Resources.CPUs))
 	}
-	if opts.Resources.Memory != "" {
-		args = append(args, "--memory", opts.Resources.Memory)
+
+	// Set default memory to 1/4 of system memory if not specified
+	memoryLimit := opts.Resources.Memory
+	if memoryLimit == "" {
+		memGB, err := getSystemMemoryGB()
+		if err == nil && memGB > 0 {
+			// Calculate 1/4 of system memory (round up)
+			memAllocated := (memGB + 3) / 4 // Round up division
+			if memAllocated < 1 {
+				memAllocated = 1 // Minimum 1GB
+			}
+			memoryLimit = fmt.Sprintf("%dg", memAllocated)
+		}
+	}
+	if memoryLimit != "" {
+		args = append(args, "--memory", memoryLimit)
 	}
 
 	// Add working directory
@@ -196,9 +188,15 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	// Add image
 	image := opts.Image
 	if image == "" {
-		image = "tensorfusion/studio-torch:latest"
+		image = DefaultImageStudioTorch
 	}
 	args = append(args, image)
+
+	// Add command args (supplements ENTRYPOINT or overrides CMD)
+	// FormatContainerCommand handles wrapping single shell commands with "sh -c"
+	if formattedCmd := FormatContainerCommand(opts.Command); len(formattedCmd) > 0 {
+		args = append(args, formattedCmd...)
+	}
 
 	klog.V(2).Infof("Running docker command: %s %v", b.dockerCmd, args)
 
@@ -227,7 +225,7 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 		SSHHost:      "localhost",
 		SSHPort:      sshPort,
 		SSHUser:      "root",
-		GPUWorkerURL: opts.GPUWorkerURL,
+		GPUWorkerURL: gpuWorkerURL,
 		CreatedAt:    time.Now(),
 		Labels:       opts.Labels,
 	}

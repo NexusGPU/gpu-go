@@ -210,8 +210,8 @@ func (b *WSLBackend) Create(ctx context.Context, opts *CreateOptions) (*Environm
 		return nil, fmt.Errorf("docker not available in WSL: %s", string(output))
 	}
 
-	// Create container using Docker in WSL
-	containerName := fmt.Sprintf("ggo-%s", opts.Name)
+	// Create container using Docker in WSL with random suffix to avoid conflicts
+	containerName := GenerateContainerName(opts.Name)
 
 	// Build docker run command
 	args := []string{"docker", "run", "-d", "--name", containerName}
@@ -221,26 +221,59 @@ func (b *WSLBackend) Create(ctx context.Context, opts *CreateOptions) (*Environm
 	args = append(args, "--label", fmt.Sprintf("ggo.name=%s", opts.Name))
 	args = append(args, "--label", "ggo.mode=wsl")
 
-	// Find available SSH port
-	sshPort := findAvailablePort(2222)
-	args = append(args, "-p", fmt.Sprintf("%d:22", sshPort))
-
-	// Add environment variables
-	if opts.GPUWorkerURL != "" {
-		args = append(args, "-e", fmt.Sprintf("GPU_GO_CONNECTION_URL=%s", opts.GPUWorkerURL))
-		args = append(args, "-e", "CUDA_VISIBLE_DEVICES=0")
+	// Add port mappings
+	sshPort := 0
+	for _, port := range opts.Ports {
+		protocol := port.Protocol
+		if protocol == "" {
+			protocol = DefaultProtocolTCP
+		}
+		args = append(args, "-p", fmt.Sprintf("%d:%d/%s", port.HostPort, port.ContainerPort, protocol))
+		if port.ContainerPort == 22 {
+			sshPort = port.HostPort
+		}
 	}
 
-	for k, v := range opts.Envs {
+	// Add default SSH port if not specified
+	if sshPort == 0 {
+		sshPort = findAvailablePort(2222)
+		args = append(args, "-p", fmt.Sprintf("%d:22/tcp", sshPort))
+	}
+
+	// Use endpoint override if specified
+	gpuWorkerURL := opts.GPUWorkerURL
+	if opts.Endpoint != "" {
+		gpuWorkerURL = opts.Endpoint
+	}
+
+	// Setup container GPU environment using common abstraction
+	// This downloads GPU client libraries and sets up env vars, volumes
+	setupConfig := &ContainerSetupConfig{
+		StudioName:     opts.Name,
+		GPUWorkerURL:   gpuWorkerURL,
+		HardwareVendor: opts.HardwareVendor,
+		MountUserHome:  !opts.NoUserVolume,
+	}
+
+	setupResult, err := SetupContainerGPUEnv(ctx, setupConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to setup container environment: %w", err)
+	}
+
+	// Merge setup env vars with user env vars (user takes precedence)
+	mergedEnvs := MergeEnvVars(setupResult.EnvVars, opts.Envs)
+	for k, v := range mergedEnvs {
 		args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
 	}
 
-	// Add volume mounts (convert Windows paths to WSL paths)
-	for _, vol := range opts.Volumes {
+	// Merge setup volumes with user volumes (user takes precedence)
+	// Convert Windows paths to WSL paths for volume mounts
+	mergedVolumes := MergeVolumeMounts(setupResult.VolumeMounts, opts.Volumes)
+	for _, vol := range mergedVolumes {
 		hostPath := b.windowsToWSLPath(vol.HostPath)
 		mountOpt := fmt.Sprintf("%s:%s", hostPath, vol.ContainerPath)
 		if vol.ReadOnly {
-			mountOpt += ":ro"
+			mountOpt += MountOptionReadOnly
 		}
 		args = append(args, "-v", mountOpt)
 	}
@@ -248,9 +281,15 @@ func (b *WSLBackend) Create(ctx context.Context, opts *CreateOptions) (*Environm
 	// Add image
 	image := opts.Image
 	if image == "" {
-		image = "tensorfusion/studio-torch:latest"
+		image = DefaultImageStudioTorch
 	}
 	args = append(args, image)
+
+	// Add command args (supplements ENTRYPOINT or overrides CMD)
+	// FormatContainerCommand handles wrapping single shell commands with "sh -c"
+	if formattedCmd := FormatContainerCommand(opts.Command); len(formattedCmd) > 0 {
+		args = append(args, formattedCmd...)
+	}
 
 	// Run in WSL
 	output, err = b.runInWSL(ctx, distro, args...)
@@ -269,7 +308,7 @@ func (b *WSLBackend) Create(ctx context.Context, opts *CreateOptions) (*Environm
 		SSHHost:      "localhost",
 		SSHPort:      sshPort,
 		SSHUser:      "root",
-		GPUWorkerURL: opts.GPUWorkerURL,
+		GPUWorkerURL: gpuWorkerURL,
 		CreatedAt:    time.Now(),
 		Labels: map[string]string{
 			"wsl.distro": distro,
@@ -331,18 +370,23 @@ func (b *WSLBackend) List(ctx context.Context) ([]*Environment, error) {
 		}
 
 		var container struct {
-			ID    string `json:"ID"`
-			Names string `json:"Names"`
-			Image string `json:"Image"`
-			State string `json:"State"`
-			Ports string `json:"Ports"`
+			ID     string `json:"ID"`
+			Names  string `json:"Names"`
+			Image  string `json:"Image"`
+			State  string `json:"State"`
+			Ports  string `json:"Ports"`
+			Labels string `json:"Labels"`
 		}
 
 		if err := json.Unmarshal([]byte(line), &container); err != nil {
 			continue
 		}
 
+		// Parse name from labels if available, otherwise strip prefix
 		name := strings.TrimPrefix(container.Names, "ggo-")
+		if labelName := extractLabelValue(container.Labels, "ggo.name"); labelName != "" {
+			name = labelName
+		}
 		sshPort := parseSSHPort(container.Ports)
 
 		status := StatusStopped

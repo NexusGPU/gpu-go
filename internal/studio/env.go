@@ -53,6 +53,8 @@ type GPUEnvResult struct {
 }
 
 // GetLibraryNames returns the library names to preload for a vendor (Linux/macOS)
+// Note: These are the expected canonical names. Use FindActualLibraryFiles to
+// discover actual downloaded files which may have different names.
 func GetLibraryNames(vendor GPUVendor) []string {
 	switch vendor {
 	case VendorNvidia:
@@ -62,6 +64,68 @@ func GetLibraryNames(vendor GPUVendor) []string {
 	default:
 		return []string{}
 	}
+}
+
+// FindActualLibraryFiles scans the cache directory for actual GPU library files
+// that should be preloaded. This handles cases where downloaded files have different
+// names than the canonical library names.
+func FindActualLibraryFiles(cachePath string, vendor GPUVendor) []string {
+	var libs []string
+
+	// First try to find canonical library names
+	canonicalNames := GetLibraryNames(vendor)
+	for _, name := range canonicalNames {
+		libPath := filepath.Join(cachePath, name)
+		if _, err := os.Stat(libPath); err == nil {
+			libs = append(libs, name)
+		}
+	}
+
+	// If canonical names found, use them
+	if len(libs) > 0 {
+		return libs
+	}
+
+	// Otherwise, scan for .so files that match vendor patterns
+	entries, err := os.ReadDir(cachePath)
+	if err != nil {
+		return canonicalNames // Fall back to canonical names if can't read dir
+	}
+
+	// Patterns for different vendors
+	var patterns []string
+	switch vendor {
+	case VendorNvidia:
+		patterns = []string{"libcuda", "libnvidia", "nvcuda", "nvml"}
+	case VendorAMD, VendorHygon:
+		patterns = []string{"libamdhip", "librocm", "amdhip"}
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		// Check if it's a shared library
+		if !strings.HasSuffix(name, ".so") && !strings.Contains(name, ".so.") {
+			continue
+		}
+		// Check if it matches any vendor pattern
+		nameLower := strings.ToLower(name)
+		for _, pattern := range patterns {
+			if strings.Contains(nameLower, pattern) {
+				libs = append(libs, name)
+				break
+			}
+		}
+	}
+
+	// If still no libraries found, return canonical names as fallback
+	if len(libs) == 0 {
+		return canonicalNames
+	}
+
+	return libs
 }
 
 // GetWindowsLibraryNames returns the DLL names for a vendor (Windows)
@@ -184,8 +248,10 @@ func SetupGPUEnv(paths *platform.Paths, config *GPUEnvConfig) (*GPUEnvResult, er
 }
 
 // generateLDPreloadContent generates the content for ld.so.preload based on vendor
+// It first tries to find actual library files in the cache, falling back to canonical names
 func generateLDPreloadContent(vendor GPUVendor, cachePath string, isContainer bool) string {
-	libNames := GetLibraryNames(vendor)
+	// Find actual library files in cache directory
+	libNames := FindActualLibraryFiles(cachePath, vendor)
 	if len(libNames) == 0 {
 		return "# No GPU libraries to preload\n"
 	}

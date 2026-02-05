@@ -54,8 +54,8 @@ func (b *AppleContainerBackend) IsAvailable(ctx context.Context) bool {
 }
 
 func (b *AppleContainerBackend) Create(ctx context.Context, opts *CreateOptions) (*Environment, error) {
-	// Generate container name
-	containerName := fmt.Sprintf("ggo-%s", opts.Name)
+	// Generate container name with random suffix to avoid conflicts
+	containerName := GenerateContainerName(opts.Name)
 
 	// Build docker run command
 	args := []string{"run", "-d", "--name", containerName}
@@ -84,33 +84,35 @@ func (b *AppleContainerBackend) Create(ctx context.Context, opts *CreateOptions)
 		args = append(args, "-p", fmt.Sprintf("%d:22/tcp", sshPort))
 	}
 
-	// Setup GPU connection environment
-	if opts.GPUWorkerURL != "" {
-		// Parse worker URL to extract connection info
-		connInfo, err := parseGPUWorkerURL(opts.GPUWorkerURL)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse GPU worker URL: %w", err)
-		}
-
-		// Add TENSOR_FUSION_CONNECTION env var with connection details
-		args = append(args, "-e", fmt.Sprintf("TENSOR_FUSION_CONNECTION=%s", connInfo))
-		args = append(args, "-e", fmt.Sprintf("GPU_WORKER_URL=%s", opts.GPUWorkerURL))
-		args = append(args, "-e", "CUDA_VISIBLE_DEVICES=0")
-
-		// Mount directory for GPU libraries
-		args = append(args, "-v", "/tmp/tensor-fusion/libs:/usr/local/tensor-fusion/libs:ro")
-
-		// Set LD_LIBRARY_PATH to include GPU libraries
-		args = append(args, "-e", "LD_LIBRARY_PATH=/usr/local/tensor-fusion/libs:$LD_LIBRARY_PATH")
+	// Use endpoint override if specified
+	gpuWorkerURL := opts.GPUWorkerURL
+	if opts.Endpoint != "" {
+		gpuWorkerURL = opts.Endpoint
 	}
 
-	// Add custom environment variables
-	for k, v := range opts.Envs {
+	// Setup container GPU environment using common abstraction
+	// This downloads GPU client libraries and sets up env vars, volumes
+	setupConfig := &ContainerSetupConfig{
+		StudioName:     opts.Name,
+		GPUWorkerURL:   gpuWorkerURL,
+		HardwareVendor: opts.HardwareVendor,
+		MountUserHome:  !opts.NoUserVolume,
+	}
+
+	setupResult, err := SetupContainerGPUEnv(ctx, setupConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to setup container environment: %w", err)
+	}
+
+	// Merge setup env vars with user env vars (user takes precedence)
+	mergedEnvs := MergeEnvVars(setupResult.EnvVars, opts.Envs)
+	for k, v := range mergedEnvs {
 		args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
 	}
 
-	// Add volume mounts
-	for _, vol := range opts.Volumes {
+	// Merge setup volumes with user volumes (user takes precedence)
+	mergedVolumes := MergeVolumeMounts(setupResult.VolumeMounts, opts.Volumes)
+	for _, vol := range mergedVolumes {
 		mountOpt := fmt.Sprintf("%s:%s", vol.HostPath, vol.ContainerPath)
 		if vol.ReadOnly {
 			mountOpt += MountOptionReadOnly
@@ -133,7 +135,7 @@ func (b *AppleContainerBackend) Create(ctx context.Context, opts *CreateOptions)
 			if memAllocated < 1 {
 				memAllocated = 1 // Minimum 1GB
 			}
-			memoryLimit = fmt.Sprintf("%dGi", memAllocated)
+			memoryLimit = fmt.Sprintf("%dg", memAllocated)
 		}
 	}
 	if memoryLimit != "" {
@@ -155,6 +157,12 @@ func (b *AppleContainerBackend) Create(ctx context.Context, opts *CreateOptions)
 	}
 	args = append(args, image)
 
+	// Add command args (supplements ENTRYPOINT or overrides CMD)
+	// FormatContainerCommand handles wrapping single shell commands with "sh -c"
+	if formattedCmd := FormatContainerCommand(opts.Command); len(formattedCmd) > 0 {
+		args = append(args, formattedCmd...)
+	}
+
 	// Run container
 	fmt.Printf("Creating Apple container with command: %s %s\n", b.dockerCmd, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, b.dockerCmd, args...)
@@ -164,14 +172,6 @@ func (b *AppleContainerBackend) Create(ctx context.Context, opts *CreateOptions)
 	}
 
 	containerID := strings.TrimSpace(string(output))
-
-	// Setup GPU libraries if worker URL provided
-	if opts.GPUWorkerURL != "" {
-		if err := b.setupGPULibraries(ctx, containerID, opts.GPUWorkerURL); err != nil {
-			// Log warning but don't fail
-			fmt.Printf("Warning: failed to setup GPU libraries: %v\n", err)
-		}
-	}
 
 	// Get container info
 	env := &Environment{
@@ -183,7 +183,7 @@ func (b *AppleContainerBackend) Create(ctx context.Context, opts *CreateOptions)
 		SSHHost:      "localhost",
 		SSHPort:      sshPort,
 		SSHUser:      "root",
-		GPUWorkerURL: opts.GPUWorkerURL,
+		GPUWorkerURL: gpuWorkerURL,
 		CreatedAt:    time.Now(),
 		Labels:       opts.Labels,
 	}
@@ -425,20 +425,6 @@ func (b *AppleContainerBackend) Logs(ctx context.Context, envID string, follow b
 	}()
 
 	return logCh, nil
-}
-
-// setupGPULibraries downloads and sets up GPU libraries for the container
-func (b *AppleContainerBackend) setupGPULibraries(ctx context.Context, containerID, workerURL string) error {
-	// This would trigger a download of GPU libraries from CDN
-	// For now, we'll just log that it's configured
-	fmt.Printf("GPU libraries configured for container %s with worker URL: %s\n", containerID[:12], workerURL)
-
-	// In production, this would:
-	// 1. Determine the architecture (arm64 for Apple Silicon, amd64 for Intel)
-	// 2. Download versioned libraries from cdn.tensor-fusion.ai
-	// 3. Mount them into the container
-
-	return nil
 }
 
 var _ Backend = (*AppleContainerBackend)(nil)
