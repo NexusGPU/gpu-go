@@ -106,6 +106,16 @@ func platformBackendHint(ctx context.Context, goos string) string {
 	}
 	switch goos {
 	case "darwin":
+		// Check if colima is installed
+		if _, err := exec.LookPath("colima"); err != nil {
+			// Colima is not installed, provide installation command
+			// Check if brew is available
+			if _, err := exec.LookPath("brew"); err == nil {
+				return "Colima is not installed. Install it with: brew install colima"
+			}
+			return "Colima is not installed. Install Homebrew first (https://brew.sh/), then run: brew install colima"
+		}
+		// Colima is installed but not running, or other backends are preferred
 		return "Install and start Colima, Docker, or Apple Container runtime."
 	case "windows":
 		return "Install and start WSL or Docker Desktop."

@@ -270,8 +270,8 @@ func (b *ColimaBackend) EnsureRunning(ctx context.Context) error {
 	if diskAllocated > diskGB {
 		diskAllocated = diskGB // Don't exceed available space
 	}
-	if diskAllocated < 20 {
-		diskAllocated = 20 // Minimum 20GB
+	if diskAllocated < 200 {
+		diskAllocated = 200 // Minimum 200GB
 	}
 
 	// Get CPU count (don't limit CPU, use all available cores)
@@ -288,7 +288,7 @@ func (b *ColimaBackend) EnsureRunning(ctx context.Context) error {
 	// Start Colima with the specified profile
 	// - CPU: use all available cores (no limit)
 	// - Memory: 60% of system memory (minimum 2GB)
-	// - Disk: 60% of available disk space (minimum 20GB)
+	// - Disk: 60% of available disk space (minimum 500GB)
 	// - DNS: configure DNS servers to fix Docker pull issues
 	cmd := exec.CommandContext(ctx, "colima", "start",
 		"-p", b.profile,
