@@ -11,6 +11,7 @@ import (
 	"github.com/NexusGPU/gpu-go/cmd/ggo/auth"
 	"github.com/NexusGPU/gpu-go/cmd/ggo/cmdutil"
 	"github.com/NexusGPU/gpu-go/internal/api"
+	"github.com/NexusGPU/gpu-go/internal/config"
 	"github.com/NexusGPU/gpu-go/internal/tui"
 	"github.com/spf13/cobra"
 	"k8s.io/klog/v2"
@@ -68,6 +69,7 @@ func NewShareCmd() *cobra.Command {
 }
 
 func getClient() *api.Client {
+	// Priority: 1. CLI flag, 2. Env vars, 3. Agent secret, 4. PAT token
 	token := userToken
 	if token == "" {
 		token = os.Getenv("GPU_GO_TOKEN")
@@ -75,6 +77,17 @@ func getClient() *api.Client {
 	if token == "" {
 		token = os.Getenv("GPU_GO_USER_TOKEN")
 	}
+
+	// Try agent config secret before PAT token
+	if token == "" {
+		cfgMgr := config.NewManager("", "")
+		if agentCfg, err := cfgMgr.LoadConfig(); err == nil && agentCfg != nil && agentCfg.AgentSecret != "" {
+			klog.V(2).Infof("Using agent secret for authentication")
+			token = agentCfg.AgentSecret
+		}
+	}
+
+	// Fall back to PAT token
 	if token == "" {
 		if savedToken, err := auth.GetToken(); err == nil && savedToken != "" {
 			token = savedToken

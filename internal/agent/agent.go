@@ -41,6 +41,11 @@ const (
 	HardSMLimiterEnv = "TF_CUDA_SM_PERCENT_LIMIT"
 	// HardMemLimiterEnv sets memory limit in megabytes
 	HardMemLimiterEnv = "TF_CUDA_MEMORY_LIMIT"
+
+	// GPU visibility environment variables
+	envCUDAVisibleDevices = "CUDA_VISIBLE_DEVICES"
+	envHIPVisibleDevices  = "HIP_VISIBLE_DEVICES"
+	envROCRVisibleDevices = "ROCR_VISIBLE_DEVICES"
 )
 
 // workerSnapshot captures worker state for change detection
@@ -375,6 +380,11 @@ func (a *Agent) convertToWorkerInfos(apiWorkers []api.WorkerConfig) ([]*hvApi.Wo
 		return nil, fmt.Errorf("license encrypted field is missing in config.json")
 	}
 
+	gpuVendorByID, err := a.loadGPUVendorByID()
+	if err != nil {
+		klog.Warningf("Failed to load GPU config for visibility env: %v", err)
+	}
+
 	infos := make([]*hvApi.WorkerInfo, 0, len(apiWorkers))
 	for _, w := range apiWorkers {
 		if !w.Enabled {
@@ -407,6 +417,11 @@ func (a *Agent) convertToWorkerInfos(apiWorkers []api.WorkerConfig) ([]*hvApi.Wo
 				w.WorkerID, w.VRAMMb, HardMemLimiterEnv, w.VRAMMb)
 		}
 
+		vendor := resolveWorkerVendor(w.WorkerID, w.GPUIDs, gpuVendorByID)
+		for k, v := range buildGPUVisibilityEnv(vendor, w.GPUIDs) {
+			envVars[k] = v
+		}
+
 		info.WorkerRunningInfo = &hvApi.WorkerRunningInfo{
 			Type:       hvApi.WorkerRuntimeTypeProcess,
 			Executable: a.workerBinaryPath,
@@ -420,6 +435,104 @@ func (a *Agent) convertToWorkerInfos(apiWorkers []api.WorkerConfig) ([]*hvApi.Wo
 		infos = append(infos, info)
 	}
 	return infos, nil
+}
+
+func (a *Agent) loadGPUVendorByID() (map[string]string, error) {
+	gpus, err := a.config.LoadGPUs()
+	if err != nil {
+		return nil, err
+	}
+
+	vendorByID := make(map[string]string, len(gpus))
+	for _, gpu := range gpus {
+		id := strings.ToLower(strings.TrimSpace(gpu.GPUID))
+		if id == "" {
+			continue
+		}
+		vendor := strings.ToLower(strings.TrimSpace(gpu.Vendor))
+		if vendor == "" {
+			continue
+		}
+		vendorByID[id] = vendor
+	}
+
+	return vendorByID, nil
+}
+
+func resolveWorkerVendor(workerID string, gpuIDs []string, gpuVendorByID map[string]string) string {
+	if len(gpuIDs) == 0 || len(gpuVendorByID) == 0 {
+		return ""
+	}
+
+	var vendor string
+	for _, id := range gpuIDs {
+		normalizedID := strings.ToLower(strings.TrimSpace(id))
+		if normalizedID == "" {
+			continue
+		}
+		v, ok := gpuVendorByID[normalizedID]
+		if !ok || v == "" {
+			continue
+		}
+		if vendor == "" {
+			vendor = v
+			continue
+		}
+		if v != vendor {
+			klog.Warningf("Worker has mixed GPU vendors; using first vendor for visibility env: worker_id=%s vendor=%s other_vendor=%s", workerID, vendor, v)
+			return vendor
+		}
+	}
+
+	return vendor
+}
+
+func buildGPUVisibilityEnv(vendor string, gpuIDs []string) map[string]string {
+	if vendor == "" || len(gpuIDs) == 0 {
+		return nil
+	}
+
+	visibleIDs := make([]string, 0, len(gpuIDs))
+	for _, id := range gpuIDs {
+		trimmed := strings.TrimSpace(id)
+		if trimmed == "" {
+			continue
+		}
+		switch vendor {
+		case vendorNVIDIA:
+			visibleIDs = append(visibleIDs, normalizeNvidiaGPUID(trimmed))
+		default:
+			visibleIDs = append(visibleIDs, trimmed)
+		}
+	}
+
+	if len(visibleIDs) == 0 {
+		return nil
+	}
+
+	value := strings.Join(visibleIDs, ",")
+	env := make(map[string]string, 2)
+	switch vendor {
+	case vendorNVIDIA:
+		env[envCUDAVisibleDevices] = value
+	case vendorAMD, "hygon":
+		env[envHIPVisibleDevices] = value
+		env[envROCRVisibleDevices] = value
+	}
+
+	return env
+}
+
+func normalizeNvidiaGPUID(id string) string {
+	id = strings.ToLower(strings.TrimSpace(id))
+	if id == "" {
+		return id
+	}
+	dash := strings.Index(id, "-")
+	if dash == -1 {
+		return strings.ToUpper(id)
+	}
+	return strings.ToUpper(id[:dash]) + id[dash:]
 }
 
 // normalizeWorkerStatus maps status to API-allowed WorkerStatus: "pending" | "running" | "stopping" | "stopped".

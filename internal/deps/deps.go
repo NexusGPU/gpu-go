@@ -777,6 +777,13 @@ func (m *Manager) downloadLibraryUnsafe(ctx context.Context, lib Library, progre
 		}
 	}
 
+	// Create versioned symlinks for .so files (e.g., libcuda.so.1 -> libcuda.so)
+	if isSharedLibrary(lib.Name) && !platform.IsWindows() {
+		if err := createVersionedSymlinks(destPath, lib.Name); err != nil {
+			klog.Warningf("Failed to create versioned symlinks for %s: %v", lib.Name, err)
+		}
+	}
+
 	// Update size if it was zero (discovered during download)
 	if lib.Size == 0 {
 		lib.Size = downloadedBytes
@@ -928,6 +935,41 @@ func isSharedLibrary(name string) bool {
 		return true
 	}
 	return false
+}
+
+// createVersionedSymlinks creates versioned symlinks for shared library files
+// For example, for libcuda.so, it creates:
+//   - libcuda.so.1 -> libcuda.so
+//
+// This is necessary because many applications look for versioned .so files
+func createVersionedSymlinks(destPath, filename string) error {
+	dir := filepath.Dir(destPath)
+	nameLower := strings.ToLower(filename)
+
+	// Only create symlinks for .so files that don't already have a version number
+	// e.g., create symlinks for libcuda.so but not for libcuda.so.1 or libcuda.so.525.60.13
+	if !strings.HasSuffix(nameLower, ".so") {
+		// Already has a version suffix, skip
+		return nil
+	}
+
+	// Create symlink with .1 suffix (e.g., libcuda.so.1 -> libcuda.so)
+	symlinkPath := filepath.Join(dir, filename+".1")
+
+	// Remove existing symlink if it exists
+	if _, err := os.Lstat(symlinkPath); err == nil {
+		if err := os.Remove(symlinkPath); err != nil {
+			return fmt.Errorf("failed to remove existing symlink: %w", err)
+		}
+	}
+
+	// Create relative symlink (just the filename, not full path)
+	if err := os.Symlink(filename, symlinkPath); err != nil {
+		return fmt.Errorf("failed to create symlink %s -> %s: %w", symlinkPath, filename, err)
+	}
+
+	klog.V(4).Infof("Created symlink: %s -> %s", symlinkPath, filename)
+	return nil
 }
 
 // CleanCache removes all cached downloads
