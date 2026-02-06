@@ -12,21 +12,22 @@ This extension is part of the [TensorFusion](https://github.com/NexusGPU/tensor-
 
 ## 🚀 Quick Start
 
-### Step 1: Register & Setup Agent
-Before using the VS Code extension, you need a TensorFusion account and a running GPU agent.
+### Step 1: Register & Setup Machine Agent
+Before using the VS Code extension, you need a TensorFusion account and a running Machine Agent on your Machine Host.
 
 1.  Go to the [TensorFusion Dashboard](https://tensor-fusion.ai/auth/login?callbackUrl=%2Fdashboard).
 2.  Register for an account.
-3.  Follow the dashboard instructions to install and start the **GPUGo Agent** on your GPU machine (Server).
+3.  Follow the dashboard instructions to install and start the **GPUGo Machine Agent** on your Machine Host (GPU server).
 
 ### Step 2: Install Extension
 Install this extension from the VS Code Marketplace.
 
-### Step 3: Login
+### Step 3: Login or Continue as Guest
 1.  Click on the **GPU Go** icon in the Activity Bar.
-2.  Click **"Login to GPU Go"**.
-3.  Go to the [Dashboard](https://tensor-fusion.ai/auth/login?callbackUrl=%2Fdashboard) to generate a **Personal Access Token (PAT)**.
-4.  Paste the token into the VS Code prompt.
+2.  Choose one path:
+    - **Login with PAT** to manage vGPU workers and Machine Hosts.
+    - **Continue as Guest** to connect with a share link (no PAT needed).
+3.  If you choose login, go to the [Dashboard](https://tensor-fusion.ai/auth/login?callbackUrl=%2Fdashboard) to generate a **Personal Access Token (PAT)** and paste it into VS Code.
 
 ### Step 4: Create Studio
 Once logged in, you can create a new **Studio** environment:
@@ -42,10 +43,15 @@ Once logged in, you can create a new **Studio** environment:
 - **Pre-configured Images**: PyTorch, TensorFlow, Jupyter, and more.
 - **Automatic SSH Config**: No manual configuration needed.
 
-### 🔧 GPU Workers & Devices
-- View and manage GPU workers across your infrastructure.
+### 🔧 vGPU Workers & Machine Hosts
+- View and manage vGPU workers across your infrastructure.
 - Monitor active connections and device utilization in real-time.
 - View GPU specifications (model, VRAM, driver version).
+
+### 🔗 Guest Mode (Share Links)
+- Connect instantly with a share link or short code.
+- Open a terminal and run `ggo use` for you.
+- Upgrade anytime via Command Palette: **GPUGo: Login to GPUGo**.
 
 ## 🔗 Links
 

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+## [0.1.3] - 2026-02-06
+
+### Added
+- Guest mode onboarding with share-link flow
+- Share links list and actions in vGPU Worker details
+- Studio sidebar action to connect with a share link
+
+### Changed
+- Updated UI terminology to vGPU Worker, Machine Host, and Machine Agent
+
 ## [0.1.2] - 2026-02-02
 
 ### Added
