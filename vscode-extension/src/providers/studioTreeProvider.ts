@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { CLI, StudioEnv } from '../cli/cli';
 import { AuthManager } from '../auth/authManager';
-import { PropertyItem, createLoginItem, createEmptyItem, createErrorItem, getStatusIcon, getStatusContext } from './treeUtils';
+import { PropertyItem, createActionItem, createLoginItem, createEmptyItem, createErrorItem, getStatusIcon, getStatusContext } from './treeUtils';
 
 export class StudioTreeItem extends vscode.TreeItem {
     constructor(
@@ -71,22 +71,36 @@ export class StudioTreeProvider implements vscode.TreeDataProvider<vscode.TreeIt
     }
 
     async getChildren(element?: vscode.TreeItem): Promise<vscode.TreeItem[]> {
-        if (!this.authManager.isLoggedIn) {
+        if (!this.authManager.isLoggedIn && !this.authManager.isGuestMode) {
             return [createLoginItem()];
         }
 
         if (!element) {
             // Root level - show studio environments
             try {
+                const items: vscode.TreeItem[] = [];
+                if (this.authManager.isGuestMode) {
+                    items.push(createActionItem(
+                        'Connect with share link',
+                        'gpugo.connectWithShareLink',
+                        'link',
+                        'Paste a share link or short code to connect'
+                    ));
+                }
+
                 this.studios = await this.cli.studioList();
                 
                 if (this.studios.length === 0) {
-                    return [createEmptyItem('No studio environments', 'Click + to create one')];
+                    const hint = this.authManager.isGuestMode
+                        ? 'Connect with a share link to get started'
+                        : 'Click + to create one';
+                    items.push(createEmptyItem('No studio environments', hint));
+                    return items;
                 }
 
-                return this.studios.map(env => 
+                return items.concat(this.studios.map(env => 
                     new StudioTreeItem(env.name, env, vscode.TreeItemCollapsibleState.Collapsed)
-                );
+                ));
             } catch (error) {
                 return [createErrorItem('Error loading studios', error)];
             }

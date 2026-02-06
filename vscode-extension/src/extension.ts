@@ -129,6 +129,26 @@ function registerCommands(context: vscode.ExtensionContext, cli: CLI) {
     );
 
     context.subscriptions.push(
+        vscode.commands.registerCommand('gpugo.connectWithShareLink', async () => {
+            const shareLink = await vscode.window.showInputBox({
+                prompt: 'Paste a share link or short code',
+                placeHolder: 'https://go.gpu.tf/s/abc123',
+                ignoreFocusOut: true
+            });
+            if (!shareLink || !shareLink.trim()) {
+                return;
+            }
+            if (process.platform === 'darwin') {
+                vscode.window.showWarningMessage('Remote vGPU use is not supported on macOS yet.');
+                return;
+            }
+            const terminal = vscode.window.createTerminal('GPUGo vGPU');
+            terminal.show();
+            terminal.sendText(`ggo use ${shareLink.trim()} -y`);
+        })
+    );
+
+    context.subscriptions.push(
         vscode.commands.registerCommand('gpugo.startStudio', async (item) => {
             if (item?.name) {
                 await cli.studioStart(item.name);

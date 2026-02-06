@@ -133,6 +133,11 @@
         "category": "GPUGo"
       },
       {
+        "command": "gpugo.connectWithShareLink",
+        "title": "Connect with Share Link",
+        "category": "GPUGo"
+      },
+      {
         "command": "gpugo.startStudio",
         "title": "Start Studio",
         "icon": "$(play)",
