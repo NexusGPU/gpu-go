@@ -10,15 +10,18 @@ export class CreateStudioPanel {
     private readonly _panel: vscode.WebviewPanel;
     private readonly _extensionUri: vscode.Uri;
     private readonly _cli: CLI;
+    private _prefillShareLink?: string;
     private _disposables: vscode.Disposable[] = [];
 
-    public static createOrShow(extensionUri: vscode.Uri, cli: CLI) {
+    public static createOrShow(extensionUri: vscode.Uri, cli: CLI, prefillShareLink?: string) {
         const column = vscode.window.activeTextEditor
             ? vscode.window.activeTextEditor.viewColumn
             : undefined;
 
         // If panel exists, show it
         if (CreateStudioPanel.currentPanel) {
+            CreateStudioPanel.currentPanel._prefillShareLink = prefillShareLink;
+            void CreateStudioPanel.currentPanel.updateContent();
             CreateStudioPanel.currentPanel._panel.reveal(column);
             return;
         }
@@ -33,13 +36,14 @@ export class CreateStudioPanel {
             }
         );
 
-        CreateStudioPanel.currentPanel = new CreateStudioPanel(panel, extensionUri, cli);
+        CreateStudioPanel.currentPanel = new CreateStudioPanel(panel, extensionUri, cli, prefillShareLink);
     }
 
-    private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri, cli: CLI) {
+    private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri, cli: CLI, prefillShareLink?: string) {
         this._panel = panel;
         this._extensionUri = extensionUri;
         this._cli = cli;
+        this._prefillShareLink = prefillShareLink;
 
         // Set content
         this.updateContent();
@@ -65,7 +69,7 @@ export class CreateStudioPanel {
         // Get available backends
         const backends = await this._cli.studioBackends();
         
-        this._panel.webview.html = this.getHtmlForWebview(backends);
+        this._panel.webview.html = this.getHtmlForWebview(backends, this._prefillShareLink);
     }
 
     private async createStudio(data: {
@@ -130,7 +134,7 @@ export class CreateStudioPanel {
         }
     }
 
-    private getHtmlForWebview(backends: string[]): string {
+    private getHtmlForWebview(backends: string[], prefillShareLink?: string): string {
         const webview = this._panel.webview;
         const nonce = getNonce();
 
@@ -243,9 +247,9 @@ export class CreateStudioPanel {
                 </div>
 
                 <vscode-form-group variant="vertical">
-                    <vscode-label for="gpuUrl">GPU Worker URL (Optional)</vscode-label>
-                    <vscode-textfield id="gpuUrl" name="gpuUrl" placeholder="https://worker.example.com:9001"></vscode-textfield>
-                    <vscode-form-helper>URL to a remote GPU worker (leave empty for local testing)</vscode-form-helper>
+                    <vscode-label for="gpuUrl">Share link or code (Optional)</vscode-label>
+                    <vscode-textfield id="gpuUrl" name="gpuUrl" placeholder="https://go.gpu.tf/s/abc123"></vscode-textfield>
+                    <vscode-form-helper>Share link or short code for a remote vGPU worker (leave empty for local testing)</vscode-form-helper>
                 </vscode-form-group>
 
                 <vscode-collapsible title="Advanced Options">
@@ -303,6 +307,7 @@ export class CreateStudioPanel {
             <script nonce="${nonce}">
                 const vscode = acquireVsCodeApi();
                 const templates = ${templatesJson};
+                const prefillShareLink = ${JSON.stringify(prefillShareLink || '')};
                 
                 // Update UI when template changes
                 document.getElementById('template').addEventListener('change', (e) => {
@@ -386,6 +391,13 @@ export class CreateStudioPanel {
                     document.getElementById('template').dispatchEvent(new Event('change'));
                 }
                 
+                if (prefillShareLink) {
+                    const shareInput = document.getElementById('gpuUrl');
+                    if (shareInput) {
+                        shareInput.value = prefillShareLink;
+                    }
+                }
+
                 document.getElementById('create-btn').addEventListener('click', () => {
                     const name = document.getElementById('name').value;
                     if (!name) {
