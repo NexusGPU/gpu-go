@@ -99,7 +99,7 @@ ggo studio create my-studio -s abc123 --mode docker
 | `docker` | 原生 Docker | 所有 |
 | `colima` | Colima 容器运行时 | macOS/Linux |
 | `wsl` | Windows Subsystem for Linux | Windows |
-| `apple` | Apple Virtualization Framework | macOS |
+| `apple-container` | Apple Container（macOS 26+） | macOS |
 
 ### 卷挂载（Volume Mounts）
 

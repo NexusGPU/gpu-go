@@ -140,7 +140,7 @@ export class CreateStudioPanel {
             'docker': 'Docker',
             'colima': 'Colima',
             'wsl': 'WSL (Windows)',
-            'apple': 'Apple Container (macOS)',
+            'apple-container': 'Apple Container (macOS 26+)',
             'podman': 'Podman',
             'lima': 'Lima'
         };

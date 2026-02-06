@@ -14,12 +14,12 @@ import (
 type Mode string
 
 const (
-	ModeWSL            Mode = "wsl"    // Windows Subsystem for Linux
-	ModeColima         Mode = "colima" // Colima (macOS/Linux)
-	ModeAppleContainer Mode = "apple"  // Apple Virtualization Framework
-	ModeDocker         Mode = "docker" // Native Docker
-	ModeKubernetes     Mode = "k8s"    // Kubernetes (kind, minikube, etc.)
-	ModeAuto           Mode = "auto"   // Auto-detect best option
+	ModeWSL            Mode = "wsl"             // Windows Subsystem for Linux
+	ModeColima         Mode = "colima"          // Colima (macOS/Linux)
+	ModeAppleContainer Mode = "apple-container" // Apple Container (macOS)
+	ModeDocker         Mode = "docker"          // Native Docker
+	ModeKubernetes     Mode = "k8s"             // Kubernetes (kind, minikube, etc.)
+	ModeAuto           Mode = "auto"            // Auto-detect best option
 )
 
 // StudioImage represents a pre-configured AI development image
