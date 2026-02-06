@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 
@@ -193,19 +194,86 @@ func (m *Manager) List(ctx context.Context) ([]*Environment, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	var allEnvs []*Environment
+	state, err := m.loadState()
+	if err != nil {
+		state = make(map[string]*Environment)
+	}
+
+	runtimeByMode := make(map[Mode][]*Environment)
+	runtimeIDs := make(map[Mode]map[string]struct{})
+	offlineModes := make(map[Mode]struct{})
+
 	for _, backend := range m.backends {
+		mode := backend.Mode()
 		if !backend.IsAvailable(ctx) {
+			offlineModes[mode] = struct{}{}
 			continue
 		}
 		envs, err := backend.List(ctx)
 		if err != nil {
-			continue // Log but continue with other backends
+			offlineModes[mode] = struct{}{}
+			continue
 		}
-		allEnvs = append(allEnvs, envs...)
+		runtimeByMode[mode] = envs
+		ids := make(map[string]struct{}, len(envs))
+		for _, env := range envs {
+			ids[env.ID] = struct{}{}
+		}
+		runtimeIDs[mode] = ids
+	}
+
+	var allEnvs []*Environment
+	includedIDs := make(map[string]struct{})
+	for _, envs := range runtimeByMode {
+		for _, env := range envs {
+			allEnvs = append(allEnvs, env)
+			includedIDs[env.ID] = struct{}{}
+		}
+	}
+
+	stateEnvs := make([]*Environment, 0, len(state))
+	for _, env := range state {
+		stateEnvs = append(stateEnvs, env)
+	}
+	sort.Slice(stateEnvs, func(i, j int) bool {
+		if stateEnvs[i].Name == stateEnvs[j].Name {
+			return stateEnvs[i].ID < stateEnvs[j].ID
+		}
+		return stateEnvs[i].Name < stateEnvs[j].Name
+	})
+
+	for _, env := range stateEnvs {
+		if _, ok := includedIDs[env.ID]; ok {
+			continue
+		}
+
+		envCopy := cloneEnvironment(env)
+		if _, offline := offlineModes[env.Mode]; offline {
+			envCopy.Status = StatusUnknown
+		} else if _, ok := runtimeIDs[env.Mode]; ok {
+			envCopy.Status = StatusDeleted
+		} else {
+			envCopy.Status = StatusUnknown
+		}
+		allEnvs = append(allEnvs, envCopy)
 	}
 
 	return allEnvs, nil
+}
+
+func cloneEnvironment(env *Environment) *Environment {
+	if env == nil {
+		return nil
+	}
+	copyEnv := *env
+	if env.Labels != nil {
+		labels := make(map[string]string, len(env.Labels))
+		for k, v := range env.Labels {
+			labels[k] = v
+		}
+		copyEnv.Labels = labels
+	}
+	return &copyEnv
 }
 
 // Stop stops an environment

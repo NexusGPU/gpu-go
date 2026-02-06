@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/NexusGPU/gpu-go/cmd/ggo/cmdutil"
@@ -514,12 +515,16 @@ func (r *envListResult) RenderTUI(out *tui.Output) {
 
 	styles := tui.DefaultStyles()
 	var rows [][]string
+	offlineModes := make(map[string]struct{})
 	for _, env := range r.envs {
 		statusIcon := tui.StatusIcon(string(env.Status))
 		statusStyled := styles.StatusStyle(string(env.Status)).Render(statusIcon + " " + string(env.Status))
 
-		sshInfo := styles.Muted.Render("-")
-		if env.SSHPort > 0 {
+		sshInfo := styles.Muted.Render("N/A")
+		if env.Status == studio.StatusUnknown {
+			offlineModes[string(env.Mode)] = struct{}{}
+		}
+		if env.Status != studio.StatusUnknown && env.Status != studio.StatusDeleted && env.SSHPort > 0 && env.SSHHost != "" {
 			sshInfo = fmt.Sprintf("%s:%d", env.SSHHost, env.SSHPort)
 		}
 
@@ -538,6 +543,16 @@ func (r *envListResult) RenderTUI(out *tui.Output) {
 		Rows(rows)
 
 	out.Println(table.String())
+
+	if len(offlineModes) > 0 {
+		modes := make([]string, 0, len(offlineModes))
+		for mode := range offlineModes {
+			modes = append(modes, mode)
+		}
+		sort.Strings(modes)
+		out.Println()
+		out.Warning(fmt.Sprintf("Container runtime offline: %s", strings.Join(modes, ", ")))
+	}
 }
 
 func newStartCmd() *cobra.Command {
