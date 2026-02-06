@@ -44,7 +44,7 @@ Copy the command from dashboard and run. You can see real-time onboarding progre
 **Optionally**, you can run in manual way
 
 ```bash
-curl -fsSL https://cdn.tensor-fusion.ai/gpugo/install.sh | sh
+curl -fsSL https://cdn.tensor-fusion.ai/archive/gpugo/install.sh | sh
 ```
 ```bash
 # 1. Register the agent using the token from the Dashboard
