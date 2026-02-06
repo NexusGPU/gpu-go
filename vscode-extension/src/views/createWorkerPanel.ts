@@ -25,7 +25,7 @@ export class CreateWorkerPanel {
         // Create new panel
         const panel = vscode.window.createWebviewPanel(
             CreateWorkerPanel.viewType,
-            'Create Worker',
+            'Create vGPU Worker',
             column || vscode.ViewColumn.One,
             {
                 enableScripts: true
@@ -58,9 +58,9 @@ export class CreateWorkerPanel {
                         vscode.env.openExternal(vscode.Uri.parse(this._cli.getDashboardUrl() + '/workers/new'));
                         break;
                     case 'openTerminal': {
-                        const terminal = vscode.window.createTerminal('GPUGo Worker');
+                        const terminal = vscode.window.createTerminal('GPUGo vGPU Worker');
                         terminal.show();
-                        terminal.sendText('# Run this on your GPU server:');
+                        terminal.sendText('# Run this on your Machine Host:');
                         terminal.sendText('# ggo worker create --agent-id <agent-id> --name my-worker --gpu-ids 0');
                         break;
                     }
@@ -79,12 +79,12 @@ export class CreateWorkerPanel {
 
         const content = `
             <div class="header">
-                <h1><vscode-icon name="add"></vscode-icon> Create GPU Worker</h1>
+                <h1><vscode-icon name="add"></vscode-icon> Create vGPU Worker</h1>
             </div>
 
             <p class="description">
-                Workers enable you to share GPU resources from your servers with remote development environments.
-                Choose one of the options below to create a new worker.
+                vGPU workers let you share GPU resources from your Machine Host with remote development environments.
+                Choose one of the options below to create a new vGPU worker.
             </p>
 
             <vscode-divider></vscode-divider>
@@ -92,7 +92,7 @@ export class CreateWorkerPanel {
             <div class="options-container">
                 <vscode-collapsible title="Option 1: Using CLI (Recommended)" open>
                     <div class="option-content">
-                        <p>Run the following command on your GPU server to create a worker:</p>
+                        <p>Run the following command on your Machine Host to create a vGPU worker:</p>
                         
                         <div class="code-block">
                             <code>ggo worker create --agent-id &lt;agent-id&gt; --name &lt;worker-name&gt; --gpu-ids &lt;gpu-ids&gt;</code>
@@ -119,11 +119,11 @@ export class CreateWorkerPanel {
                             <vscode-table-body slot="body">
                                 <vscode-table-row>
                                     <vscode-table-cell><code>--agent-id</code></vscode-table-cell>
-                                    <vscode-table-cell>The agent ID from the GPU server</vscode-table-cell>
+                                    <vscode-table-cell>The Machine Agent ID from the host</vscode-table-cell>
                                 </vscode-table-row>
                                 <vscode-table-row>
                                     <vscode-table-cell><code>--name</code></vscode-table-cell>
-                                    <vscode-table-cell>A friendly name for the worker</vscode-table-cell>
+                                    <vscode-table-cell>A friendly name for the vGPU worker</vscode-table-cell>
                                 </vscode-table-row>
                                 <vscode-table-row>
                                     <vscode-table-cell><code>--gpu-ids</code></vscode-table-cell>
@@ -147,7 +147,7 @@ export class CreateWorkerPanel {
 
                 <vscode-collapsible title="Option 2: Using Dashboard">
                     <div class="option-content">
-                        <p>Create and manage workers through the web dashboard with a graphical interface.</p>
+                        <p>Create and manage vGPU workers through the web dashboard with a graphical interface.</p>
                         
                         <div class="actions" style="margin-top: 16px;">
                             <vscode-button id="dashboard-btn">
@@ -166,11 +166,11 @@ export class CreateWorkerPanel {
                 <div>
                     <strong>Quick Start Guide</strong>
                     <ol>
-                        <li>Install <code>ggo</code> on your GPU server</li>
+                        <li>Install <code>ggo</code> on your Machine Host</li>
                         <li>Run <code>ggo login</code> to authenticate</li>
-                        <li>Run <code>ggo agent start</code> to start the agent</li>
-                        <li>Create workers with <code>ggo worker create</code></li>
-                        <li>Use workers in your studio environments</li>
+                        <li>Run <code>ggo agent start</code> to start the Machine Agent</li>
+                        <li>Create vGPU workers with <code>ggo worker create</code></li>
+                        <li>Use vGPU workers in your studio environments</li>
                     </ol>
                 </div>
             </div>

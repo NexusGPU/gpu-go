@@ -11,7 +11,7 @@ export class WorkerTreeItem extends vscode.TreeItem {
     ) {
         super(worker.name || worker.workerId, collapsibleState);
         
-        this.tooltip = `Worker: ${worker.name}\nID: ${worker.workerId}\nStatus: ${worker.status}`;
+        this.tooltip = `vGPU worker: ${worker.name}\nID: ${worker.workerId}\nStatus: ${worker.status}`;
         this.description = worker.status;
         
         // Set icon and context based on status
@@ -77,7 +77,7 @@ export class WorkersTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
                 Logger.log(`Found ${this.workers.length} workers`);
                 
                 if (this.workers.length === 0) {
-                    return [createEmptyItem('No workers found', 'Create one from your GPU server')];
+                    return [createEmptyItem('No vGPU workers found', 'Create one from your GPU server')];
                 }
 
                 return this.workers.map(worker => 
@@ -93,13 +93,13 @@ export class WorkersTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
             // Show worker details and connections
             const worker = element.worker;
             const items: vscode.TreeItem[] = [
-                new PropertyItem('ID', worker.workerId),
-                new PropertyItem('Port', String(worker.listenPort)),
+                new PropertyItem('vGPU worker ID', worker.workerId),
+                new PropertyItem('Listen Port', String(worker.listenPort)),
                 new PropertyItem('Enabled', worker.enabled ? 'Yes' : 'No')
             ];
 
             if (worker.gpuIds && worker.gpuIds.length > 0) {
-                items.push(new PropertyItem('GPUs', worker.gpuIds.join(', ')));
+                items.push(new PropertyItem('vGPU IDs', worker.gpuIds.join(', ')));
             }
 
             // Add connections section

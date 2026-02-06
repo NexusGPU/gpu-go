@@ -11,7 +11,7 @@ export class AgentTreeItem extends vscode.TreeItem {
     ) {
         super(agent.hostname, collapsibleState);
 
-        this.tooltip = `Host: ${agent.hostname}\nStatus: ${agent.status}\nOS: ${agent.os}/${agent.arch}`;
+        this.tooltip = `Machine Host: ${agent.hostname}\nStatus: ${agent.status}\nOS: ${agent.os}/${agent.arch}`;
         this.description = `${agent.status} - ${agent.os}`;
 
         // Set icon and context based on status
@@ -80,8 +80,8 @@ export class DevicesTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
                 if (this.agents.length === 0) {
                     // Show placeholder with instructions
                     return [
-                        createEmptyItem('No GPU devices found', 'Add GPU servers to get started'),
-                        createActionItem('Add GPU Server', 'gpugo.createWorker', 'add', 'Click to learn how to add GPU servers')
+                        createEmptyItem('No machine hosts found', 'Add a machine host to get started'),
+                        createActionItem('Add Machine Host', 'gpugo.createWorker', 'add', 'Click to learn how to add a machine host')
                     ];
                 }
 
@@ -92,8 +92,8 @@ export class DevicesTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
                 Logger.error('Error fetching agents:', error);
                 // If no agents, show helpful message
                 return [
-                    createEmptyItem('No GPU devices found', 'Add GPU servers to get started'),
-                    createActionItem('Add GPU Server', 'gpugo.createWorker', 'add', 'Click to learn how to add GPU servers')
+                    createEmptyItem('No machine hosts found', 'Add a machine host to get started'),
+                    createActionItem('Add Machine Host', 'gpugo.createWorker', 'add', 'Click to learn how to add a machine host')
                 ];
             }
         }
@@ -104,7 +104,7 @@ export class DevicesTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
             const items: vscode.TreeItem[] = [];
 
             // Agent info
-            items.push(new PropertyItem('Agent ID', agent.agentId.substring(0, 8) + '...'));
+            items.push(new PropertyItem('Machine Agent ID', agent.agentId.substring(0, 8) + '...'));
             items.push(new PropertyItem('OS', `${agent.os}/${agent.arch}`));
 
             if (agent.networkIps && agent.networkIps.length > 0) {

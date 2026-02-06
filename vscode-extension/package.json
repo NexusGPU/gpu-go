@@ -85,13 +85,15 @@
         },
         {
           "id": "gpugo.workers",
-          "name": "Workers",
-          "contextualTitle": "GPUGo Workers"
+          "name": "vGPU Workers",
+          "contextualTitle": "GPUGo vGPU Workers",
+          "when": "!gpugo.guestMode"
         },
         {
           "id": "gpugo.devices",
-          "name": "Devices",
-          "contextualTitle": "GPUGo Devices"
+          "name": "Machine Hosts",
+          "contextualTitle": "GPUGo Machine Hosts",
+          "when": "!gpugo.guestMode"
         }
       ]
     },

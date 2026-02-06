@@ -27,7 +27,7 @@ export class WorkerDetailPanel {
         // Create new panel
         const panel = vscode.window.createWebviewPanel(
             WorkerDetailPanel.viewType,
-            'Worker Details',
+            'vGPU Worker Details',
             column || vscode.ViewColumn.One,
             {
                 enableScripts: true
@@ -68,7 +68,7 @@ export class WorkerDetailPanel {
 
     private async update(workerId: string) {
         const worker = await this._cli.workerGet(workerId);
-        this._panel.title = worker ? `Worker: ${worker.name}` : 'Worker Details';
+        this._panel.title = worker ? `vGPU Worker: ${worker.name}` : 'vGPU Worker Details';
         this._panel.webview.html = this.getHtmlForWebview(worker);
     }
 
@@ -83,8 +83,8 @@ export class WorkerDetailPanel {
 
         if (!worker) {
             return getWebviewContent(webview, this._extensionUri, nonce, `
-                <h1>Worker Not Found</h1>
-                <p>Unable to load worker details.</p>
+                <h1>vGPU Worker Not Found</h1>
+                <p>Unable to load vGPU worker details.</p>
             `);
         }
 
@@ -109,12 +109,12 @@ export class WorkerDetailPanel {
 
             <vscode-form-container>
                 <vscode-form-group variant="vertical">
-                    <vscode-label>Worker ID</vscode-label>
+                    <vscode-label>vGPU worker ID</vscode-label>
                     <vscode-textfield readonly value="${worker.workerId}"></vscode-textfield>
                 </vscode-form-group>
 
                 <vscode-form-group variant="vertical">
-                    <vscode-label>Agent ID</vscode-label>
+                    <vscode-label>Machine Agent ID</vscode-label>
                     <vscode-textfield readonly value="${worker.agentId || 'N/A'}"></vscode-textfield>
                 </vscode-form-group>
 
@@ -124,7 +124,7 @@ export class WorkerDetailPanel {
                 </vscode-form-group>
 
                 <vscode-form-group variant="vertical">
-                    <vscode-label>GPUs</vscode-label>
+                    <vscode-label>vGPU IDs</vscode-label>
                     <vscode-textfield readonly value="${worker.gpuIds?.join(', ') || 'None'}"></vscode-textfield>
                 </vscode-form-group>
 
