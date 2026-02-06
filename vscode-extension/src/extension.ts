@@ -9,6 +9,7 @@ import { CreateWorkerPanel } from './views/createWorkerPanel';
 import { CreateStudioPanel } from './views/createStudioPanel';
 import { CLI } from './cli/cli';
 import { Logger } from './logger';
+import { resolveAuthMode } from './utils/authState';
 
 let authManager: AuthManager;
 let studioProvider: StudioTreeProvider;
@@ -44,6 +45,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
     // Initialize auth manager
     authManager = new AuthManager(context, cli);
+    await updateAuthContext(authManager);
 
     // Initialize tree providers
     studioProvider = new StudioTreeProvider(cli, authManager);
@@ -78,7 +80,8 @@ export async function activate(context: vscode.ExtensionContext) {
     );
 
     // Listen for auth state changes
-    authManager.onAuthStateChanged(() => {
+    authManager.onAuthStateChanged(async () => {
+        await updateAuthContext(authManager);
         studioProvider.refresh();
         workersProvider.refresh();
         devicesProvider.refresh();
@@ -307,30 +310,39 @@ export function deactivate() {
 async function checkAndPromptLogin(authManager: AuthManager): Promise<void> {
     try {
         const isLoggedIn = await authManager.checkLoginStatus();
+        const mode = resolveAuthMode({ loggedIn: isLoggedIn, guestMode: authManager.isGuestMode });
         
-        if (!isLoggedIn) {
-            Logger.log('User not logged in, prompting for login');
+        if (mode === 'none') {
+            Logger.log('User not logged in, prompting for onboarding');
             
             // Show login prompt with auto-login option
             const action = await vscode.window.showInformationMessage(
-                'Welcome to GPUGo! You need to login to access your remote GPUs.',
-                'Login Now',
-                'Later'
+                'Welcome to GPUGo! Use a share link to connect instantly, or sign in to manage vGPU workers.',
+                'Continue as Guest',
+                'Login with PAT'
             );
 
-            if (action === 'Login Now') {
+            if (action === 'Continue as Guest') {
+                Logger.log('User chose guest mode');
+                await authManager.setGuestMode(true);
+            } else if (action === 'Login with PAT') {
                 // Auto-execute login command
                 Logger.log('User chose to login, starting login flow');
                 vscode.commands.executeCommand('gpugo.login');
             } else {
-                Logger.log('User deferred login');
+                Logger.log('User deferred onboarding');
             }
-        } else {
+        } else if (mode === 'full') {
             Logger.log('User already logged in');
         }
     } catch (error) {
         Logger.error('Failed to check login status:', error);
     }
+}
+
+async function updateAuthContext(authManager: AuthManager): Promise<void> {
+    await vscode.commands.executeCommand('setContext', 'gpugo.loggedIn', authManager.isLoggedIn);
+    await vscode.commands.executeCommand('setContext', 'gpugo.guestMode', authManager.isGuestMode);
 }
 
 /**

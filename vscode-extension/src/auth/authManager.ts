@@ -11,16 +11,22 @@ export class AuthManager {
     private context: vscode.ExtensionContext;
     private cli: CLI;
     private _isLoggedIn: boolean = false;
+    private _guestMode: boolean = false;
     private _onAuthStateChanged: vscode.EventEmitter<boolean> = new vscode.EventEmitter<boolean>();
     readonly onAuthStateChanged: vscode.Event<boolean> = this._onAuthStateChanged.event;
 
     constructor(context: vscode.ExtensionContext, cli: CLI) {
         this.context = context;
         this.cli = cli;
+        this._guestMode = this.context.globalState.get<boolean>('gpugo.guestMode', false);
     }
 
     get isLoggedIn(): boolean {
         return this._isLoggedIn;
+    }
+
+    get isGuestMode(): boolean {
+        return this._guestMode;
     }
 
     /**
@@ -32,10 +38,19 @@ export class AuthManager {
         if (authStatus.loggedIn) {
             Logger.log('Auth check via CLI: logged in');
             this._isLoggedIn = true;
+            if (this._guestMode) {
+                await this.setGuestMode(false);
+            }
             this._onAuthStateChanged.fire(true);
             return true;
         }
         return false;
+    }
+
+    async setGuestMode(enabled: boolean): Promise<void> {
+        this._guestMode = enabled;
+        await this.context.globalState.update('gpugo.guestMode', enabled);
+        this._onAuthStateChanged.fire(this._isLoggedIn);
     }
 
     async login(): Promise<boolean> {
@@ -98,6 +113,9 @@ export class AuthManager {
             }
             
             this._isLoggedIn = true;
+            if (this._guestMode) {
+                await this.setGuestMode(false);
+            }
             this._onAuthStateChanged.fire(true);
             
             Logger.log('Login successful');
@@ -126,6 +144,7 @@ export class AuthManager {
             await fs.unlink(tokenPath);
             
             this._isLoggedIn = false;
+            await this.setGuestMode(true);
             this._onAuthStateChanged.fire(false);
             
             vscode.window.showInformationMessage('Successfully logged out from GPUGo.');
