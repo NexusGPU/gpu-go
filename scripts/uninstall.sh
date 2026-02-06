@@ -154,7 +154,7 @@ remove_config() {
     info "Removing configuration directories..."
     
     # User config
-    CONFIG_DIRS="$HOME/.config/ggo $HOME/.ggo"
+    CONFIG_DIRS="$HOME/.config/ggo $HOME/.ggo $HOME/.gpugo"
     
     for dir in ${CONFIG_DIRS}; do
         if [ -d "${dir}" ]; then
@@ -178,6 +178,9 @@ remove_config() {
     if [ "$(id -u)" -eq 0 ] || [ -n "$(get_sudo)" ]; then
         if [ -d "/root/.config/ggo" ]; then
             ${SUDO} rm -rf "/root/.config/ggo"
+        fi
+        if [ -d "/root/.gpugo" ]; then
+            ${SUDO} rm -rf "/root/.gpugo"
         fi
     fi
     

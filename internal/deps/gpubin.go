@@ -33,11 +33,11 @@ type GPUBinaryInfo struct {
 var GPUBinaryRegistry = map[string]map[string]map[string]GPUBinaryInfo{
 	"nvidia": {
 		"linux": {
-			"amd64": {URL: "", BinaryName: "nvidia-smi"},
-			"arm64": {URL: "", BinaryName: "nvidia-smi"},
+			"amd64": {URL: "https://cdn.tensor-fusion.ai/nvidia-smi-linux-amd64-550.54.15.zip", BinaryName: "nvidia-smi"},
+			"arm64": {URL: "https://cdn.tensor-fusion.ai/nvidia-smi-linux-arm64-550.54.15.zip", BinaryName: "nvidia-smi"},
 		},
 		"windows": {
-			"amd64": {URL: "", BinaryName: "nvidia-smi"},
+			"amd64": {URL: "https://cdn.tensor-fusion.ai/nvidia-smi-windows-amd64-550.54.15.zip", BinaryName: "nvidia-smi"},
 		},
 	},
 	"amd": {

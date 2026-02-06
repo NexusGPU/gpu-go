@@ -143,6 +143,14 @@ func NewAgentWithHypervisor(client *api.Client, configMgr *config.Manager, hvMgr
 // Register registers the agent with the server using a temporary token.
 // Registration does not send a status report; status is reported only after Start() via statusReportLoop.
 func (a *Agent) Register(tempToken string, gpus []api.GPUInfo) error {
+	registered, err := a.config.IsRegistered()
+	if err != nil {
+		return err
+	}
+	if registered {
+		return ErrAlreadyRegistered
+	}
+
 	// Get network IPs
 	networkIPs := getNetworkIPs()
 
@@ -1244,11 +1252,21 @@ func (a *Agent) GetReconciler() *hypervisor.Reconciler {
 // ErrNotRegistered indicates the agent is not registered
 var ErrNotRegistered = &NotRegisteredError{}
 
+// ErrAlreadyRegistered indicates the agent is already registered
+var ErrAlreadyRegistered = &AlreadyRegisteredError{}
+
 // NotRegisteredError is returned when the agent is not registered
 type NotRegisteredError struct{}
 
 func (e *NotRegisteredError) Error() string {
 	return "agent is not registered, please run 'ggo agent register' first"
+}
+
+// AlreadyRegisteredError is returned when the agent is already registered
+type AlreadyRegisteredError struct{}
+
+func (e *AlreadyRegisteredError) Error() string {
+	return "agent is already registered, please run 'ggo uninstall' and register again"
 }
 
 // writePIDFile writes the current process PID to the PID file

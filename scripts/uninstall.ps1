@@ -198,6 +198,7 @@ function Remove-ConfigDirectories {
         (Join-Path $env:APPDATA "ggo"),
         (Join-Path $env:LOCALAPPDATA "ggo"),
         (Join-Path $env:USERPROFILE ".ggo"),
+        (Join-Path $env:USERPROFILE ".gpugo"),
         (Join-Path $env:USERPROFILE ".config\ggo")
     )
     
@@ -255,5 +256,6 @@ try {
 }
 catch {
     Write-Err $_.Exception.Message
-    exit 1
+    $global:LASTEXITCODE = 1
+    return
 }

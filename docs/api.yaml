@@ -1,4 +1,3 @@
-# generated from tensor-fusion-website project with `pnpm generate:openapi`
 openapi: 3.0.0
 info:
   version: 1.0.0
@@ -67,6 +66,9 @@ components:
       properties:
         exists:
           type: boolean
+        token:
+          type: string
+          nullable: true
         expires_at:
           type: string
           nullable: true
@@ -78,6 +80,7 @@ components:
           nullable: true
       required:
         - exists
+        - token
         - expires_at
         - last_used_at
         - created_at
@@ -86,6 +89,9 @@ components:
       properties:
         gpu_id:
           type: string
+        gpu_index:
+          type: integer
+          minimum: 0
         vendor:
           type: string
         model:
@@ -108,6 +114,9 @@ components:
       properties:
         gpu_id:
           type: string
+        gpu_index:
+          type: integer
+          minimum: 0
         used_by_worker:
           type: string
           nullable: true
@@ -153,6 +162,9 @@ components:
             properties:
               gpu_id:
                 type: string
+              gpu_index:
+                type: integer
+                minimum: 0
               vendor:
                 type: string
               model:
@@ -239,10 +251,6 @@ components:
                 type: array
                 items:
                   type: string
-              gpu_indices:
-                type: array
-                items:
-                  type: integer
               vram_mb:
                 type: integer
               compute_percent:
@@ -289,6 +297,9 @@ components:
             properties:
               gpu_id:
                 type: string
+              gpu_index:
+                type: integer
+                minimum: 0
               used_by_worker:
                 type: string
                 nullable: true
@@ -300,8 +311,6 @@ components:
                 type: integer
                 minimum: 0
                 exclusiveMinimum: true
-              gpu_index:
-                type: integer
               driver_version:
                 type: string
               cuda_version:
@@ -311,7 +320,6 @@ components:
             required:
               - gpu_id
               - used_by_worker
-              - gpu_index
               - vendor
               - model
               - vram_mb
@@ -333,14 +341,15 @@ components:
                 type: integer
               restarts:
                 type: integer
-              gpu_indices:
-                type: array
-                items:
-                  type: integer
               gpu_ids:
                 type: array
                 items:
                   type: string
+              gpu_indices:
+                type: array
+                items:
+                  type: integer
+                  minimum: 0
               connections:
                 type: array
                 items:
@@ -436,6 +445,11 @@ components:
           type: array
           items:
             type: string
+        gpu_indices:
+          type: array
+          items:
+            type: integer
+            minimum: 0
         listen_port:
           type: number
         enabled:
@@ -454,6 +468,7 @@ components:
         - agent_id
         - name
         - gpu_ids
+        - gpu_indices
         - listen_port
         - enabled
         - status
@@ -479,6 +494,14 @@ components:
         enabled:
           type: boolean
           default: true
+        vram_mb:
+          type: integer
+          minimum: 0
+          exclusiveMinimum: true
+        compute_percent:
+          type: integer
+          minimum: 1
+          maximum: 100
       required:
         - agent_id
         - name
@@ -502,6 +525,16 @@ components:
           maximum: 65535
         enabled:
           type: boolean
+        vram_mb:
+          type: integer
+          nullable: true
+          minimum: 0
+          exclusiveMinimum: true
+        compute_percent:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 100
     CreateShareRequest:
       type: object
       properties:
@@ -657,6 +690,7 @@ paths:
                         type: string
                       gpu_index:
                         type: integer
+                        minimum: 0
                       vendor:
                         type: string
                       model:
@@ -671,7 +705,6 @@ paths:
                         type: string
                     required:
                       - gpu_id
-                      - gpu_index
                       - vendor
                       - model
                       - vram_mb
@@ -790,6 +823,7 @@ paths:
                         type: string
                       gpu_index:
                         type: integer
+                        minimum: 0
                       used_by_worker:
                         type: string
                         nullable: true
@@ -810,7 +844,6 @@ paths:
                     required:
                       - gpu_id
                       - used_by_worker
-                      - gpu_index
                       - vendor
                       - model
                       - vram_mb
@@ -840,6 +873,7 @@ paths:
                         type: array
                         items:
                           type: integer
+                          minimum: 0
                       connections:
                         type: array
                         items:
@@ -986,6 +1020,11 @@ paths:
                           type: array
                           items:
                             type: string
+                        gpu_indices:
+                          type: array
+                          items:
+                            type: integer
+                            minimum: 0
                         listen_port:
                           type: number
                         enabled:
@@ -1004,6 +1043,7 @@ paths:
                         - agent_id
                         - name
                         - gpu_ids
+                        - gpu_indices
                         - listen_port
                         - enabled
                         - status
@@ -1038,6 +1078,14 @@ paths:
                 enabled:
                   type: boolean
                   default: true
+                vram_mb:
+                  type: integer
+                  minimum: 0
+                  exclusiveMinimum: true
+                compute_percent:
+                  type: integer
+                  minimum: 1
+                  maximum: 100
               required:
                 - agent_id
                 - name
@@ -1061,6 +1109,11 @@ paths:
                     type: array
                     items:
                       type: string
+                  gpu_indices:
+                    type: array
+                    items:
+                      type: integer
+                      minimum: 0
                   listen_port:
                     type: number
                   enabled:
@@ -1079,6 +1132,7 @@ paths:
                   - agent_id
                   - name
                   - gpu_ids
+                  - gpu_indices
                   - listen_port
                   - enabled
                   - status

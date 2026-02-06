@@ -134,15 +134,6 @@ func newRegisterCmd() *cobra.Command {
 			out := getOutput()
 			client := api.NewClient(api.WithBaseURL(serverURL))
 
-			// Sync deps manifest before registration
-			depsMgr := deps.NewManager(
-				deps.WithPaths(paths),
-				deps.WithAPIClient(client),
-			)
-			if _, err := depsMgr.SyncReleases(context.Background(), "", ""); err != nil {
-				klog.Fatalf("Failed to sync deps manifest: error=%v", err)
-			}
-
 			if token == "" {
 				token = os.Getenv("GPU_GO_TOKEN")
 			}
@@ -154,6 +145,28 @@ func newRegisterCmd() *cobra.Command {
 			}
 
 			configMgr := config.NewManager(configDir, stateDir)
+			registered, err := configMgr.IsRegistered()
+			if err != nil {
+				cmd.SilenceUsage = true
+				klog.Errorf("Failed to check registration status: error=%v", err)
+				return err
+			}
+			if registered {
+				cmd.SilenceUsage = true
+				if !out.IsJSON() {
+					out.Error("Agent already registered on this machine. Please run the uninstall command and register again.")
+				}
+				return agent.ErrAlreadyRegistered
+			}
+
+			// Sync deps manifest before registration
+			depsMgr := deps.NewManager(
+				deps.WithPaths(paths),
+				deps.WithAPIClient(client),
+			)
+			if _, err := depsMgr.SyncReleases(context.Background(), "", ""); err != nil {
+				klog.Fatalf("Failed to sync deps manifest: error=%v", err)
+			}
 
 			gpus, err := discoverGPUs()
 			if err != nil {

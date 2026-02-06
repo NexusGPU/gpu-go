@@ -13,6 +13,7 @@ import (
 	"github.com/NexusGPU/gpu-go/internal/deps"
 	"github.com/NexusGPU/gpu-go/internal/platform"
 	hvapi "github.com/NexusGPU/tensor-fusion/pkg/hypervisor/api"
+	"k8s.io/klog/v2"
 )
 
 const (
@@ -194,10 +195,31 @@ func detectVendor() (string, string) {
 
 // detectVendorFromSystem detects GPU vendor from system information
 func detectVendorFromSystem() string {
+	if runtime.GOOS == "windows" {
+		vendor, driverVersion, verified := detectWindowsGPUVendor()
+		if vendor != "" {
+			if vendor == vendorNVIDIA && driverVersion != "" {
+				warnIfNvidiaDriverOutdated(driverVersion)
+			}
+			switch {
+			case driverVersion != "" && verified:
+				klog.Infof("Detected Windows GPU vendor: %s (driver_version=%s verified)", vendor, driverVersion)
+			case driverVersion != "":
+				klog.Infof("Detected Windows GPU vendor: %s (driver_version=%s)", vendor, driverVersion)
+			default:
+				klog.Infof("Detected Windows GPU vendor: %s", vendor)
+			}
+			return vendor
+		}
+	}
+
 	// Check for NVIDIA
-	if _, err := exec.LookPath("nvidia-smi"); err == nil {
+	if smiPath, err := exec.LookPath("nvidia-smi"); err == nil {
+		if driverVersion := queryNvidiaSMIDriverVersion(smiPath); driverVersion != "" {
+			warnIfNvidiaDriverOutdated(driverVersion)
+		}
 		// nvidia-smi exists, try to run it
-		cmd := exec.Command("nvidia-smi", "--query-gpu=vendor", "--format=csv,noheader")
+		cmd := exec.Command(smiPath, "--query-gpu=vendor", "--format=csv,noheader")
 		if output, err := cmd.Output(); err == nil {
 			vendor := strings.TrimSpace(strings.ToLower(string(output)))
 			if strings.Contains(vendor, vendorNVIDIA) {

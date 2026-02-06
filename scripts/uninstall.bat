@@ -138,6 +138,11 @@ if exist "%USERPROFILE%\.ggo" (
     rmdir /s /q "%USERPROFILE%\.ggo" >nul 2>&1
 )
 
+if exist "%USERPROFILE%\.gpugo" (
+    echo [INFO] Removing %USERPROFILE%\.gpugo...
+    rmdir /s /q "%USERPROFILE%\.gpugo" >nul 2>&1
+)
+
 if exist "%USERPROFILE%\.config\ggo" (
     echo [INFO] Removing %USERPROFILE%\.config\ggo...
     rmdir /s /q "%USERPROFILE%\.config\ggo" >nul 2>&1

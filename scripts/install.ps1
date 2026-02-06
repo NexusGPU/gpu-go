@@ -254,9 +254,9 @@ function Install-Ggo {
     Write-Host "==========================================" -ForegroundColor Green
     Write-Host ""
     
-    # Check for administrator privileges if using token (needed for service setup)
-    if ($Token -and -not (Test-Administrator)) {
-        throw "Administrator privileges required for agent mode. Please run PowerShell as Administrator."
+    # Check for administrator privileges (required for onboarding)
+    if (-not (Test-Administrator)) {
+        throw "Administrator privileges required. Please run PowerShell as Administrator."
     }
     
     # Detect architecture
@@ -407,5 +407,6 @@ try {
 }
 catch {
     Write-Err $_.Exception.Message
-    exit 1
+    $global:LASTEXITCODE = 1
+    return
 }

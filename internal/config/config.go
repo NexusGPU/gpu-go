@@ -198,3 +198,18 @@ func (m *Manager) ConfigExists() bool {
 	_, err := os.Stat(m.ConfigPath())
 	return err == nil
 }
+
+// IsRegistered returns true when the config indicates an existing registration.
+func (m *Manager) IsRegistered() (bool, error) {
+	cfg, err := m.LoadConfig()
+	if err != nil {
+		return false, err
+	}
+	if cfg == nil {
+		return false, nil
+	}
+	if cfg.AgentID == "" || cfg.AgentSecret == "" {
+		return false, nil
+	}
+	return true, nil
+}
