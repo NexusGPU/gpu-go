@@ -122,9 +122,9 @@ export class DevicesTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
                 }
             }
 
-            // Workers
+            // vGPU workers
             if (agent.workers && agent.workers.length > 0) {
-                items.push(new PropertyItem('Workers', String(agent.workers.length)));
+                items.push(new PropertyItem('vGPU workers', String(agent.workers.length)));
             }
 
             return items;

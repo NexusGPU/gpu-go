@@ -107,7 +107,7 @@ export class CreateWorkerPanel {
                         <ul>
                             <li>GPU server with NVIDIA GPU(s)</li>
                             <li>ggo CLI installed on the server</li>
-                            <li>Agent running on the server (<code>ggo agent start</code>)</li>
+                            <li>Machine Agent running on the host (<code>ggo agent start</code>)</li>
                         </ul>
 
                         <h3>Parameters</h3>
