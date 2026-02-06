@@ -12,6 +12,7 @@ type TokenResponse struct {
 // GPUInfo represents GPU information for agent registration
 type GPUInfo struct {
 	GPUID         string `json:"gpu_id"`
+	GPUIndex      int    `json:"gpu_index"`
 	Vendor        string `json:"vendor"`
 	Model         string `json:"model"`
 	VRAMMb        int64  `json:"vram_mb"`
@@ -65,6 +66,7 @@ type AgentListResponse struct {
 type WorkerConfig struct {
 	WorkerID       string   `json:"worker_id"`
 	GPUIDs         []string `json:"gpu_ids"`
+	GPUIndices     []int    `json:"gpu_indices,omitempty"`
 	VRAMMb         int64    `json:"vram_mb,omitempty"`
 	ComputePercent int      `json:"compute_percent,omitempty"`
 	IsolationMode  string   `json:"isolation_mode,omitempty"`
@@ -82,6 +84,7 @@ type AgentConfigResponse struct {
 // GPUStatus represents GPU status for status report
 type GPUStatus struct {
 	GPUID         string  `json:"gpu_id"`
+	GPUIndex      int     `json:"gpu_index"`
 	UsedByWorker  *string `json:"used_by_worker"`
 	Vendor        string  `json:"vendor"`
 	Model         string  `json:"model"`
@@ -104,6 +107,7 @@ type WorkerStatus struct {
 	PID         int              `json:"pid,omitempty"`
 	Restarts    int              `json:"restarts,omitempty"`
 	GPUIDs      []string         `json:"gpu_ids"`
+	GPUIndices  []int            `json:"gpu_indices,omitempty"`
 	Connections []ConnectionInfo `json:"connections,omitempty"`
 	// Optimization flags - only update DB when these are true
 	WorkerChanged     *bool `json:"worker_changed,omitempty"`     // true if status/pid/restarts/gpu_ids changed

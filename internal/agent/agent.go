@@ -59,6 +59,7 @@ type workerSnapshot struct {
 // gpuSnapshot captures GPU state for change detection
 type gpuSnapshot struct {
 	GPUID         string
+	GPUIndex      int
 	Vendor        string
 	Model         string
 	VRAMMb        int64
@@ -176,10 +177,11 @@ func (a *Agent) Register(tempToken string, gpus []api.GPUInfo) error {
 	gpuConfigs := make([]config.GPUConfig, len(gpus))
 	for i, gpu := range gpus {
 		gpuConfigs[i] = config.GPUConfig{
-			GPUID:  gpu.GPUID,
-			Vendor: gpu.Vendor,
-			Model:  gpu.Model,
-			VRAMMb: gpu.VRAMMb,
+			GPUID:    gpu.GPUID,
+			GPUIndex: gpu.GPUIndex,
+			Vendor:   gpu.Vendor,
+			Model:    gpu.Model,
+			VRAMMb:   gpu.VRAMMb,
 		}
 	}
 	if err := a.config.SaveGPUs(gpuConfigs); err != nil {
@@ -333,6 +335,7 @@ func (a *Agent) pullConfig() error {
 		workers[i] = config.WorkerConfig{
 			WorkerID:       w.WorkerID,
 			GPUIDs:         w.GPUIDs,
+			GPUIndices:     w.GPUIndices,
 			VRAMMb:         w.VRAMMb,
 			ComputePercent: w.ComputePercent,
 			ListenPort:     w.ListenPort,
@@ -384,6 +387,21 @@ func (a *Agent) convertToWorkerInfos(apiWorkers []api.WorkerConfig) ([]*hvApi.Wo
 	if err != nil {
 		klog.Warningf("Failed to load GPU config for visibility env: %v", err)
 	}
+	gpuIndexByID, err := a.loadGPUIndexByID()
+	if err != nil {
+		klog.Warningf("Failed to load GPU index mapping for visibility env: %v", err)
+		gpuIndexByID = make(map[string]int)
+	}
+	if a.hypervisorMgr != nil && a.hypervisorMgr.IsStarted() {
+		devices, err := a.hypervisorMgr.ListDevices()
+		if err != nil {
+			klog.Warningf("Failed to list devices for visibility env: %v", err)
+		} else {
+			for id, index := range gpuIndexByIDFromDevices(devices) {
+				gpuIndexByID[id] = index
+			}
+		}
+	}
 
 	infos := make([]*hvApi.WorkerInfo, 0, len(apiWorkers))
 	for _, w := range apiWorkers {
@@ -403,6 +421,7 @@ func (a *Agent) convertToWorkerInfos(apiWorkers []api.WorkerConfig) ([]*hvApi.Wo
 		envVars := make(map[string]string)
 		envVars["TF_LICENSE"] = cfg.License.Plain
 		envVars["TF_LICENSE_SIGN"] = cfg.License.Encrypted
+		envVars["TF_ENABLE_LOG"] = "1"
 
 		// Set hard limiter environment variables for Fractional GPU support
 		// TODO: use MIG for partitioned
@@ -418,7 +437,8 @@ func (a *Agent) convertToWorkerInfos(apiWorkers []api.WorkerConfig) ([]*hvApi.Wo
 		}
 
 		vendor := resolveWorkerVendor(w.WorkerID, w.GPUIDs, gpuVendorByID)
-		for k, v := range buildGPUVisibilityEnv(vendor, w.GPUIDs) {
+		gpuIndices := resolveWorkerGPUIndices(w.WorkerID, w.GPUIndices, w.GPUIDs, gpuIndexByID)
+		for k, v := range buildGPUVisibilityEnv(vendor, gpuIndices) {
 			envVars[k] = v
 		}
 
@@ -445,7 +465,7 @@ func (a *Agent) loadGPUVendorByID() (map[string]string, error) {
 
 	vendorByID := make(map[string]string, len(gpus))
 	for _, gpu := range gpus {
-		id := strings.ToLower(strings.TrimSpace(gpu.GPUID))
+		id := normalizeGPUID(gpu.GPUID)
 		if id == "" {
 			continue
 		}
@@ -457,6 +477,36 @@ func (a *Agent) loadGPUVendorByID() (map[string]string, error) {
 	}
 
 	return vendorByID, nil
+}
+
+func (a *Agent) loadGPUIndexByID() (map[string]int, error) {
+	gpus, err := a.config.LoadGPUs()
+	if err != nil {
+		return nil, err
+	}
+
+	indexByID := make(map[string]int, len(gpus))
+	for _, gpu := range gpus {
+		id := normalizeGPUID(gpu.GPUID)
+		if id == "" {
+			continue
+		}
+		indexByID[id] = gpu.GPUIndex
+	}
+
+	return indexByID, nil
+}
+
+func gpuIndexByIDFromDevices(devices []*hvApi.DeviceInfo) map[string]int {
+	indexByID := make(map[string]int, len(devices))
+	for _, dev := range devices {
+		id := normalizeGPUID(dev.UUID)
+		if id == "" {
+			continue
+		}
+		indexByID[id] = int(dev.Index)
+	}
+	return indexByID
 }
 
 func resolveWorkerVendor(workerID string, gpuIDs []string, gpuVendorByID map[string]string) string {
@@ -487,30 +537,61 @@ func resolveWorkerVendor(workerID string, gpuIDs []string, gpuVendorByID map[str
 	return vendor
 }
 
-func buildGPUVisibilityEnv(vendor string, gpuIDs []string) map[string]string {
-	if vendor == "" || len(gpuIDs) == 0 {
+func resolveWorkerGPUIndices(workerID string, configuredIndices []int, gpuIDs []string, gpuIndexByID map[string]int) []int {
+	if len(configuredIndices) > 0 {
+		indices := make([]int, 0, len(configuredIndices))
+		for _, index := range configuredIndices {
+			if index < 0 {
+				continue
+			}
+			indices = append(indices, index)
+		}
+		if len(indices) == 0 {
+			klog.Warningf("Worker has GPU indices configured but none are usable: worker_id=%s", workerID)
+		}
+		return indices
+	}
+	if len(gpuIDs) == 0 || len(gpuIndexByID) == 0 {
 		return nil
 	}
 
-	visibleIDs := make([]string, 0, len(gpuIDs))
+	indices := make([]int, 0, len(gpuIDs))
 	for _, id := range gpuIDs {
-		trimmed := strings.TrimSpace(id)
-		if trimmed == "" {
+		normalizedID := normalizeGPUID(id)
+		if normalizedID == "" {
 			continue
 		}
-		switch vendor {
-		case vendorNVIDIA:
-			visibleIDs = append(visibleIDs, normalizeNvidiaGPUID(trimmed))
-		default:
-			visibleIDs = append(visibleIDs, trimmed)
+		index, ok := gpuIndexByID[normalizedID]
+		if !ok {
+			klog.Warningf("GPU index not found for worker visibility env: worker_id=%s gpu_id=%s", workerID, id)
+			continue
 		}
+		indices = append(indices, index)
 	}
+	if len(indices) == 0 {
+		klog.Warningf("Failed to resolve GPU indices for worker visibility env: worker_id=%s", workerID)
+	}
+	return indices
+}
 
-	if len(visibleIDs) == 0 {
+func buildGPUVisibilityEnv(vendor string, gpuIndices []int) map[string]string {
+	if vendor == "" || len(gpuIndices) == 0 {
 		return nil
 	}
 
-	value := strings.Join(visibleIDs, ",")
+	visibleIndices := make([]string, 0, len(gpuIndices))
+	for _, index := range gpuIndices {
+		if index < 0 {
+			continue
+		}
+		visibleIndices = append(visibleIndices, strconv.Itoa(index))
+	}
+
+	if len(visibleIndices) == 0 {
+		return nil
+	}
+
+	value := strings.Join(visibleIndices, ",")
 	env := make(map[string]string, 2)
 	switch vendor {
 	case vendorNVIDIA:
@@ -523,16 +604,12 @@ func buildGPUVisibilityEnv(vendor string, gpuIDs []string) map[string]string {
 	return env
 }
 
-func normalizeNvidiaGPUID(id string) string {
+func normalizeGPUID(id string) string {
 	id = strings.ToLower(strings.TrimSpace(id))
 	if id == "" {
 		return id
 	}
-	dash := strings.Index(id, "-")
-	if dash == -1 {
-		return strings.ToUpper(id)
-	}
-	return strings.ToUpper(id[:dash]) + id[dash:]
+	return id
 }
 
 // normalizeWorkerStatus maps status to API-allowed WorkerStatus: "pending" | "running" | "stopping" | "stopped".
@@ -576,7 +653,8 @@ func (a *Agent) detectGPUChanges(devices []*hvApi.DeviceInfo) (map[string]bool, 
 			cudaVersion = dev.Properties["cudaVersion"]
 		}
 		currentGPUs = append(currentGPUs, &gpuSnapshot{
-			GPUID:         strings.ToLower(dev.UUID),
+			GPUID:         normalizeGPUID(dev.UUID),
+			GPUIndex:      int(dev.Index),
 			Vendor:        dev.Vendor,
 			Model:         dev.Model,
 			VRAMMb:        int64(dev.TotalMemoryBytes / (1024 * 1024)),
@@ -602,7 +680,8 @@ func (a *Agent) detectGPUChanges(devices []*hvApi.DeviceInfo) (map[string]bool, 
 			continue
 		}
 		// Compare fields that matter for gpu_changed
-		if current.Vendor != prev.Vendor ||
+		if current.GPUIndex != prev.GPUIndex ||
+			current.Vendor != prev.Vendor ||
 			current.Model != prev.Model ||
 			current.VRAMMb != prev.VRAMMb ||
 			current.DriverVersion != prev.DriverVersion ||
@@ -902,7 +981,7 @@ func (a *Agent) collectGPUStatus(forceRefresh bool) ([]api.GPUStatus, map[string
 	// Create map for live devices
 	liveDeviceMap := make(map[string]*hvApi.DeviceInfo)
 	for _, dev := range liveDevices {
-		liveDeviceMap[strings.ToLower(dev.UUID)] = dev
+		liveDeviceMap[normalizeGPUID(dev.UUID)] = dev
 	}
 
 	// Detect GPU changes
@@ -921,19 +1000,22 @@ func (a *Agent) collectGPUStatus(forceRefresh bool) ([]api.GPUStatus, map[string
 		// Default values from config
 		driverVer := ""
 		cudaVer := ""
+		gpuIndex := gpu.GPUIndex
 
 		// Update with live info if available
-		if liveDev, ok := liveDeviceMap[strings.ToLower(gpu.GPUID)]; ok {
+		if liveDev, ok := liveDeviceMap[normalizeGPUID(gpu.GPUID)]; ok {
 			if liveDev.Properties != nil {
 				driverVer = liveDev.Properties["driverVersion"]
 				cudaVer = liveDev.Properties["cudaVersion"]
 			}
+			gpuIndex = int(liveDev.Index)
 		}
 
 		gpuChanged := forceRefresh || gpuChanges[gpu.GPUID]
 
 		gpuStatuses[i] = api.GPUStatus{
 			GPUID:         gpu.GPUID,
+			GPUIndex:      gpuIndex,
 			UsedByWorker:  gpu.UsedByWorker,
 			Vendor:        gpu.Vendor,
 			Model:         gpu.Model,
@@ -970,6 +1052,23 @@ func (a *Agent) collectWorkerStatusFromHypervisor(
 	gpuChanges map[string]bool,
 ) ([]api.WorkerStatus, error) {
 	hvWorkers := a.hypervisorMgr.ListWorkers()
+	gpuIndexByID := make(map[string]int)
+	if a.hypervisorMgr != nil && a.hypervisorMgr.IsStarted() {
+		devices, err := a.hypervisorMgr.ListDevices()
+		if err != nil {
+			klog.Warningf("Failed to list devices for worker status GPU indices: %v", err)
+		} else {
+			gpuIndexByID = gpuIndexByIDFromDevices(devices)
+		}
+	}
+	if len(gpuIndexByID) == 0 {
+		indexByID, err := a.loadGPUIndexByID()
+		if err != nil {
+			klog.Warningf("Failed to load GPU index mapping for worker status: %v", err)
+		} else {
+			gpuIndexByID = indexByID
+		}
+	}
 
 	// Detect worker changes
 	workerChanges := a.detectWorkerChanges(hvWorkers)
@@ -1008,12 +1107,14 @@ func (a *Agent) collectWorkerStatusFromHypervisor(
 			connections = parseConnectionsToAPI(connLines)
 		}
 
+		gpuIndices := resolveWorkerGPUIndices(w.WorkerUID, nil, w.AllocatedDevices, gpuIndexByID)
 		workerStatuses = append(workerStatuses, api.WorkerStatus{
 			WorkerID:          w.WorkerUID,
 			Status:            normalizeWorkerStatus(status),
 			PID:               pid,
 			Restarts:          restarts,
 			GPUIDs:            w.AllocatedDevices,
+			GPUIndices:        gpuIndices,
 			Connections:       connections,
 			WorkerChanged:     &workerChanged,
 			ConnectionChanged: &connectionChanged,
@@ -1037,6 +1138,11 @@ func (a *Agent) collectWorkerStatusFromConfig(forceRefresh bool, gpuChanges map[
 	if err != nil {
 		return nil, err
 	}
+	gpuIndexByID, err := a.loadGPUIndexByID()
+	if err != nil {
+		klog.Warningf("Failed to load GPU index mapping for worker status: %v", err)
+		gpuIndexByID = make(map[string]int)
+	}
 
 	workerStatuses := make([]api.WorkerStatus, len(workerConfigs))
 	for i, w := range workerConfigs {
@@ -1045,11 +1151,13 @@ func (a *Agent) collectWorkerStatusFromConfig(forceRefresh bool, gpuChanges map[
 		connectionChanged := true
 		gpuChanged := forceRefresh || len(gpuChanges) > 0
 
+		gpuIndices := resolveWorkerGPUIndices(w.WorkerID, w.GPUIndices, w.GPUIDs, gpuIndexByID)
 		workerStatuses[i] = api.WorkerStatus{
 			WorkerID:          w.WorkerID,
 			Status:            normalizeWorkerStatus(w.Status),
 			PID:               w.PID,
 			GPUIDs:            w.GPUIDs,
+			GPUIndices:        gpuIndices,
 			Connections:       w.Connections,
 			WorkerChanged:     &workerChanged,
 			ConnectionChanged: &connectionChanged,

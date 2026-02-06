@@ -50,7 +50,7 @@ func TestAgent_Register(t *testing.T) {
 	agent := NewAgent(client, configMgr)
 
 	gpus := []api.GPUInfo{
-		{GPUID: "GPU-0", Vendor: "nvidia", Model: "RTX 4090", VRAMMb: 24576},
+		{GPUID: "GPU-0", GPUIndex: 2, Vendor: "nvidia", Model: "RTX 4090", VRAMMb: 24576},
 	}
 
 	err := agent.Register("tmp_token123", gpus)
@@ -67,6 +67,7 @@ func TestAgent_Register(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, gpuConfigs, 1)
 	assert.Equal(t, "GPU-0", gpuConfigs[0].GPUID)
+	assert.Equal(t, 2, gpuConfigs[0].GPUIndex)
 }
 
 func TestAgent_StartAndStop(t *testing.T) {
@@ -232,8 +233,8 @@ func TestAgent_ReportStatus(t *testing.T) {
 
 	// Save GPUs
 	gpus := []config.GPUConfig{
-		{GPUID: "GPU-0", Vendor: "nvidia", Model: "RTX 4090", VRAMMb: 24576},
-		{GPUID: "GPU-1", Vendor: "nvidia", Model: "RTX 4090", VRAMMb: 24576},
+		{GPUID: "GPU-0", GPUIndex: 0, Vendor: "nvidia", Model: "RTX 4090", VRAMMb: 24576},
+		{GPUID: "GPU-1", GPUIndex: 1, Vendor: "nvidia", Model: "RTX 4090", VRAMMb: 24576},
 	}
 	err := configMgr.SaveGPUs(gpus)
 	require.NoError(t, err)
@@ -259,6 +260,11 @@ func TestAgent_ReportStatus(t *testing.T) {
 
 	err = agent.reportStatus()
 	require.NoError(t, err)
+	assert.Len(t, receivedReq.GPUs, 2)
+	assert.Equal(t, 0, receivedReq.GPUs[0].GPUIndex)
+	assert.Equal(t, 1, receivedReq.GPUs[1].GPUIndex)
+	require.Len(t, receivedReq.Workers, 1)
+	assert.Equal(t, []int{0}, receivedReq.Workers[0].GPUIndices)
 
 	// Verify request
 	assert.Len(t, receivedReq.GPUs, 2)

@@ -32,6 +32,7 @@ func ConvertDevicesToGPUInfo(devices []*hvapi.DeviceInfo) []api.GPUInfo {
 
 		gpus[i] = api.GPUInfo{
 			GPUID:         strings.ToLower(dev.UUID),
+			GPUIndex:      int(dev.Index),
 			Vendor:        dev.Vendor,
 			Model:         dev.Model,
 			VRAMMb:        int64(dev.TotalMemoryBytes / (1024 * 1024)),
@@ -291,6 +292,7 @@ func CreateMockGPUs(count int) []api.GPUInfo {
 	for i := range count {
 		gpus[i] = api.GPUInfo{
 			GPUID:         fmt.Sprintf("GPU-%d", i),
+			GPUIndex:      i,
 			Vendor:        vendorNVIDIA,
 			Model:         "RTX 4090",
 			VRAMMb:        24576,

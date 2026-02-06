@@ -33,6 +33,7 @@ type Config struct {
 // GPUConfig represents GPU configuration
 type GPUConfig struct {
 	GPUID        string  `json:"gpu_id"`
+	GPUIndex     int     `json:"gpu_index"`
 	Vendor       string  `json:"vendor"`
 	Model        string  `json:"model"`
 	VRAMMb       int64   `json:"vram_mb"`
@@ -43,6 +44,7 @@ type GPUConfig struct {
 type WorkerConfig struct {
 	WorkerID       string               `json:"worker_id"`
 	GPUIDs         []string             `json:"gpu_ids"`
+	GPUIndices     []int                `json:"gpu_indices,omitempty"`
 	VRAMMb         int64                `json:"vram_mb,omitempty"`
 	ComputePercent int                  `json:"compute_percent,omitempty"`
 	ListenPort     int                  `json:"listen_port"`

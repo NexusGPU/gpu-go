@@ -239,6 +239,10 @@ components:
                 type: array
                 items:
                   type: string
+              gpu_indices:
+                type: array
+                items:
+                  type: integer
               vram_mb:
                 type: integer
               compute_percent:
@@ -296,6 +300,8 @@ components:
                 type: integer
                 minimum: 0
                 exclusiveMinimum: true
+              gpu_index:
+                type: integer
               driver_version:
                 type: string
               cuda_version:
@@ -305,6 +311,7 @@ components:
             required:
               - gpu_id
               - used_by_worker
+              - gpu_index
               - vendor
               - model
               - vram_mb
@@ -326,6 +333,10 @@ components:
                 type: integer
               restarts:
                 type: integer
+              gpu_indices:
+                type: array
+                items:
+                  type: integer
               gpu_ids:
                 type: array
                 items:
@@ -644,6 +655,8 @@ paths:
                     properties:
                       gpu_id:
                         type: string
+                      gpu_index:
+                        type: integer
                       vendor:
                         type: string
                       model:
@@ -658,6 +671,7 @@ paths:
                         type: string
                     required:
                       - gpu_id
+                      - gpu_index
                       - vendor
                       - model
                       - vram_mb
@@ -774,6 +788,8 @@ paths:
                     properties:
                       gpu_id:
                         type: string
+                      gpu_index:
+                        type: integer
                       used_by_worker:
                         type: string
                         nullable: true
@@ -794,6 +810,7 @@ paths:
                     required:
                       - gpu_id
                       - used_by_worker
+                      - gpu_index
                       - vendor
                       - model
                       - vram_mb
@@ -819,6 +836,10 @@ paths:
                         type: array
                         items:
                           type: string
+                      gpu_indices:
+                        type: array
+                        items:
+                          type: integer
                       connections:
                         type: array
                         items:
