@@ -463,11 +463,11 @@ func (b *DockerBackend) Get(ctx context.Context, idOrName string) (*Environment,
 	// Parse status
 	status := StatusStopped
 	switch c.State.Status {
-	case "running":
+	case DockerStateRunning:
 		status = StatusRunning
-	case "exited":
+	case DockerStateExited:
 		status = StatusStopped
-	case "created":
+	case DockerStateCreated:
 		status = StatusPending
 	}
 
