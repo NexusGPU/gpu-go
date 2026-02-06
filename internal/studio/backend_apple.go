@@ -133,6 +133,7 @@ func (b *AppleContainerBackend) Create(ctx context.Context, opts *CreateOptions)
 		GPUWorkerURL:   gpuWorkerURL,
 		HardwareVendor: opts.HardwareVendor,
 		MountUserHome:  !opts.NoUserVolume,
+		SkipSSHMounts:  true,
 	}
 
 	setupResult, err := SetupContainerGPUEnv(ctx, setupConfig)

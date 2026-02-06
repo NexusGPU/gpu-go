@@ -22,6 +22,8 @@ type ContainerSetupConfig struct {
 	HardwareVendor string
 	// MountUserHome indicates whether to mount the user's home directory
 	MountUserHome bool
+	// SkipSSHMounts disables mounting SSH key files into the container
+	SkipSSHMounts bool
 	// UserHomeContainerPath is the path to mount user home in container (default: /home/user/host)
 	UserHomeContainerPath string
 }
@@ -107,10 +109,12 @@ func SetupContainerGPUEnv(ctx context.Context, config *ContainerSetupConfig) (*C
 	}
 
 	// Step 4: Setup SSH volume mounts for container SSH access
-	sshMounts := getSSHVolumeMounts(paths, config.StudioName)
-	result.VolumeMounts = append(result.VolumeMounts, sshMounts...)
-	if len(sshMounts) > 0 {
-		klog.V(2).Infof("SSH mounts configured for studio %s: %d mounts", config.StudioName, len(sshMounts))
+	if !config.SkipSSHMounts {
+		sshMounts := getSSHVolumeMounts(paths, config.StudioName)
+		result.VolumeMounts = append(result.VolumeMounts, sshMounts...)
+		if len(sshMounts) > 0 {
+			klog.V(2).Infof("SSH mounts configured for studio %s: %d mounts", config.StudioName, len(sshMounts))
+		}
 	}
 
 	// Step 5: Download and mount GPU binary (like nvidia-smi) to /usr/local/bin/
