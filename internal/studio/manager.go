@@ -48,6 +48,12 @@ func (m *Manager) GetBackend(mode Mode) (Backend, error) {
 		return m.detectBestBackend()
 	}
 
+	if mode == ModeAppleContainer && runtime.GOOS == OSDarwin {
+		if major := platform.MacOSMajorVersion(); major > 0 && major < 26 {
+			return nil, errors.Unavailable("Apple Container requires macOS 26 or newer. Please upgrade your macOS version.")
+		}
+	}
+
 	backend, ok := m.backends[mode]
 	if !ok {
 		return nil, errors.NotFoundf("backend not registered for mode: %s", mode)
@@ -65,7 +71,16 @@ func (m *Manager) detectBestBackend() (Backend, error) {
 	case OSWindows:
 		preferenceOrder = []Mode{ModeWSL, ModeDocker, ModeKubernetes}
 	case OSDarwin:
-		preferenceOrder = []Mode{ModeColima, ModeAppleContainer, ModeDocker, ModeKubernetes}
+		macMajor := platform.MacOSMajorVersion()
+		if macMajor >= 26 {
+			if platform.HasDockerSocket() {
+				preferenceOrder = []Mode{ModeColima, ModeDocker, ModeAppleContainer, ModeKubernetes}
+			} else {
+				preferenceOrder = []Mode{ModeAppleContainer, ModeColima, ModeDocker, ModeKubernetes}
+			}
+		} else {
+			preferenceOrder = []Mode{ModeColima, ModeDocker, ModeKubernetes}
+		}
 	case OSLinux:
 		preferenceOrder = []Mode{ModeDocker, ModeColima, ModeKubernetes}
 	default:
@@ -107,17 +122,21 @@ func platformBackendHint(ctx context.Context, goos string) string {
 	}
 	switch goos {
 	case "darwin":
-		// Check if colima is installed
-		if _, err := exec.LookPath("colima"); err != nil {
-			// Colima is not installed, provide installation command
-			// Check if brew is available
-			if _, err := exec.LookPath("brew"); err == nil {
-				return "Colima is not installed. Install it with: brew install colima"
-			}
-			return "Colima is not installed. Install Homebrew first (https://brew.sh/), then run: brew install colima"
+		macMajor := platform.MacOSMajorVersion()
+		appleHint := "Apple Container (macOS 26+): download the signed installer pkg from https://github.com/apple/container/releases"
+		if macMajor > 0 && macMajor < 26 {
+			appleHint = "Apple Container requires macOS 26+ (upgrade your macOS to use it)"
 		}
-		// Colima is installed but not running, or other backends are preferred
-		return "Install and start Colima, Docker, or Apple Container runtime."
+		colimaHint := "Colima: brew install colima"
+		orbstackHint := "OrbStack: brew install orbstack"
+		dockerHint := "Docker Desktop: https://docs.docker.com/get-docker/"
+		return strings.Join([]string{
+			"No container runtime detected on macOS.",
+			appleHint + ".",
+			colimaHint + ".",
+			orbstackHint + ".",
+			dockerHint + ".",
+		}, " ")
 	case "windows":
 		return "Install and start WSL or Docker Desktop."
 	default:

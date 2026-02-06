@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/NexusGPU/gpu-go/internal/deps"
 	"github.com/NexusGPU/gpu-go/internal/platform"
@@ -22,6 +23,10 @@ type ContainerSetupConfig struct {
 	HardwareVendor string
 	// MountUserHome indicates whether to mount the user's home directory
 	MountUserHome bool
+	// SkipSSHMounts disables mounting SSH key files into the container
+	SkipSSHMounts bool
+	// SkipFileMounts disables mounting files into the container (directories only)
+	SkipFileMounts bool
 	// UserHomeContainerPath is the path to mount user home in container (default: /home/user/host)
 	UserHomeContainerPath string
 }
@@ -82,6 +87,13 @@ func SetupContainerGPUEnv(ctx context.Context, config *ContainerSetupConfig) (*C
 			result.EnvVars[k] = v
 		}
 
+		if config.SkipFileMounts {
+			result.EnvVars["LD_LIBRARY_PATH"] = "/opt/gpugo/libs"
+			if preload := buildContainerLDPreload(paths.LibsDir(), vendor); preload != "" {
+				result.EnvVars["LD_PRELOAD"] = preload
+			}
+		}
+
 		// Copy volume mounts from GPU setup
 		result.VolumeMounts = append(result.VolumeMounts, envResult.VolumeMounts...)
 
@@ -107,14 +119,21 @@ func SetupContainerGPUEnv(ctx context.Context, config *ContainerSetupConfig) (*C
 	}
 
 	// Step 4: Setup SSH volume mounts for container SSH access
-	sshMounts := getSSHVolumeMounts(paths, config.StudioName)
-	result.VolumeMounts = append(result.VolumeMounts, sshMounts...)
-	if len(sshMounts) > 0 {
-		klog.V(2).Infof("SSH mounts configured for studio %s: %d mounts", config.StudioName, len(sshMounts))
+	if !config.SkipSSHMounts {
+		var sshMounts []VolumeMount
+		if config.SkipFileMounts {
+			sshMounts = getSSHDirectoryMounts(paths, config.StudioName)
+		} else {
+			sshMounts = getSSHVolumeMounts(paths, config.StudioName)
+		}
+		result.VolumeMounts = append(result.VolumeMounts, sshMounts...)
+		if len(sshMounts) > 0 {
+			klog.V(2).Infof("SSH mounts configured for studio %s: %d mounts", config.StudioName, len(sshMounts))
+		}
 	}
 
 	// Step 5: Download and mount GPU binary (like nvidia-smi) to /usr/local/bin/
-	if config.GPUWorkerURL != "" && config.HardwareVendor != "" {
+	if !config.SkipFileMounts && config.GPUWorkerURL != "" && config.HardwareVendor != "" {
 		gpuBinMount, err := ensureAndMountGPUBinary(ctx, paths, config.HardwareVendor)
 		if err != nil {
 			klog.Warningf("Failed to setup GPU binary mount: %v (continuing without it)", err)
@@ -122,6 +141,10 @@ func SetupContainerGPUEnv(ctx context.Context, config *ContainerSetupConfig) (*C
 			result.VolumeMounts = append(result.VolumeMounts, *gpuBinMount)
 			klog.Infof("GPU binary mount configured: %s -> %s", gpuBinMount.HostPath, gpuBinMount.ContainerPath)
 		}
+	}
+
+	if config.SkipFileMounts {
+		result.VolumeMounts = filterDirectoryMounts(result.VolumeMounts)
 	}
 
 	return result, nil
@@ -186,6 +209,37 @@ func ensureGPUClientLibraries(ctx context.Context, vendor GPUVendor) error {
 
 	klog.V(2).Info("GPU client libraries downloaded successfully")
 	return nil
+}
+
+func buildContainerLDPreload(libsPath string, vendor GPUVendor) string {
+	libNames := FindActualLibraryFiles(libsPath, vendor)
+	if len(libNames) == 0 {
+		return ""
+	}
+
+	preloadPaths := make([]string, 0, len(libNames))
+	for _, lib := range libNames {
+		preloadPaths = append(preloadPaths, filepath.Join("/opt/gpugo/libs", lib))
+	}
+
+	return strings.Join(preloadPaths, ":")
+}
+
+func filterDirectoryMounts(mounts []VolumeMount) []VolumeMount {
+	filtered := make([]VolumeMount, 0, len(mounts))
+	for _, mount := range mounts {
+		info, err := os.Stat(mount.HostPath)
+		if err != nil {
+			klog.V(2).Infof("Skipping mount %s: %v", mount.HostPath, err)
+			continue
+		}
+		if !info.IsDir() {
+			klog.V(2).Infof("Skipping file mount %s", mount.HostPath)
+			continue
+		}
+		filtered = append(filtered, mount)
+	}
+	return filtered
 }
 
 // getUserHomeMount returns the volume mount for user's home directory
@@ -331,6 +385,47 @@ func setupSSHAuthorizedKeys(paths *platform.Paths, studioName string) (string, e
 
 	klog.V(2).Infof("Created authorized_keys for studio %s: %s", studioName, authorizedKeysPath)
 	return authorizedKeysPath, nil
+}
+
+// setupSSHAuthorizedKeysDir creates an authorized_keys file inside a dedicated directory
+func setupSSHAuthorizedKeysDir(paths *platform.Paths, studioName string) (string, error) {
+	publicKey, _, err := findUserSSHPublicKey()
+	if err != nil {
+		return "", err
+	}
+
+	normalizedName := platform.NormalizeName(studioName)
+	sshDir := filepath.Join(paths.StudioConfigDir(normalizedName), "ssh")
+	if err := os.MkdirAll(sshDir, 0700); err != nil {
+		return "", fmt.Errorf("failed to create directory for authorized_keys: %w", err)
+	}
+
+	authorizedKeysPath := filepath.Join(sshDir, "authorized_keys")
+	if err := os.WriteFile(authorizedKeysPath, []byte(publicKey), 0600); err != nil {
+		return "", fmt.Errorf("failed to write authorized_keys: %w", err)
+	}
+
+	klog.V(2).Infof("Created authorized_keys directory for studio %s: %s", studioName, authorizedKeysPath)
+	return authorizedKeysPath, nil
+}
+
+// getSSHDirectoryMounts returns volume mounts for SSH access using directory mounts only
+func getSSHDirectoryMounts(paths *platform.Paths, studioName string) []VolumeMount {
+	var mounts []VolumeMount
+
+	authorizedKeysPath, err := setupSSHAuthorizedKeysDir(paths, studioName)
+	if err != nil {
+		klog.V(2).Infof("Could not setup authorized_keys: %v (SSH access to container may require password)", err)
+		return mounts
+	}
+
+	mounts = append(mounts, VolumeMount{
+		HostPath:      filepath.Dir(authorizedKeysPath),
+		ContainerPath: "/root/.ssh",
+		ReadOnly:      false,
+	})
+
+	return mounts
 }
 
 // getSSHVolumeMounts returns volume mounts for SSH access to the container

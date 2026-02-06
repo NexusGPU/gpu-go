@@ -47,6 +47,7 @@ func NewStudioCmd() *cobra.Command {
 Supported platforms:
   - wsl:    Windows Subsystem for Linux (Windows only)
   - colima: Colima container runtime (macOS/Linux)
+  - apple-container: Apple Container (macOS 26+)
   - docker: Native Docker
   - k8s:    Kubernetes (kind, minikube, etc.)
   - auto:   Auto-detect best available platform
@@ -57,6 +58,9 @@ Examples:
 
   # Create with specific mode
   ggo studio create my-studio --mode wsl -s "https://..."
+
+  # Create with Apple Container (macOS 26+)
+  ggo studio create my-studio --mode apple-container -s "https://..."
 
   # Create with specific Colima profile
   ggo studio create my-studio --mode colima --colima-profile myprofile
@@ -179,7 +183,7 @@ Examples:
 		RunE: runCreate,
 	}
 
-	cmd.Flags().StringVarP(&mode, "mode", "m", "", "Container/VM mode (wsl, colima, docker, k8s, auto)")
+	cmd.Flags().StringVarP(&mode, "mode", "m", "", "Container/VM mode (wsl, colima, apple-container, docker, k8s, auto)")
 	cmd.Flags().StringVarP(&image, "image", "i", "tensorfusion/studio-torch:latest", "Container image")
 	cmd.Flags().StringVarP(&shareLink, "share-link", "s", "", "Share link or share code to remote vGPU worker (required)")
 	cmd.Flags().StringVar(&serverURL, "server", api.GetDefaultBaseURL(), "Server URL for resolving share links")
@@ -828,8 +832,10 @@ func (r *backendsResult) RenderTUI(out *tui.Output) {
 		out.Println()
 		out.Println(styles.Subtitle.Render("Install one of the following:"))
 		out.Println()
+		out.Println("  • " + styles.Bold.Render("Apple Container (macOS 26+):") + " " + tui.URL("https://github.com/apple/container/releases"))
 		out.Println("  • " + styles.Bold.Render("Docker:") + " " + tui.URL("https://docs.docker.com/get-docker/"))
 		out.Println("  • " + styles.Bold.Render("Colima (macOS):") + " " + tui.Code("brew install colima"))
+		out.Println("  • " + styles.Bold.Render("OrbStack (macOS):") + " " + tui.Code("brew install orbstack"))
 		out.Println("  • " + styles.Bold.Render("WSL (Windows):") + " " + tui.URL("https://docs.microsoft.com/en-us/windows/wsl/install"))
 		out.Println()
 		return

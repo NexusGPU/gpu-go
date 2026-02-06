@@ -5,24 +5,29 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
+	"os"
 	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/NexusGPU/gpu-go/internal/errors"
+	"github.com/NexusGPU/gpu-go/internal/platform"
 )
 
-// AppleContainerBackend implements the Backend interface using Apple native containers
-// This uses Docker CLI with the assumption that Docker Desktop or similar is running
-// on macOS using Apple Virtualization Framework
+const appleContainerInstallHint = "Apple Container is not installed. Download the signed installer package from https://github.com/apple/container/releases"
+
+// AppleContainerBackend implements the Backend interface using Apple native containers.
 type AppleContainerBackend struct {
-	dockerCmd string
+	containerCmd string
 }
 
-// NewAppleContainerBackend creates a new Apple container backend
+// NewAppleContainerBackend creates a new Apple container backend.
 func NewAppleContainerBackend() *AppleContainerBackend {
 	return &AppleContainerBackend{
-		dockerCmd: "docker",
+		containerCmd: "container",
 	}
 }
 
@@ -35,35 +40,67 @@ func (b *AppleContainerBackend) Mode() Mode {
 }
 
 func (b *AppleContainerBackend) IsAvailable(ctx context.Context) bool {
-	// Only available on macOS
-	if runtime.GOOS != OSDarwin {
+	if !b.isSupportedOS() {
+		return false
+	}
+	if _, err := exec.LookPath(b.containerCmd); err != nil {
 		return false
 	}
 
-	// Check if Docker is available
-	cmd := exec.CommandContext(ctx, b.dockerCmd, "info")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
+	cmd := exec.CommandContext(ctx, b.containerCmd, "system", "status")
+	return cmd.Run() == nil
+}
+
+func (b *AppleContainerBackend) IsInstalled(ctx context.Context) bool {
+	if !b.isSupportedOS() {
 		return false
 	}
+	_, err := exec.LookPath(b.containerCmd)
+	return err == nil
+}
 
-	// Check if it's using Apple Virtualization Framework or native macOS
-	outputStr := string(output)
-	return strings.Contains(outputStr, "Operating System") &&
-		(strings.Contains(outputStr, "macOS") || strings.Contains(outputStr, "Darwin"))
+func (b *AppleContainerBackend) EnsureRunning(ctx context.Context) error {
+	if !b.isSupportedOS() {
+		return errors.Unavailable("Apple Container requires macOS 26 or newer. Please upgrade your macOS version.")
+	}
+	if !b.IsInstalled(ctx) {
+		return errors.Unavailable(appleContainerInstallHint)
+	}
+	if b.IsAvailable(ctx) {
+		return nil
+	}
+
+	fmt.Fprintf(os.Stderr, "\n   Starting Apple Container services...\n")
+	cmd := exec.CommandContext(ctx, b.containerCmd, "system", "start")
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to start Apple Container services: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "\n   Apple Container services started!\n\n")
+	return nil
 }
 
 func (b *AppleContainerBackend) Create(ctx context.Context, opts *CreateOptions) (*Environment, error) {
+	if err := b.EnsureRunning(ctx); err != nil {
+		return nil, err
+	}
+
 	// Generate container name with random suffix to avoid conflicts
 	containerName := GenerateContainerName(opts.Name)
 
-	// Build docker run command
-	args := []string{"run", "-d", "--name", containerName}
+	// Build container run command
+	args := []string{"run", "--detach", "--name", containerName}
+
+	// Add platform if specified
+	if opts.Platform != "" {
+		args = append(args, "--platform", opts.Platform)
+	}
 
 	// Add labels
 	args = append(args, "--label", "ggo.managed=true")
 	args = append(args, "--label", fmt.Sprintf("ggo.name=%s", opts.Name))
-	args = append(args, "--label", "ggo.backend=apple-container")
+	args = append(args, "--label", fmt.Sprintf("ggo.mode=%s", b.Mode()))
 
 	// Add port mappings
 	sshPort := 0
@@ -91,12 +128,12 @@ func (b *AppleContainerBackend) Create(ctx context.Context, opts *CreateOptions)
 	}
 
 	// Setup container GPU environment using common abstraction
-	// This downloads GPU client libraries and sets up env vars, volumes
 	setupConfig := &ContainerSetupConfig{
 		StudioName:     opts.Name,
 		GPUWorkerURL:   gpuWorkerURL,
 		HardwareVendor: opts.HardwareVendor,
 		MountUserHome:  !opts.NoUserVolume,
+		SkipFileMounts: true,
 	}
 
 	setupResult, err := SetupContainerGPUEnv(ctx, setupConfig)
@@ -120,9 +157,13 @@ func (b *AppleContainerBackend) Create(ctx context.Context, opts *CreateOptions)
 		args = append(args, "-v", mountOpt)
 	}
 
-	// Add resource limits (macOS-specific optimizations)
+	// Add resource limits
 	if opts.Resources.CPUs > 0 {
-		args = append(args, "--cpus", fmt.Sprintf("%.2f", opts.Resources.CPUs))
+		cpus := int64(math.Ceil(opts.Resources.CPUs))
+		if cpus < 1 {
+			cpus = 1
+		}
+		args = append(args, "--cpus", strconv.FormatInt(cpus, 10))
 	}
 
 	// Set default memory to 1/4 of system memory if not specified
@@ -130,25 +171,22 @@ func (b *AppleContainerBackend) Create(ctx context.Context, opts *CreateOptions)
 	if memoryLimit == "" {
 		memGB, err := getSystemMemoryGB()
 		if err == nil && memGB > 0 {
-			// Calculate 1/4 of system memory (round up)
-			memAllocated := (memGB + 3) / 4 // Round up division
+			memAllocated := (memGB + 3) / 4
 			if memAllocated < 1 {
-				memAllocated = 1 // Minimum 1GB
+				memAllocated = 1
 			}
-			memoryLimit = fmt.Sprintf("%dg", memAllocated)
+			memoryLimit = fmt.Sprintf("%dG", memAllocated)
 		}
 	}
+	memoryLimit = normalizeContainerMemory(memoryLimit)
 	if memoryLimit != "" {
 		args = append(args, "--memory", memoryLimit)
 	}
 
 	// Add working directory
 	if opts.WorkDir != "" {
-		args = append(args, "-w", opts.WorkDir)
+		args = append(args, "--workdir", opts.WorkDir)
 	}
-
-	// Restart policy for better reliability
-	args = append(args, "--restart", "unless-stopped")
 
 	// Add image
 	image := opts.Image
@@ -158,14 +196,11 @@ func (b *AppleContainerBackend) Create(ctx context.Context, opts *CreateOptions)
 	args = append(args, image)
 
 	// Add command args (supplements ENTRYPOINT or overrides CMD)
-	// FormatContainerCommand handles wrapping single shell commands with "sh -c"
 	if formattedCmd := FormatContainerCommand(opts.Command); len(formattedCmd) > 0 {
 		args = append(args, formattedCmd...)
 	}
 
-	// Run container
-	fmt.Printf("Creating Apple container with command: %s %s\n", b.dockerCmd, strings.Join(args, " "))
-	cmd := exec.CommandContext(ctx, b.dockerCmd, args...)
+	cmd := exec.CommandContext(ctx, b.containerCmd, args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create container: %w, output: %s", err, string(output))
@@ -173,14 +208,13 @@ func (b *AppleContainerBackend) Create(ctx context.Context, opts *CreateOptions)
 
 	containerID := strings.TrimSpace(string(output))
 
-	// Get container info
 	env := &Environment{
-		ID:           containerID[:12],
+		ID:           containerID,
 		Name:         opts.Name,
 		Mode:         ModeAppleContainer,
 		Image:        image,
 		Status:       StatusRunning,
-		SSHHost:      "localhost",
+		SSHHost:      DefaultHostLocalhost,
 		SSHPort:      sshPort,
 		SSHUser:      "root",
 		GPUWorkerURL: gpuWorkerURL,
@@ -192,7 +226,7 @@ func (b *AppleContainerBackend) Create(ctx context.Context, opts *CreateOptions)
 }
 
 func (b *AppleContainerBackend) Start(ctx context.Context, envID string) error {
-	cmd := exec.CommandContext(ctx, b.dockerCmd, "start", envID)
+	cmd := exec.CommandContext(ctx, b.containerCmd, "start", envID)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to start container: %w, output: %s", err, string(output))
@@ -201,7 +235,7 @@ func (b *AppleContainerBackend) Start(ctx context.Context, envID string) error {
 }
 
 func (b *AppleContainerBackend) Stop(ctx context.Context, envID string) error {
-	cmd := exec.CommandContext(ctx, b.dockerCmd, "stop", envID)
+	cmd := exec.CommandContext(ctx, b.containerCmd, "stop", envID)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to stop container: %w, output: %s", err, string(output))
@@ -210,10 +244,7 @@ func (b *AppleContainerBackend) Stop(ctx context.Context, envID string) error {
 }
 
 func (b *AppleContainerBackend) Remove(ctx context.Context, envID string) error {
-	// Stop first
-	_ = b.Stop(ctx, envID)
-
-	cmd := exec.CommandContext(ctx, b.dockerCmd, "rm", "-f", envID)
+	cmd := exec.CommandContext(ctx, b.containerCmd, "delete", "--force", envID)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to remove container: %w, output: %s", err, string(output))
@@ -222,163 +253,33 @@ func (b *AppleContainerBackend) Remove(ctx context.Context, envID string) error 
 }
 
 func (b *AppleContainerBackend) List(ctx context.Context) ([]*Environment, error) {
-	cmd := exec.CommandContext(ctx, b.dockerCmd, "ps", "-a",
-		"--filter", "label=ggo.managed=true",
-		"--filter", "label=ggo.backend=apple-container",
-		"--format", "{{json .}}")
-
+	cmd := exec.CommandContext(ctx, b.containerCmd, "list", "--all", "--format", "json")
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list containers: %w", err)
 	}
 
-	var envs []*Environment
-	for _, line := range strings.Split(string(output), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		var container struct {
-			ID      string `json:"ID"`
-			Names   string `json:"Names"`
-			Image   string `json:"Image"`
-			State   string `json:"State"`
-			Status  string `json:"Status"`
-			Ports   string `json:"Ports"`
-			Labels  string `json:"Labels"`
-			Created string `json:"CreatedAt"`
-		}
-
-		if err := json.Unmarshal([]byte(line), &container); err != nil {
-			continue
-		}
-
-		// Parse name
-		name := strings.TrimPrefix(container.Names, "ggo-")
-
-		// Parse SSH port from ports
-		sshPort := parseSSHPort(container.Ports)
-
-		// Parse status
-		status := StatusStopped
-		switch container.State {
-		case DockerStateRunning:
-			status = StatusRunning
-		case DockerStateExited:
-			status = StatusStopped
-		case DockerStateCreated:
-			status = StatusPending
-		}
-
-		env := &Environment{
-			ID:      container.ID,
-			Name:    name,
-			Mode:    ModeAppleContainer,
-			Image:   container.Image,
-			Status:  status,
-			SSHHost: "localhost",
-			SSHPort: sshPort,
-			SSHUser: "root",
-		}
-
-		envs = append(envs, env)
-	}
-
-	return envs, nil
+	return parseAppleContainerList(output)
 }
 
 func (b *AppleContainerBackend) Get(ctx context.Context, idOrName string) (*Environment, error) {
-	// Try to find by container ID or name
-	containerName := idOrName
-	if !strings.HasPrefix(idOrName, "ggo-") {
-		containerName = "ggo-" + idOrName
-	}
-
-	cmd := exec.CommandContext(ctx, b.dockerCmd, "inspect", containerName)
+	cmd := exec.CommandContext(ctx, b.containerCmd, "inspect", idOrName)
 	output, err := cmd.Output()
 	if err != nil {
-		// Try with original name/ID
-		cmd = exec.CommandContext(ctx, b.dockerCmd, "inspect", idOrName)
-		output, err = cmd.Output()
-		if err != nil {
-			return nil, fmt.Errorf("environment not found: %s", idOrName)
-		}
-	}
-
-	var containers []struct {
-		ID    string `json:"Id"`
-		Name  string `json:"Name"`
-		State struct {
-			Status string `json:"Status"`
-		} `json:"State"`
-		Config struct {
-			Image  string            `json:"Image"`
-			Labels map[string]string `json:"Labels"`
-			Env    []string          `json:"Env"`
-		} `json:"Config"`
-		NetworkSettings struct {
-			Ports map[string][]struct {
-				HostPort string `json:"HostPort"`
-			} `json:"Ports"`
-		} `json:"NetworkSettings"`
-	}
-
-	if err := json.Unmarshal(output, &containers); err != nil {
-		return nil, fmt.Errorf("failed to parse container info: %w", err)
-	}
-
-	if len(containers) == 0 {
 		return nil, fmt.Errorf("environment not found: %s", idOrName)
 	}
 
-	c := containers[0]
-
-	// Parse name
-	name := strings.TrimPrefix(strings.TrimPrefix(c.Name, "/"), "ggo-")
-	if labelName, ok := c.Config.Labels["ggo.name"]; ok {
-		name = labelName
+	var snapshots []appleContainerSnapshot
+	if err := json.Unmarshal(output, &snapshots); err != nil {
+		return nil, fmt.Errorf("failed to parse container info: %w", err)
+	}
+	if len(snapshots) == 0 {
+		return nil, fmt.Errorf("environment not found: %s", idOrName)
 	}
 
-	// Parse SSH port
-	sshPort := 22
-	if ports, ok := c.NetworkSettings.Ports["22/tcp"]; ok && len(ports) > 0 {
-		if p, err := strconv.Atoi(ports[0].HostPort); err == nil {
-			sshPort = p
-		}
-	}
-
-	// Parse GPU worker URL from env
-	gpuWorkerURL := ""
-	for _, env := range c.Config.Env {
-		if strings.HasPrefix(env, "GPU_WORKER_URL=") {
-			gpuWorkerURL = strings.TrimPrefix(env, "GPU_WORKER_URL=")
-			break
-		}
-	}
-
-	// Parse status
-	status := StatusStopped
-	switch c.State.Status {
-	case DockerStateRunning:
-		status = StatusRunning
-	case DockerStateExited:
-		status = StatusStopped
-	case DockerStateCreated:
-		status = StatusPending
-	}
-
-	env := &Environment{
-		ID:           c.ID[:12],
-		Name:         name,
-		Mode:         ModeAppleContainer,
-		Image:        c.Config.Image,
-		Status:       status,
-		SSHHost:      "localhost",
-		SSHPort:      sshPort,
-		SSHUser:      "root",
-		GPUWorkerURL: gpuWorkerURL,
-		Labels:       c.Config.Labels,
+	env, ok := appleContainerToEnvironment(snapshots[0])
+	if !ok {
+		return nil, errors.NotFound("environment", idOrName)
 	}
 
 	return env, nil
@@ -386,19 +287,18 @@ func (b *AppleContainerBackend) Get(ctx context.Context, idOrName string) (*Envi
 
 func (b *AppleContainerBackend) Exec(ctx context.Context, envID string, cmd []string) ([]byte, error) {
 	args := append([]string{"exec", envID}, cmd...)
-	execCmd := exec.CommandContext(ctx, b.dockerCmd, args...)
+	execCmd := exec.CommandContext(ctx, b.containerCmd, args...)
 	return execCmd.CombinedOutput()
 }
 
 func (b *AppleContainerBackend) Logs(ctx context.Context, envID string, follow bool) (<-chan string, error) {
 	args := []string{"logs"}
 	if follow {
-		args = append(args, "-f")
+		args = append(args, "--follow")
 	}
 	args = append(args, envID)
 
-	cmd := exec.CommandContext(ctx, b.dockerCmd, args...)
-
+	cmd := exec.CommandContext(ctx, b.containerCmd, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, err
@@ -427,7 +327,172 @@ func (b *AppleContainerBackend) Logs(ctx context.Context, envID string, follow b
 	return logCh, nil
 }
 
+func (b *AppleContainerBackend) isSupportedOS() bool {
+	if runtime.GOOS != OSDarwin {
+		return false
+	}
+	major := platform.MacOSMajorVersion()
+	return major >= 26
+}
+
+type appleContainerSnapshot struct {
+	Status        string                  `json:"status"`
+	Configuration appleContainerConfig    `json:"configuration"`
+	Networks      []appleContainerNetwork `json:"networks"`
+}
+
+type appleContainerConfig struct {
+	ID             string                        `json:"id"`
+	Image          appleContainerImage           `json:"image"`
+	Labels         map[string]string             `json:"labels"`
+	InitProcess    appleContainerProcess         `json:"initProcess"`
+	PublishedPorts []appleContainerPublishedPort `json:"publishedPorts"`
+}
+
+type appleContainerImage struct {
+	Reference string `json:"reference"`
+}
+
+type appleContainerProcess struct {
+	Environment []string `json:"environment"`
+}
+
+type appleContainerPublishedPort struct {
+	HostPort      uint16 `json:"hostPort"`
+	ContainerPort uint16 `json:"containerPort"`
+	Proto         string `json:"proto"`
+	Count         uint16 `json:"count"`
+}
+
+type appleContainerNetwork struct {
+	IPv4Address string `json:"ipv4Address"`
+}
+
+func parseAppleContainerList(output []byte) ([]*Environment, error) {
+	var snapshots []appleContainerSnapshot
+	if err := json.Unmarshal(output, &snapshots); err != nil {
+		return nil, fmt.Errorf("failed to parse container list: %w", err)
+	}
+
+	var envs []*Environment
+	for _, snapshot := range snapshots {
+		env, ok := appleContainerToEnvironment(snapshot)
+		if !ok {
+			continue
+		}
+		envs = append(envs, env)
+	}
+
+	return envs, nil
+}
+
+func appleContainerToEnvironment(snapshot appleContainerSnapshot) (*Environment, bool) {
+	labels := snapshot.Configuration.Labels
+	if labels["ggo.managed"] != "true" {
+		return nil, false
+	}
+	if modeLabel, ok := labels["ggo.mode"]; ok && modeLabel != string(ModeAppleContainer) {
+		if modeLabel != "apple-container" {
+			return nil, false
+		}
+	}
+
+	name := strings.TrimPrefix(snapshot.Configuration.ID, "ggo-")
+	if labelName := labels["ggo.name"]; labelName != "" {
+		name = labelName
+	}
+
+	sshPort := extractSSHPort(snapshot.Configuration.PublishedPorts)
+	gpuWorkerURL := extractGPUWorkerURL(snapshot.Configuration.InitProcess.Environment)
+
+	var status EnvironmentStatus
+	switch snapshot.Status {
+	case "running":
+		status = StatusRunning
+	case "stopped":
+		status = StatusStopped
+	case "stopping":
+		status = StatusPending
+	default:
+		status = StatusPending
+	}
+
+	env := &Environment{
+		ID:           snapshot.Configuration.ID,
+		Name:         name,
+		Mode:         ModeAppleContainer,
+		Image:        snapshot.Configuration.Image.Reference,
+		Status:       status,
+		SSHHost:      DefaultHostLocalhost,
+		SSHPort:      sshPort,
+		SSHUser:      "root",
+		GPUWorkerURL: gpuWorkerURL,
+		Labels:       labels,
+	}
+
+	return env, true
+}
+
+func extractGPUWorkerURL(envs []string) string {
+	prefixes := []string{
+		"TENSOR_FUSION_OPERATOR_CONNECTION_INFO=",
+		"GPU_GO_CONNECTION_URL=",
+		"GPU_WORKER_URL=",
+	}
+	for _, env := range envs {
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(env, prefix) {
+				return strings.TrimPrefix(env, prefix)
+			}
+		}
+	}
+	return ""
+}
+
+func extractSSHPort(published []appleContainerPublishedPort) int {
+	for _, port := range published {
+		if port.Proto != "" && !strings.EqualFold(port.Proto, DefaultProtocolTCP) {
+			continue
+		}
+		count := port.Count
+		if count == 0 {
+			count = 1
+		}
+		for offset := uint16(0); offset < count; offset++ {
+			if port.ContainerPort+offset == 22 {
+				return int(port.HostPort + offset)
+			}
+		}
+	}
+	return 22
+}
+
+func normalizeContainerMemory(memory string) string {
+	if memory == "" {
+		return ""
+	}
+	replacements := map[string]string{
+		"Ki": "K",
+		"Mi": "M",
+		"Gi": "G",
+		"Ti": "T",
+		"Pi": "P",
+		"ki": "K",
+		"mi": "M",
+		"gi": "G",
+		"ti": "T",
+		"pi": "P",
+	}
+	for oldSuffix, newSuffix := range replacements {
+		if strings.HasSuffix(memory, oldSuffix) {
+			return strings.TrimSuffix(memory, oldSuffix) + newSuffix
+		}
+	}
+	return memory
+}
+
 var _ Backend = (*AppleContainerBackend)(nil)
+var _ AutoStartableBackend = (*AppleContainerBackend)(nil)
 
 func init() {
 	_ = bytes.Buffer{} // silence import
