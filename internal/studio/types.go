@@ -95,6 +95,8 @@ const (
 	StatusStopped    EnvironmentStatus = "stopped"
 	StatusError      EnvironmentStatus = "error"
 	StatusTerminated EnvironmentStatus = "terminated"
+	StatusDeleted    EnvironmentStatus = "deleted"
+	StatusUnknown    EnvironmentStatus = "unknown"
 )
 
 // Platform constants for runtime.GOOS comparisons

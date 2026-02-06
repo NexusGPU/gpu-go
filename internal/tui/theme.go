@@ -6,7 +6,8 @@ import (
 )
 
 const (
-	statusYes = "yes"
+	statusYes       = "yes"
+	statusIconCross = "✕"
 )
 
 // Theme defines the color palette for the TUI
@@ -203,7 +204,7 @@ func (s *Styles) StatusStyle(status string) lipgloss.Style {
 	switch status {
 	case "running", "active", "online", "connected", "enabled", statusYes:
 		return s.Success
-	case "stopped", "inactive", "offline", "disconnected", "disabled", "no":
+	case "stopped", "inactive", "offline", "disconnected", "disabled", "no", "deleted":
 		return s.Muted
 	case "error", "failed", "unhealthy":
 		return s.Error
@@ -224,13 +225,15 @@ func StatusIcon(status string) string {
 	case "stopped", "inactive", "offline", "disconnected":
 		return "○"
 	case "error", "failed", "unhealthy":
-		return "✕"
+		return statusIconCross
+	case "deleted":
+		return statusIconCross
 	case "starting", "stopping", "pending", "initializing":
 		return "◐"
 	case "enabled", statusYes:
 		return "✓"
 	case "disabled", "no":
-		return "✕"
+		return statusIconCross
 	case "unknown", "n/a":
 		return "◐"
 	default:
