@@ -56,6 +56,13 @@ if [[ -z "$repo_root" ]]; then
 fi
 
 cd "$repo_root"
+workflow_test="$repo_root/scripts/build-workflow.test.sh"
+if [[ ! -x "$workflow_test" ]]; then
+  echo "Missing executable $workflow_test" >&2
+  exit 1
+fi
+
+"$workflow_test"
 "$gh_cmd" workflow run "$workflow" --ref "$ref"
 
 echo "Triggered $workflow on ref $ref"

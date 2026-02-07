@@ -71,6 +71,17 @@ func (b *DockerBackend) setDockerEnv(cmd *exec.Cmd) {
 	}
 }
 
+// SocketPath implements BackendSocketPath. Returns the effective Docker socket path.
+func (b *DockerBackend) SocketPath(ctx context.Context) string {
+	if b.dockerHost != "" {
+		return b.dockerHost
+	}
+	if v := os.Getenv("DOCKER_HOST"); v != "" {
+		return v
+	}
+	return "unix:///var/run/docker.sock"
+}
+
 // GetHostArch returns the architecture of the Docker host
 // Returns "amd64", "arm64", or empty string if detection fails
 func (b *DockerBackend) GetHostArch(ctx context.Context) string {

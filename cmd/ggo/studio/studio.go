@@ -141,6 +141,26 @@ func getOutput() *tui.Output {
 	return cmdutil.NewOutput(outputFormat)
 }
 
+// printBackendAndSocket prints current backend name and container unix sock path to TUI.
+func printBackendAndSocket(ctx context.Context, out *tui.Output, mgr *studio.Manager, mode studio.Mode) {
+	backend, err := mgr.GetBackend(mode)
+	if err != nil {
+		return
+	}
+	styles := tui.DefaultStyles()
+	out.Println()
+	out.Println(styles.Subtitle.Render("Backend"))
+	sock := "—"
+	if sp, ok := backend.(studio.BackendSocketPath); ok {
+		if p := sp.SocketPath(ctx); p != "" {
+			sock = p
+		}
+	}
+	out.Printf("  Backend: %s\n", backend.Name())
+	out.Printf("  Container unix sock: %s\n", sock)
+	out.Println()
+}
+
 func newCreateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create <name>",
@@ -256,7 +276,20 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	return out.Render(&createResult{env: env, mgr: mgr, noSSH: noSSH})
+	backendName, socketPath := "", ""
+	if backend, err := mgr.GetBackend(env.Mode); err == nil {
+		backendName = backend.Name()
+		if sp, ok := backend.(studio.BackendSocketPath); ok {
+			socketPath = sp.SocketPath(ctx)
+		}
+	}
+	return out.Render(&createResult{
+		env:         env,
+		mgr:         mgr,
+		noSSH:       noSSH,
+		backendName: backendName,
+		socketPath:  socketPath,
+	})
 }
 
 // ensureRemoteGPUClientLibs downloads remote-gpu-client libraries if not already present
@@ -425,9 +458,11 @@ func parseEnvVars(envVars []string) (map[string]string, error) {
 
 // createResult implements Renderable for create command output
 type createResult struct {
-	env   *studio.Environment
-	mgr   *studio.Manager
-	noSSH bool
+	env         *studio.Environment
+	mgr         *studio.Manager
+	noSSH       bool
+	backendName string
+	socketPath  string
 }
 
 func (r *createResult) RenderJSON() any {
@@ -448,7 +483,14 @@ func (r *createResult) RenderTUI(out *tui.Output) {
 		Add("Mode", string(env.Mode)).
 		Add("Image", env.Image).
 		AddWithStatus("Status", string(env.Status), string(env.Status))
-
+	if r.backendName != "" {
+		status = status.Add("Backend", r.backendName)
+		sock := r.socketPath
+		if sock == "" {
+			sock = "—"
+		}
+		status = status.Add("Container unix sock", sock)
+	}
 	out.Println(status.String())
 
 	if env.SSHPort > 0 && !r.noSSH {
@@ -569,6 +611,14 @@ func newStartCmd() *cobra.Command {
 			mgr := getManager()
 			out := getOutput()
 
+			env, err := mgr.Get(ctx, args[0])
+			if err != nil {
+				cmd.SilenceUsage = true
+				return err
+			}
+			if !out.IsJSON() {
+				printBackendAndSocket(ctx, out, mgr, env.Mode)
+			}
 			if err := mgr.Start(ctx, args[0]); err != nil {
 				cmd.SilenceUsage = true
 				return err
@@ -593,6 +643,14 @@ func newStopCmd() *cobra.Command {
 			mgr := getManager()
 			out := getOutput()
 
+			env, err := mgr.Get(ctx, args[0])
+			if err != nil {
+				cmd.SilenceUsage = true
+				return err
+			}
+			if !out.IsJSON() {
+				printBackendAndSocket(ctx, out, mgr, env.Mode)
+			}
 			if err := mgr.Stop(ctx, args[0]); err != nil {
 				cmd.SilenceUsage = true
 				return err

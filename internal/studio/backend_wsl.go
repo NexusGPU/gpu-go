@@ -52,6 +52,15 @@ func (b *WSLBackend) Mode() Mode {
 	return ModeWSL
 }
 
+// SocketPath implements BackendSocketPath. Returns the Docker socket path inside the WSL distro.
+func (b *WSLBackend) SocketPath(ctx context.Context) string {
+	distro, err := b.GetDistro(ctx)
+	if err != nil || distro == "" {
+		distro = "default"
+	}
+	return fmt.Sprintf("WSL (%s): /var/run/docker.sock (inside distro)", distro)
+}
+
 func (b *WSLBackend) IsAvailable(ctx context.Context) bool {
 	if runtime.GOOS != OSWindows {
 		return false

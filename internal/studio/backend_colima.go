@@ -41,10 +41,13 @@ func NewColimaBackendWithProfile(profile string) *ColimaBackend {
 	}
 }
 
-// SetDockerHost sets a custom Docker socket path
+// SetDockerHost sets a custom Docker socket path (overrides default Colima socket).
 func (b *ColimaBackend) SetDockerHost(dockerHost string) {
+	if dockerHost == "" {
+		return
+	}
 	b.dockerHost = dockerHost
-	b.dockerBackend = NewDockerBackend()
+	b.dockerBackend = NewDockerBackendWithHost(dockerHost)
 }
 
 // GetVMArch returns the architecture of the Colima VM
@@ -123,6 +126,11 @@ func (b *ColimaBackend) Name() string {
 
 func (b *ColimaBackend) Mode() Mode {
 	return ModeColima
+}
+
+// SocketPath implements BackendSocketPath.
+func (b *ColimaBackend) SocketPath(ctx context.Context) string {
+	return b.dockerHost
 }
 
 func (b *ColimaBackend) IsAvailable(ctx context.Context) bool {

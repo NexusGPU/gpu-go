@@ -229,6 +229,14 @@ type AutoStartableBackend interface {
 	EnsureRunning(ctx context.Context) error
 }
 
+// BackendSocketPath is an optional interface for backends that use a container unix socket.
+// SocketPath returns the backend's container unix socket path (e.g. DOCKER_HOST or docker.sock path).
+// Empty string means not applicable (e.g. Apple Container).
+type BackendSocketPath interface {
+	Backend
+	SocketPath(ctx context.Context) string
+}
+
 // SSHConfig represents an SSH configuration entry
 type SSHConfig struct {
 	Host         string
