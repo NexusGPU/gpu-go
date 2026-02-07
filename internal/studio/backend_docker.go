@@ -455,7 +455,7 @@ func (b *DockerBackend) Get(ctx context.Context, idOrName string) (*Environment,
 	}
 
 	// Parse SSH port
-	sshPort := 22
+	sshPort := 0
 	if ports, ok := c.NetworkSettings.Ports["22/tcp"]; ok && len(ports) > 0 {
 		if p, err := strconv.Atoi(ports[0].HostPort); err == nil {
 			sshPort = p
@@ -562,7 +562,7 @@ func parseSSHPort(ports string) int {
 			}
 		}
 	}
-	return 22
+	return 0
 }
 
 // findAvailablePort finds an available port in the SSH port range (12000-18000)

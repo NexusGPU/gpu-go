@@ -4,16 +4,25 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/NexusGPU/gpu-go/internal/errors"
 	"github.com/NexusGPU/gpu-go/internal/platform"
+)
+
+var (
+	createStabilityWindow       = 3 * time.Second
+	createStabilityPollInterval = 200 * time.Millisecond
+	createSSHProbeTimeout       = 500 * time.Millisecond
 )
 
 // Manager manages AI studio environments across different backends
@@ -181,6 +190,12 @@ func (m *Manager) Create(ctx context.Context, opts *CreateOptions) (*Environment
 		return nil, err
 	}
 
+	if err := m.waitForStableRunning(ctx, backend, env); err != nil {
+		return nil, err
+	}
+
+	m.clearUnreachableSSH(ctx, env)
+
 	// Save environment to local state
 	if err := m.saveEnvironment(env); err != nil {
 		// Log but don't fail
@@ -345,6 +360,49 @@ func (m *Manager) Remove(ctx context.Context, idOrName string) error {
 	return m.removeEnvironment(env.ID)
 }
 
+// RemoveAll removes all known environments. When runtimes are offline, stale state entries are still cleaned up.
+func (m *Manager) RemoveAll(ctx context.Context) ([]string, error) {
+	envs, err := m.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	seen := make(map[string]struct{}, len(envs))
+	removed := make([]string, 0, len(envs))
+	failed := make([]string, 0)
+
+	for _, env := range envs {
+		if env == nil || env.ID == "" {
+			continue
+		}
+		if _, ok := seen[env.ID]; ok {
+			continue
+		}
+		seen[env.ID] = struct{}{}
+
+		switch env.Status {
+		case StatusUnknown, StatusDeleted:
+			if err := m.removeEnvironment(env.ID); err != nil {
+				failed = append(failed, fmt.Sprintf("%s (%v)", env.Name, err))
+				continue
+			}
+			removed = append(removed, env.Name)
+		default:
+			if err := m.Remove(ctx, env.ID); err != nil {
+				failed = append(failed, fmt.Sprintf("%s (%v)", env.Name, err))
+				continue
+			}
+			removed = append(removed, env.Name)
+		}
+	}
+
+	if len(failed) > 0 {
+		return removed, fmt.Errorf("failed to remove %d environment(s): %s", len(failed), strings.Join(failed, "; "))
+	}
+
+	return removed, nil
+}
+
 // AddSSHConfig adds an SSH config entry for an environment
 func (m *Manager) AddSSHConfig(env *Environment) error {
 	if env.SSHHost == "" || env.SSHPort == 0 {
@@ -445,6 +503,109 @@ func (m *Manager) removeSSHConfigEntry(config, hostName string) string {
 func (m *Manager) getSSHConfigPath() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".ssh", "config")
+}
+
+func (m *Manager) waitForStableRunning(ctx context.Context, backend Backend, created *Environment) error {
+	if createStabilityWindow <= 0 {
+		return nil
+	}
+	if created == nil || created.ID == "" {
+		return fmt.Errorf("studio creation returned invalid environment metadata")
+	}
+
+	deadline := time.Now().Add(createStabilityWindow)
+	seenRunning := false
+	var lastStatus EnvironmentStatus
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		env, err := backend.Get(ctx, created.ID)
+		if err != nil {
+			return fmt.Errorf(
+				"studio '%s' created but status check failed within %s: %w. Check status with `ggo studio list` and logs with `ggo studio logs %s`",
+				created.Name,
+				createStabilityWindow,
+				err,
+				created.Name,
+			)
+		}
+		lastStatus = env.Status
+
+		switch env.Status {
+		case StatusRunning:
+			seenRunning = true
+		case StatusPending, StatusStarting, StatusPulling:
+			if seenRunning {
+				return fmt.Errorf(
+					"studio '%s' failed to stay running for at least %s (status=%s). Check status with `ggo studio list` and logs with `ggo studio logs %s`",
+					created.Name,
+					createStabilityWindow,
+					env.Status,
+					created.Name,
+				)
+			}
+		default:
+			return fmt.Errorf(
+				"studio '%s' failed to stay running for at least %s (status=%s). Check status with `ggo studio list` and logs with `ggo studio logs %s`",
+				created.Name,
+				createStabilityWindow,
+				env.Status,
+				created.Name,
+			)
+		}
+
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			if seenRunning {
+				return nil
+			}
+			return fmt.Errorf(
+				"studio '%s' did not reach running status within %s (last status=%s). Check status with `ggo studio list` and logs with `ggo studio logs %s`",
+				created.Name,
+				createStabilityWindow,
+				lastStatus,
+				created.Name,
+			)
+		}
+
+		sleepFor := createStabilityPollInterval
+		if sleepFor <= 0 || sleepFor > remaining {
+			sleepFor = remaining
+		}
+
+		timer := time.NewTimer(sleepFor)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func (m *Manager) clearUnreachableSSH(ctx context.Context, env *Environment) {
+	if env == nil || env.SSHHost == "" || env.SSHPort <= 0 {
+		return
+	}
+
+	dialCtx, cancel := context.WithTimeout(ctx, createSSHProbeTimeout)
+	defer cancel()
+
+	dialer := &net.Dialer{}
+	address := net.JoinHostPort(env.SSHHost, strconv.Itoa(env.SSHPort))
+	conn, err := dialer.DialContext(dialCtx, "tcp", address)
+	if err != nil {
+		env.SSHHost = ""
+		env.SSHPort = 0
+		env.SSHUser = ""
+		return
+	}
+	_ = conn.Close()
 }
 
 // State management

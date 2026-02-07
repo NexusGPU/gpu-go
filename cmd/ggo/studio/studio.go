@@ -81,7 +81,10 @@ Examples:
   ggo studio stop my-studio
 
   # Remove an environment
-  ggo studio rm my-studio`,
+  ggo studio rm my-studio
+
+  # Batch remove all environments
+  ggo studio rm --all -f`,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			// Initialize klog flags if not already initialized
 			klog.InitFlags(nil)
@@ -667,18 +670,61 @@ func newStopCmd() *cobra.Command {
 
 func newRemoveCmd() *cobra.Command {
 	var force bool
+	var all bool
 
 	cmd := &cobra.Command{
 		Use:     "rm <name>",
-		Short:   "Remove a studio environment",
+		Short:   "Remove studio environment(s)",
 		Aliases: []string{"remove", "delete"},
-		Args:    cobra.ExactArgs(1),
+		Args: func(cmd *cobra.Command, args []string) error {
+			if all {
+				if len(args) > 0 {
+					return fmt.Errorf("--all does not accept a studio name")
+				}
+				return nil
+			}
+			return cobra.ExactArgs(1)(cmd, args)
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
 			mgr := getManager()
 			out := getOutput()
-			name := args[0]
 
+			if all {
+				if !force && !out.IsJSON() {
+					styles := tui.DefaultStyles()
+					fmt.Printf("%s Are you sure you want to remove ALL studio environments? [y/N]: ", styles.Warning.Render("!"))
+					var confirm string
+					fmt.Scanln(&confirm)
+					if confirm != "y" && confirm != "Y" {
+						out.Info("Cancelled")
+						return nil
+					}
+				}
+
+				removedNames, err := mgr.RemoveAll(ctx)
+				if err != nil {
+					cmd.SilenceUsage = true
+					return err
+				}
+				if len(removedNames) == 0 {
+					out.Info("No studio environments found")
+					return nil
+				}
+				for _, removedName := range removedNames {
+					if err := mgr.RemoveSSHConfig(removedName); err != nil {
+						klog.Warningf("Failed to remove SSH config for %s: error=%v", removedName, err)
+					}
+				}
+
+				return out.Render(&cmdutil.ActionData{
+					Success: true,
+					Message: fmt.Sprintf("Removed %d studio environment(s)", len(removedNames)),
+					ID:      "all",
+				})
+			}
+
+			name := args[0]
 			if !force && !out.IsJSON() {
 				styles := tui.DefaultStyles()
 				fmt.Printf("%s Are you sure you want to remove environment %s? [y/N]: ",
@@ -710,6 +756,7 @@ func newRemoveCmd() *cobra.Command {
 	}
 
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Force remove")
+	cmd.Flags().BoolVar(&all, "all", false, "Remove all studio environments in one batch")
 	return cmd
 }
 

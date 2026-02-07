@@ -464,7 +464,7 @@ func extractSSHPort(published []appleContainerPublishedPort) int {
 			}
 		}
 	}
-	return 22
+	return 0
 }
 
 func normalizeContainerMemory(memory string) string {
