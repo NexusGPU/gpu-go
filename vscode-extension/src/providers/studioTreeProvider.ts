@@ -26,6 +26,8 @@ export class StudioTreeItem extends vscode.TreeItem {
             this.description = `● Running`;
         } else if (env.status === 'stopped' || env.status === 'exited') {
             this.description = `○ Stopped`;
+        } else if (env.status === 'unknown') {
+            this.description = `○ Unknown`;
         } else {
             this.description = `◔ ${env.status}`;
         }

@@ -162,6 +162,11 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 		args = append(args, "--platform", platform)
 	}
 
+	// Add local GPU passthrough if requested
+	if opts.UseLocalGPU {
+		args = append(args, "--gpus", "all")
+	}
+
 	// Add labels
 	args = append(args, "--label", "ggo.managed=true")
 	args = append(args, "--label", fmt.Sprintf("ggo.name=%s", opts.Name))

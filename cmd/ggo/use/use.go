@@ -107,6 +107,9 @@ Examples:
 				return err
 			}
 
+			// Append share code to connection URL for authentication
+			shareInfo.ConnectionURL = shareInfo.ConnectionURL + "+" + shortCode
+
 			klog.Infof("Found GPU worker: worker_id=%s vendor=%s connection_url=%s", shareInfo.WorkerID, shareInfo.HardwareVendor, shareInfo.ConnectionURL)
 
 			// Download required libraries first (silent when -y is used for eval)

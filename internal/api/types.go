@@ -53,6 +53,8 @@ type AgentInfo struct {
 	NetworkIPs []string     `json:"network_ips,omitempty"`
 	GPUs       []GPUInfo    `json:"gpus,omitempty"`
 	Workers    []WorkerInfo `json:"workers,omitempty"`
+	GPUCount   int          `json:"gpu_count,omitempty"`
+	GPUSummary string       `json:"gpu_summary,omitempty"`
 	LastSeenAt time.Time    `json:"last_seen_at"`
 	CreatedAt  time.Time    `json:"created_at"`
 }
@@ -72,6 +74,7 @@ type WorkerConfig struct {
 	IsolationMode  string   `json:"isolation_mode,omitempty"`
 	ListenPort     int      `json:"listen_port"`
 	Enabled        bool     `json:"enabled"`
+	ShareCodes     []string `json:"share_codes,omitempty"`
 }
 
 // AgentConfigResponse represents the response from GET /api/v1/agents/{agent_id}/config
@@ -136,9 +139,10 @@ type AgentStatusRequest struct {
 
 // AgentStatusResponse represents the response from agent status report
 type AgentStatusResponse struct {
-	Success       bool     `json:"success"`
-	ConfigVersion int      `json:"config_version"`
-	License       *License `json:"license,omitempty"` // null if no regeneration needed
+	Success          bool                `json:"success"`
+	ConfigVersion    int                 `json:"config_version"`
+	License          *License            `json:"license,omitempty"` // null if no regeneration needed
+	WorkerShareCodes map[string][]string `json:"worker_share_codes,omitempty"` // workerID -> []shareCode
 }
 
 // SuccessResponse represents a simple success response
@@ -148,18 +152,22 @@ type SuccessResponse struct {
 
 // WorkerInfo represents worker information
 type WorkerInfo struct {
-	WorkerID    string           `json:"worker_id"`
-	AgentID     string           `json:"agent_id,omitempty"`
-	Name        string           `json:"name"`
-	GPUIDs      []string         `json:"gpu_ids"`
-	ListenPort  int              `json:"listen_port"`
-	Enabled     bool             `json:"enabled"`
-	IsDefault   bool             `json:"is_default,omitempty"`
-	Status      string           `json:"status"`
-	PID         int              `json:"pid,omitempty"`
-	Restarts    int              `json:"restarts,omitempty"`
-	Connections []ConnectionInfo `json:"connections,omitempty"`
-	CreatedAt   time.Time        `json:"created_at,omitempty"`
+	WorkerID      string           `json:"worker_id"`
+	AgentID       string           `json:"agent_id,omitempty"`
+	AgentHostname string           `json:"agent_hostname,omitempty"`
+	Name          string           `json:"name"`
+	GPUIDs        []string         `json:"gpu_ids"`
+	GPUIndices    []int            `json:"gpu_indices,omitempty"`
+	GPUs          []GPUInfo        `json:"gpus,omitempty"`
+	ListenPort    int              `json:"listen_port"`
+	Enabled       bool             `json:"enabled"`
+	IsDefault     bool             `json:"is_default,omitempty"`
+	Status        string           `json:"status"`
+	PID           int              `json:"pid,omitempty"`
+	Restarts      int              `json:"restarts,omitempty"`
+	Connections   []ConnectionInfo `json:"connections,omitempty"`
+	StartedAt     *time.Time       `json:"started_at,omitempty"`
+	CreatedAt     time.Time        `json:"created_at,omitempty"`
 }
 
 // WorkerCreateRequest represents the request body for worker creation

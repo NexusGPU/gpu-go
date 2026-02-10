@@ -9,14 +9,27 @@ export class AgentTreeItem extends vscode.TreeItem {
         public readonly agent: Agent,
         public readonly collapsibleState: vscode.TreeItemCollapsibleState
     ) {
-        super(agent.hostname, collapsibleState);
+        super(agent.hostname || agent.agentId, collapsibleState);
 
-        this.tooltip = `Host: ${agent.hostname}\nStatus: ${agent.status}\nOS: ${agent.os}/${agent.arch}`;
-        this.description = `${agent.status} - ${agent.os}`;
+        const osInfo = agent.os && agent.arch ? `${agent.os}/${agent.arch}` : '';
+        this.tooltip = `Host: ${agent.hostname}\nAgent ID: ${agent.agentId}\nStatus: ${agent.status}${osInfo ? `\nOS: ${osInfo}` : ''}`;
+        this.description = `${agent.status}${osInfo ? ` · ${osInfo}` : ''}`;
 
         // Set icon and context based on status
         this.iconPath = getStatusIcon(agent.status, 'agent');
         this.contextValue = getStatusContext(agent.status, 'agent');
+    }
+}
+
+export class GPUHeaderItem extends vscode.TreeItem {
+    constructor(
+        public readonly agentId: string,
+        public readonly gpus: GPU[],
+        collapsibleState: vscode.TreeItemCollapsibleState = vscode.TreeItemCollapsibleState.Expanded
+    ) {
+        super(`GPUs (${gpus.length})`, collapsibleState);
+        this.iconPath = new vscode.ThemeIcon('circuit-board');
+        this.contextValue = 'gpu-header';
     }
 }
 
@@ -25,17 +38,17 @@ export class GPUTreeItem extends vscode.TreeItem {
         public readonly gpu: GPU,
         public readonly deviceId: string
     ) {
-        super(gpu.model, vscode.TreeItemCollapsibleState.None);
+        super(gpu.model || gpu.gpuId, vscode.TreeItemCollapsibleState.None);
 
-        const vramGb = (gpu.vramMb / 1024).toFixed(1);
-        this.description = `${vramGb} GB`;
-        this.tooltip = `${gpu.vendor} ${gpu.model}\nVRAM: ${vramGb} GB\nDriver: ${gpu.driverVersion || 'N/A'}\nCUDA: ${gpu.cudaVersion || 'N/A'}`;
+        const vramGb = gpu.vramMb ? (gpu.vramMb / 1024).toFixed(1) : '?';
+        this.description = gpu.vramMb ? `${vramGb} GB` : '';
+        this.tooltip = `${gpu.vendor || ''} ${gpu.model || gpu.gpuId}\nVRAM: ${vramGb} GB\nGPU ID: ${gpu.gpuId}\nDriver: ${gpu.driverVersion || 'N/A'}\nCUDA: ${gpu.cudaVersion || 'N/A'}`;
         this.iconPath = new vscode.ThemeIcon('circuit-board', new vscode.ThemeColor('charts.yellow'));
 
         // Make clickable to open details
         this.command = {
             command: 'gpugo.openDeviceDetails',
-            title: 'Open Device Details',
+            title: 'Open GPU Details',
             arguments: [{ deviceId: deviceId, gpu: gpu }]
         };
     }
@@ -49,6 +62,7 @@ export class DevicesTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
     readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
     private agents: Agent[] = [];
+    private detailedAgents = new Map<string, Agent>();
     private cli: CLI;
     private authManager: AuthManager;
 
@@ -58,6 +72,7 @@ export class DevicesTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
     }
 
     refresh(): void {
+        this.detailedAgents.clear();
         this._onDidChangeTreeData.fire();
     }
 
@@ -71,63 +86,70 @@ export class DevicesTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
         }
 
         if (!element) {
-            // Root level - show agents/hosts
+            // Root level - show agents/machines
             try {
                 Logger.log('Fetching agents...');
                 this.agents = await this.cli.agentList();
                 Logger.log(`Found ${this.agents.length} agents`);
 
                 if (this.agents.length === 0) {
-                    // Show placeholder with instructions
                     return [
-                        createEmptyItem('No GPU devices found', 'Add GPU servers to get started'),
-                        createActionItem('Add GPU Server', 'gpugo.createWorker', 'add', 'Click to learn how to add GPU servers')
+                        createEmptyItem('No machines found', 'Add a GPU host to get started'),
+                        createActionItem('Add GPU Host', 'gpugo.addGpuHost', 'add', 'Click to register a GPU host via the dashboard')
                     ];
                 }
 
-                return this.agents.map(agent =>
-                    new AgentTreeItem(agent, vscode.TreeItemCollapsibleState.Collapsed)
-                );
+                // Fetch detailed data for each agent in parallel
+                const detailPromises = this.agents.map(async (agent) => {
+                    try {
+                        const detailed = await this.cli.agentGet(agent.agentId);
+                        if (detailed) {
+                            this.detailedAgents.set(agent.agentId, detailed);
+                        }
+                    } catch {
+                        // Fall back to list data
+                    }
+                });
+                await Promise.all(detailPromises);
+
+                return this.agents.map(agent => {
+                    const detailed = this.detailedAgents.get(agent.agentId) || agent;
+                    return new AgentTreeItem(detailed, vscode.TreeItemCollapsibleState.Expanded);
+                });
             } catch (error) {
                 Logger.error('Error fetching agents:', error);
-                // If no agents, show helpful message
                 return [
-                    createEmptyItem('No GPU devices found', 'Add GPU servers to get started'),
-                    createActionItem('Add GPU Server', 'gpugo.createWorker', 'add', 'Click to learn how to add GPU servers')
+                    createEmptyItem('No machines found', 'Add a GPU host to get started'),
+                    createActionItem('Add GPU Host', 'gpugo.addGpuHost', 'add', 'Click to register a GPU host via the dashboard')
                 ];
             }
         }
 
         if (element instanceof AgentTreeItem) {
-            // Show GPUs for this agent
-            const agent = element.agent;
+            const agent = this.detailedAgents.get(element.agent.agentId) || element.agent;
             const items: vscode.TreeItem[] = [];
 
-            // Agent info
-            items.push(new PropertyItem('Agent ID', agent.agentId.substring(0, 8) + '...'));
-            items.push(new PropertyItem('OS', `${agent.os}/${agent.arch}`));
-
+            // Network IP
             if (agent.networkIps && agent.networkIps.length > 0) {
-                items.push(new PropertyItem('IP', agent.networkIps[0]));
+                items.push(new PropertyItem('IP', agent.networkIps[0], { icon: 'globe' }));
             }
 
-            // GPUs
+            // GPUs - show as expandable header with GPU items underneath
             if (agent.gpus && agent.gpus.length > 0) {
-                const gpuHeader = new vscode.TreeItem(`GPUs (${agent.gpus.length})`, vscode.TreeItemCollapsibleState.Expanded);
-                gpuHeader.iconPath = new vscode.ThemeIcon('circuit-board');
-                items.push(gpuHeader);
-
-                for (const gpu of agent.gpus) {
-                    items.push(new GPUTreeItem(gpu, gpu.gpuId));
-                }
+                items.push(new GPUHeaderItem(agent.agentId, agent.gpus));
             }
 
-            // Workers
+            // Workers count
             if (agent.workers && agent.workers.length > 0) {
-                items.push(new PropertyItem('Workers', String(agent.workers.length)));
+                items.push(new PropertyItem('vGPUs', String(agent.workers.length), { icon: 'broadcast' }));
             }
 
             return items;
+        }
+
+        if (element instanceof GPUHeaderItem) {
+            // Return GPU items for the GPU header
+            return element.gpus.map(gpu => new GPUTreeItem(gpu, gpu.gpuId));
         }
 
         return [];

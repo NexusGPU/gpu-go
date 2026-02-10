@@ -54,6 +54,9 @@ export class CreateStudioPanel {
                     case 'create':
                         await this.createStudio(message.data);
                         break;
+                    case 'fetchTags':
+                        await this.handleFetchTags(message.image, message.registry);
+                        break;
                 }
             },
             null,
@@ -62,10 +65,11 @@ export class CreateStudioPanel {
     }
 
     private async updateContent() {
-        // Get available backends
-        const backends = await this._cli.studioBackends();
-        
-        this._panel.webview.html = this.getHtmlForWebview(backends);
+        // Get all backends with status
+        const allBackends = await this._cli.studioBackendsAll();
+        const defaultRegistry = vscode.workspace.getConfiguration('gpugo').get<string>('defaultRegistry', 'docker.io');
+
+        this._panel.webview.html = this.getHtmlForWebview(allBackends, defaultRegistry);
     }
 
     private async createStudio(data: {
@@ -77,6 +81,8 @@ export class CreateStudioPanel {
         ports: string;
         volumes: string;
         envs: string;
+        registry: string;
+        versionTag: string;
     }) {
         try {
             // Resolve image from template or custom
@@ -87,7 +93,16 @@ export class CreateStudioPanel {
             if (data.template && data.template !== 'custom') {
                 const template = getTemplateById(data.template);
                 if (template) {
-                    image = template.image;
+                    // Parse template image: "namespace/repo:tag"
+                    const [imageWithoutTag, defaultTag] = template.image.split(':');
+                    const tag = data.versionTag || defaultTag || 'latest';
+                    const registry = data.registry && data.registry !== 'docker.io' ? data.registry : '';
+
+                    // Compose final image
+                    image = registry
+                        ? `${registry}/${imageWithoutTag}:${tag}`
+                        : `${imageWithoutTag}:${tag}`;
+
                     // Use default ports if not specified
                     if (ports.length === 0 && template.defaultPorts) {
                         ports = template.defaultPorts;
@@ -122,19 +137,36 @@ export class CreateStudioPanel {
                 });
             });
 
-            vscode.window.showInformationMessage(`Studio '${data.name}' created successfully!`);
             vscode.commands.executeCommand('gpugo.refreshStudio');
             this._panel.dispose();
+
+            // Show toast with Connect via SSH action
+            const action = await vscode.window.showInformationMessage(
+                `Studio '${data.name}' created!`,
+                'Connect via SSH'
+            );
+            if (action === 'Connect via SSH') {
+                vscode.commands.executeCommand('opensshremotes.openEmptyWindow', { host: `ggo-${data.name}` });
+            }
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to create studio: ${error}`);
         }
     }
 
-    private getHtmlForWebview(backends: string[]): string {
+    private async handleFetchTags(image: string, registry?: string) {
+        try {
+            const tags = await this._cli.studioTags(image, registry);
+            this._panel.webview.postMessage({ command: 'tagsResult', tags });
+        } catch {
+            this._panel.webview.postMessage({ command: 'tagsResult', tags: [] });
+        }
+    }
+
+    private getHtmlForWebview(allBackends: { name: string; mode: string; available: boolean; installed: boolean }[], defaultRegistry: string): string {
         const webview = this._panel.webview;
         const nonce = getNonce();
 
-        // Backend options - filter out duplicates and add display-friendly labels
+        // Backend options with status indicators
         const backendDisplayNames: Record<string, string> = {
             'auto': 'Auto-detect',
             'docker': 'Docker',
@@ -144,22 +176,29 @@ export class CreateStudioPanel {
             'podman': 'Podman',
             'lima': 'Lima'
         };
-        
-        // Ensure "auto" is always first if available, and no duplicates
-        const uniqueBackends = backends.length > 0 
-            ? [...new Set(backends)]
-            : ['auto'];
-        
-        // Sort: auto first, then alphabetically
-        uniqueBackends.sort((a, b) => {
-            if (a === 'auto') {return -1;}
-            if (b === 'auto') {return 1;}
-            return a.localeCompare(b);
+
+        // Build backend options: auto first, then available, then others with status
+        const backendOptions: string[] = ['<vscode-option value="auto">Auto-detect</vscode-option>'];
+
+        // Sort: available first, then installed but not running, then not installed
+        const sorted = [...allBackends].sort((a, b) => {
+            if (a.available !== b.available) {return a.available ? -1 : 1;}
+            if (a.installed !== b.installed) {return a.installed ? -1 : 1;}
+            return a.name.localeCompare(b.name);
         });
-        
-        const backendOptions = uniqueBackends
-            .map(b => `<vscode-option value="${b}">${backendDisplayNames[b] || b}</vscode-option>`)
-            .join('');
+
+        for (const b of sorted) {
+            const displayName = backendDisplayNames[b.mode] || b.name;
+            let statusHint = '';
+            if (!b.available && b.installed) {
+                statusHint = ' (not running)';
+            } else if (!b.available && !b.installed) {
+                statusHint = ' (not installed)';
+            }
+            backendOptions.push(
+                `<vscode-option value="${b.mode}"${!b.available ? ' disabled' : ''}>${displayName}${statusHint}</vscode-option>`
+            );
+        }
 
         // Generate template options grouped by category with cleaner display
         const categories = getCategories();
@@ -198,7 +237,7 @@ export class CreateStudioPanel {
                 <vscode-form-group variant="vertical">
                     <vscode-label for="mode">Backend Mode</vscode-label>
                     <vscode-single-select id="mode" name="mode">
-                        ${backendOptions}
+                        ${backendOptions.join('')}
                     </vscode-single-select>
                     <vscode-form-helper>Container runtime for running the studio environment</vscode-form-helper>
                 </vscode-form-group>
@@ -242,10 +281,26 @@ export class CreateStudioPanel {
                     </div>
                 </div>
 
+                <div id="image-options-group" style="display: none;">
+                    <vscode-form-group variant="vertical">
+                        <vscode-label for="registry">Image Registry</vscode-label>
+                        <vscode-textfield id="registry" name="registry" value="${defaultRegistry}" placeholder="docker.io"></vscode-textfield>
+                        <vscode-form-helper>Container registry (default: docker.io)</vscode-form-helper>
+                    </vscode-form-group>
+
+                    <vscode-form-group variant="vertical" style="margin-top: var(--spacing-md);">
+                        <vscode-label for="versionTag">Image Version</vscode-label>
+                        <input id="versionTag" list="version-tags" value="latest" placeholder="latest"
+                            style="width: 100%; padding: 6px 8px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, transparent); border-radius: 2px; font-family: var(--vscode-font-family); font-size: var(--vscode-font-size);" />
+                        <datalist id="version-tags"></datalist>
+                        <vscode-form-helper>Image tag/version (type to search available tags)</vscode-form-helper>
+                    </vscode-form-group>
+                </div>
+
                 <vscode-form-group variant="vertical">
-                    <vscode-label for="gpuUrl">GPU Worker URL (Optional)</vscode-label>
-                    <vscode-textfield id="gpuUrl" name="gpuUrl" placeholder="https://worker.example.com:9001"></vscode-textfield>
-                    <vscode-form-helper>URL to a remote GPU worker (leave empty for local testing)</vscode-form-helper>
+                    <vscode-label for="gpuUrl">Remote GPU Share Link</vscode-label>
+                    <vscode-textfield id="gpuUrl" name="gpuUrl" placeholder="e.g., abc123 or https://go.gpu.tf/s/abc123"></vscode-textfield>
+                    <vscode-form-helper>Share link or code to a remote vGPU worker. If left empty, will use local GPU if applicable.</vscode-form-helper>
                 </vscode-form-group>
 
                 <vscode-collapsible title="Advanced Options">
@@ -278,57 +333,60 @@ export class CreateStudioPanel {
                 </div>
             </vscode-form-container>
 
-            <vscode-divider></vscode-divider>
-
-            <div class="info-box">
-                <vscode-icon name="info"></vscode-icon>
-                <div>
-                    <strong>After Creation</strong>
-                    <p>Once your studio is created, you can:</p>
-                    <ul>
-                        <li>Connect via VS Code Remote-SSH extension (Host: <code>ggo-&lt;name&gt;</code>)</li>
-                        <li>Use <code>ggo studio ssh &lt;name&gt;</code> from terminal</li>
-                        <li>Access web interfaces:
-                            <ul>
-                                <li>Jupyter Lab: <code>http://localhost:8888</code></li>
-                                <li>TensorBoard: <code>http://localhost:6006</code></li>
-                                <li>RStudio: <code>http://localhost:8787</code> (user: rstudio, pass: rstudio)</li>
-                            </ul>
-                        </li>
-                        <li>Manage with: <code>ggo studio list|start|stop|rm</code></li>
-                    </ul>
-                </div>
-            </div>
-
             <script nonce="${nonce}">
                 const vscode = acquireVsCodeApi();
                 const templates = ${templatesJson};
-                
+
+                // Request tags from extension host via CLI
+                function fetchTags(image, registry) {
+                    vscode.postMessage({ command: 'fetchTags', image: image, registry: registry || '' });
+                }
+
+                // Handle messages from extension host
+                window.addEventListener('message', event => {
+                    const message = event.data;
+                    if (message.command === 'tagsResult') {
+                        const datalist = document.getElementById('version-tags');
+                        datalist.textContent = '';
+                        (message.tags || []).forEach(tag => {
+                            const opt = document.createElement('option');
+                            opt.value = tag;
+                            datalist.appendChild(opt);
+                        });
+                    }
+                });
+
                 // Update UI when template changes
                 document.getElementById('template').addEventListener('change', (e) => {
                     const templateId = e.target.value;
                     const template = templates.find(t => t.id === templateId);
-                    
+                    const imageOptionsGroup = document.getElementById('image-options-group');
+
                     if (template) {
                         // Show/hide custom image field
                         const customImageGroup = document.getElementById('custom-image-group');
                         if (template.id === 'custom') {
                             customImageGroup.style.display = 'block';
+                            imageOptionsGroup.style.display = 'none';
                         } else {
                             customImageGroup.style.display = 'none';
+                            imageOptionsGroup.style.display = 'block';
+                            // Fetch tags for the template image via CLI
+                            const registry = document.getElementById('registry').value;
+                            fetchTags(template.image, registry);
                         }
-                        
+
                         // Show template info
                         const infoBox = document.getElementById('template-info');
                         if (template.id !== 'custom') {
                             infoBox.style.display = 'block';
-                            
+
                             // Basic info
                             document.getElementById('info-icon').textContent = template.icon;
                             document.getElementById('info-name').textContent = template.name;
                             document.getElementById('info-description').textContent = template.description;
                             document.getElementById('info-image').textContent = template.image;
-                            
+
                             // Level badge
                             const levelBadge = document.getElementById('info-level');
                             const levelLabels = {
@@ -338,10 +396,10 @@ export class CreateStudioPanel {
                             };
                             levelBadge.textContent = levelLabels[template.level] || '';
                             levelBadge.style.display = template.level ? 'inline-block' : 'none';
-                            
+
                             // Features
                             document.getElementById('info-features').textContent = template.features.join(', ') || 'N/A';
-                            
+
                             // Ports
                             const portsLabel = document.getElementById('info-ports-label');
                             const portsEl = document.getElementById('info-ports');
@@ -353,17 +411,20 @@ export class CreateStudioPanel {
                                 portsLabel.style.display = 'none';
                                 portsEl.style.display = 'none';
                             }
-                            
-                            // Web URLs
+
+                            // Web URLs - uses safe DOM construction
                             const urlsLabel = document.getElementById('info-urls-label');
                             const urlsEl = document.getElementById('info-urls');
                             if (template.webUrls && template.webUrls.length > 0) {
                                 urlsLabel.style.display = 'block';
                                 urlsEl.style.display = 'block';
-                                urlsEl.innerHTML = template.webUrls.map(u => 
-                                    '<span style="background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); padding: 2px 8px; border-radius: 4px; margin-right: 6px; font-size: 0.85em;">' +
-                                    u.name + ' :' + u.port + '</span>'
-                                ).join('');
+                                urlsEl.textContent = '';
+                                template.webUrls.forEach(u => {
+                                    const span = document.createElement('span');
+                                    span.style.cssText = 'background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); padding: 2px 8px; border-radius: 4px; margin-right: 6px; font-size: 0.85em;';
+                                    span.textContent = u.name + ' :' + u.port;
+                                    urlsEl.appendChild(span);
+                                });
                             } else {
                                 urlsLabel.style.display = 'none';
                                 urlsEl.style.display = 'none';
@@ -385,7 +446,7 @@ export class CreateStudioPanel {
                 if (initialTemplate) {
                     document.getElementById('template').dispatchEvent(new Event('change'));
                 }
-                
+
                 document.getElementById('create-btn').addEventListener('click', () => {
                     const name = document.getElementById('name').value;
                     if (!name) {
@@ -409,7 +470,9 @@ export class CreateStudioPanel {
                         gpuUrl: document.getElementById('gpuUrl').value,
                         ports: document.getElementById('ports').value,
                         volumes: document.getElementById('volumes').value,
-                        envs: document.getElementById('envs').value
+                        envs: document.getElementById('envs').value,
+                        registry: document.getElementById('registry').value,
+                        versionTag: document.getElementById('versionTag').value
                     };
 
                     vscode.postMessage({ command: 'create', data: data });

@@ -39,13 +39,17 @@ interface StudioEnvJSON {
 interface WorkerJSON {
     worker_id: string;
     agent_id?: string;
+    agent_hostname?: string;
     name: string;
     status: string;
     gpu_ids?: string[];
+    gpu_indices?: number[];
+    gpus?: GPUJSON[];
     listen_port: number;
     enabled: boolean;
     is_default?: boolean;
     connections?: ConnectionJSON[];
+    started_at?: string;
     created_at?: string;
 }
 
@@ -92,6 +96,21 @@ interface AgentStatusJSON {
     workers?: WorkerJSON[];
 }
 
+interface AgentJSON {
+    agent_id: string;
+    hostname: string;
+    status: string;
+    os: string;
+    arch: string;
+    network_ips?: string[];
+    gpus?: GPUJSON[];
+    workers?: WorkerJSON[];
+    gpu_count?: number;
+    gpu_summary?: string;
+    last_seen_at?: string;
+    created_at?: string;
+}
+
 // =============================================================================
 // Domain Types (camelCase for TypeScript)
 // =============================================================================
@@ -112,13 +131,17 @@ export interface StudioEnv {
 export interface Worker {
     workerId: string;
     agentId: string;
+    agentHostname?: string;
     name: string;
     status: string;
     gpuIds: string[];
+    gpuIndices?: number[];
+    gpus?: GPU[];
     listenPort: number;
     enabled: boolean;
     isDefault?: boolean;
     connections: Connection[];
+    startedAt?: string;
     createdAt?: string;
 }
 
@@ -136,7 +159,10 @@ export interface Agent {
     networkIps: string[];
     gpus: GPU[];
     workers: Worker[];
+    gpuCount?: number;
+    gpuSummary?: string;
     lastSeenAt: string;
+    createdAt: string;
 }
 
 export interface GPU {
@@ -503,6 +529,20 @@ export class CLI {
         }
     }
 
+    async studioBackendsAll(): Promise<{ name: string; mode: string; available: boolean; installed: boolean }[]> {
+        try {
+            const res = await this.execCommandJSON<ListResponse<{
+                name: string;
+                mode: string;
+                available: boolean;
+                installed: boolean;
+            }>>(['studio', 'backends', '--all']);
+            return res.items;
+        } catch {
+            return [];
+        }
+    }
+
     async studioImages(): Promise<{ name: string; tag: string; description: string; features: string[] }[]> {
         try {
             const res = await this.execCommandJSON<ListResponse<{
@@ -517,6 +557,19 @@ export class CLI {
                 description: img.description,
                 features: img.features || []
             }));
+        } catch {
+            return [];
+        }
+    }
+
+    async studioTags(image: string, registry?: string): Promise<string[]> {
+        try {
+            const args = ['studio', 'tags', image];
+            if (registry && registry !== 'docker.io') {
+                args.push('--registry', registry);
+            }
+            const res = await this.execCommandJSON<ListResponse<{ name: string }>>(args);
+            return res.items.map(t => t.name);
         } catch {
             return [];
         }
@@ -541,9 +594,19 @@ export class CLI {
         return {
             workerId: json.worker_id,
             agentId: json.agent_id || '',
+            agentHostname: json.agent_hostname,
             name: json.name,
             status: json.status,
             gpuIds: json.gpu_ids || [],
+            gpuIndices: json.gpu_indices,
+            gpus: json.gpus?.map(g => ({
+                gpuId: g.gpu_id,
+                vendor: g.vendor,
+                model: g.model,
+                vramMb: g.vram_mb,
+                driverVersion: g.driver_version,
+                cudaVersion: g.cuda_version
+            })),
             listenPort: json.listen_port,
             enabled: json.enabled,
             isDefault: json.is_default,
@@ -551,6 +614,7 @@ export class CLI {
                 clientIp: c.client_ip,
                 connectedAt: c.connected_at
             })),
+            startedAt: json.started_at,
             createdAt: json.created_at
         };
     }
@@ -661,33 +725,44 @@ export class CLI {
 
     async agentList(): Promise<Agent[]> {
         try {
-            // Aggregate agents from worker list
-            const workers = await this.workerList();
-            const agentMap = new Map<string, Agent>();
-
-            for (const worker of workers) {
-                if (!worker.agentId) {
-                    continue;
-                }
-                if (!agentMap.has(worker.agentId)) {
-                    agentMap.set(worker.agentId, {
-                        agentId: worker.agentId,
-                        hostname: worker.agentId,
-                        status: 'online',
-                        os: '',
-                        arch: '',
-                        networkIps: [],
-                        gpus: [],
-                        workers: [],
-                        lastSeenAt: ''
-                    });
-                }
-                agentMap.get(worker.agentId)!.workers.push(worker);
-            }
-
-            return Array.from(agentMap.values());
-        } catch {
+            const res = await this.execCommandJSON<ListResponse<AgentJSON>>(['agent', 'list']);
+            return res.items.map(a => this.convertAgent(a));
+        } catch (error) {
+            Logger.error('Failed to list agents', error);
             return [];
+        }
+    }
+
+    private convertAgent(json: AgentJSON): Agent {
+        return {
+            agentId: json.agent_id,
+            hostname: json.hostname || json.agent_id,
+            status: json.status,
+            os: json.os || '',
+            arch: json.arch || '',
+            networkIps: json.network_ips || [],
+            gpus: (json.gpus || []).map(g => ({
+                gpuId: g.gpu_id,
+                vendor: g.vendor,
+                model: g.model,
+                vramMb: g.vram_mb,
+                driverVersion: g.driver_version,
+                cudaVersion: g.cuda_version
+            })),
+            workers: (json.workers || []).map(w => this.convertWorker(w)),
+            gpuCount: json.gpu_count,
+            gpuSummary: json.gpu_summary,
+            lastSeenAt: json.last_seen_at || '',
+            createdAt: json.created_at || ''
+        };
+    }
+
+    async agentGet(agentId: string): Promise<Agent | null> {
+        try {
+            const res = await this.execCommandJSON<DetailResponse<AgentJSON>>(['agent', 'get', agentId]);
+            return this.convertAgent(res.item);
+        } catch {
+            return null;
         }
     }
 

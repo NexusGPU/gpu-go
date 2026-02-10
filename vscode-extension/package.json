@@ -72,7 +72,7 @@
         {
           "id": "gpu-go",
           "title": "GPUGo",
-          "icon": "images/icon.png"
+          "icon": "images/icon.svg"
         }
       ]
     },
@@ -85,13 +85,13 @@
         },
         {
           "id": "gpugo.workers",
-          "name": "Workers",
-          "contextualTitle": "GPUGo Workers"
+          "name": "vGPUs",
+          "contextualTitle": "GPUGo vGPUs"
         },
         {
           "id": "gpugo.devices",
-          "name": "Devices",
-          "contextualTitle": "GPUGo Devices"
+          "name": "Machines",
+          "contextualTitle": "GPUGo Machines"
         }
       ]
     },
@@ -114,13 +114,13 @@
       },
       {
         "command": "gpugo.refreshWorkers",
-        "title": "Refresh Workers",
+        "title": "Refresh vGPUs",
         "icon": "$(refresh)",
         "category": "GPUGo"
       },
       {
         "command": "gpugo.refreshDevices",
-        "title": "Refresh Devices",
+        "title": "Refresh Machines",
         "icon": "$(refresh)",
         "category": "GPUGo"
       },
@@ -180,17 +180,23 @@
       },
       {
         "command": "gpugo.openWorkerDetails",
-        "title": "Open Worker Details",
+        "title": "Open vGPU Details",
         "category": "GPUGo"
       },
       {
         "command": "gpugo.openDeviceDetails",
-        "title": "Open Device Details",
+        "title": "Open GPU Details",
+        "category": "GPUGo"
+      },
+      {
+        "command": "gpugo.addGpuHost",
+        "title": "Add GPU Host",
+        "icon": "$(add)",
         "category": "GPUGo"
       },
       {
         "command": "gpugo.createWorker",
-        "title": "Create Worker",
+        "title": "Create vGPU",
         "icon": "$(add)",
         "category": "GPUGo"
       },
@@ -314,6 +320,11 @@
           "type": "string",
           "default": "latest",
           "description": "Version of the GPUGo CLI to download (e.g., 'latest', 'v1.0.0')"
+        },
+        "gpugo.defaultRegistry": {
+          "type": "string",
+          "default": "docker.io",
+          "description": "Default container image registry for studio environments (e.g., docker.io, gcr.io/my-project, myregistry.example.com)"
         }
       }
     }

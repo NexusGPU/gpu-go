@@ -178,6 +178,34 @@ func (m *Manager) ListAvailableBackends(ctx context.Context) []Backend {
 	return available
 }
 
+// BackendStatus represents a backend with its availability status
+type BackendStatus struct {
+	Backend   Backend
+	Available bool
+	Installed bool
+}
+
+// ListAllBackends returns all registered backends with their availability status
+func (m *Manager) ListAllBackends(ctx context.Context) []BackendStatus {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var result []BackendStatus
+	for _, backend := range m.backends {
+		status := BackendStatus{
+			Backend:   backend,
+			Available: backend.IsAvailable(ctx),
+		}
+		if status.Available {
+			status.Installed = true
+		} else if autoStartable, ok := backend.(AutoStartableBackend); ok {
+			status.Installed = autoStartable.IsInstalled(ctx)
+		}
+		result = append(result, status)
+	}
+	return result
+}
+
 // Create creates a new environment
 func (m *Manager) Create(ctx context.Context, opts *CreateOptions) (*Environment, error) {
 	backend, err := m.GetBackend(opts.Mode)

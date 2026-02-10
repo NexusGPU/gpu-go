@@ -12,6 +12,7 @@ import (
 
 	"github.com/NexusGPU/gpu-go/internal/api"
 	"github.com/NexusGPU/gpu-go/internal/config"
+	"github.com/NexusGPU/gpu-go/internal/platform"
 	hvApi "github.com/NexusGPU/tensor-fusion/pkg/hypervisor/api"
 	"github.com/NexusGPU/tensor-fusion/pkg/hypervisor/framework"
 	"github.com/stretchr/testify/assert"
@@ -196,6 +197,7 @@ func TestAgent_PullConfig(t *testing.T) {
 		config:  configMgr,
 		ctx:     context.Background(),
 		agentID: "agent_test123",
+		paths:   platform.DefaultPaths().WithConfigDir(configDir),
 	}
 
 	err = agent.pullConfig()
@@ -256,6 +258,7 @@ func TestAgent_ReportStatus(t *testing.T) {
 		config:  configMgr,
 		ctx:     context.Background(),
 		agentID: "agent_test123",
+		paths:   platform.DefaultPaths().WithConfigDir(configDir),
 	}
 
 	err = agent.reportStatus()
@@ -313,6 +316,7 @@ func TestAgent_HandleHeartbeatResponse(t *testing.T) {
 		ctx:           context.Background(),
 		agentID:       "agent_test123",
 		configVersion: 1,
+		paths:         platform.DefaultPaths().WithConfigDir(configDir),
 	}
 
 	// Simulate heartbeat response with higher version

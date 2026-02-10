@@ -10,6 +10,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/NexusGPU/gpu-go/cmd/ggo/auth"
 	"github.com/NexusGPU/gpu-go/cmd/ggo/cmdutil"
 	"github.com/NexusGPU/gpu-go/internal/agent"
 	"github.com/NexusGPU/gpu-go/internal/api"
@@ -61,6 +62,8 @@ func NewAgentCmd() *cobra.Command {
 	cmd.AddCommand(newRegisterCmd())
 	cmd.AddCommand(newStartCmd())
 	cmd.AddCommand(newStatusCmd())
+	cmd.AddCommand(newListCmd())
+	cmd.AddCommand(newGetCmd())
 
 	return cmd
 }
@@ -302,6 +305,206 @@ func newStartCmd() *cobra.Command {
 	}
 
 	return cmd
+}
+
+func newListCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List all agents",
+		Long:  `List all registered GPU agents (machines) for the current user.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client := getUserClient()
+			ctx := context.Background()
+			out := getOutput()
+
+			resp, err := client.ListAgents(ctx)
+			if err != nil {
+				cmd.SilenceUsage = true
+				klog.Errorf("Failed to list agents: error=%v", err)
+				return err
+			}
+
+			return out.Render(&agentListResult{agents: resp.Agents})
+		},
+	}
+
+	return cmd
+}
+
+// getUserClient creates an API client authenticated with user token (PAT)
+func getUserClient() *api.Client {
+	token := os.Getenv("GPU_GO_TOKEN")
+	if token == "" {
+		token = os.Getenv("GPU_GO_USER_TOKEN")
+	}
+	if token == "" {
+		cfgMgr := config.NewManager(configDir, stateDir)
+		if agentCfg, err := cfgMgr.LoadConfig(); err == nil && agentCfg != nil && agentCfg.AgentSecret != "" {
+			token = agentCfg.AgentSecret
+		}
+	}
+	if token == "" {
+		if savedToken, err := auth.GetToken(); err == nil && savedToken != "" {
+			token = savedToken
+		}
+	}
+	return api.NewClient(
+		api.WithBaseURL(serverURL),
+		api.WithUserToken(token),
+	)
+}
+
+// agentListResult implements Renderable for agent list
+type agentListResult struct {
+	agents []api.AgentInfo
+}
+
+func (r *agentListResult) RenderJSON() any {
+	return tui.NewListResult(r.agents)
+}
+
+func (r *agentListResult) RenderTUI(out *tui.Output) {
+	if len(r.agents) == 0 {
+		out.Info("No agents found")
+		return
+	}
+
+	styles := tui.DefaultStyles()
+	var rows [][]string
+	for _, a := range r.agents {
+		statusIcon := tui.StatusIcon(a.Status)
+		statusStyled := styles.StatusStyle(a.Status).Render(statusIcon + " " + a.Status)
+
+		gpuSummary := "-"
+		if len(a.GPUs) > 0 {
+			gpuSummary = fmt.Sprintf("%d", len(a.GPUs))
+			if a.GPUs[0].Model != "" {
+				gpuSummary = fmt.Sprintf("%d x %s", len(a.GPUs), a.GPUs[0].Model)
+			}
+		}
+
+		rows = append(rows, []string{
+			a.AgentID,
+			a.Hostname,
+			statusStyled,
+			fmt.Sprintf("%s/%s", a.OS, a.Arch),
+			gpuSummary,
+			fmt.Sprintf("%d", len(a.Workers)),
+		})
+	}
+
+	table := tui.NewTable().
+		Headers("AGENT ID", "HOSTNAME", "STATUS", "OS/ARCH", "GPUS", "WORKERS").
+		Rows(rows)
+
+	out.Println(table.String())
+}
+
+func newGetCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "get <agent-id>",
+		Short: "Get agent details",
+		Long:  `Get detailed information about a specific agent including GPUs and workers.`,
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			agentID := args[0]
+			client := getUserClient()
+			ctx := context.Background()
+			out := getOutput()
+
+			resp, err := client.GetAgent(ctx, agentID)
+			if err != nil {
+				cmd.SilenceUsage = true
+				klog.Errorf("Failed to get agent: error=%v", err)
+				return err
+			}
+
+			return out.Render(&agentDetailResult{agent: resp})
+		},
+	}
+
+	return cmd
+}
+
+// agentDetailResult implements Renderable for agent detail
+type agentDetailResult struct {
+	agent *api.AgentInfo
+}
+
+func (r *agentDetailResult) RenderJSON() any {
+	return tui.NewDetailResult(r.agent)
+}
+
+func (r *agentDetailResult) RenderTUI(out *tui.Output) {
+	styles := tui.DefaultStyles()
+	a := r.agent
+
+	out.Println()
+	out.Println(styles.Title.Render("Agent Details"))
+	out.Println()
+
+	statusIcon := tui.StatusIcon(a.Status)
+	statusStyled := styles.StatusStyle(a.Status).Render(statusIcon + " " + a.Status)
+
+	status := tui.NewStatusTable().
+		Add("Agent ID", a.AgentID).
+		Add("Hostname", a.Hostname).
+		Add("Status", statusStyled).
+		Add("OS/Arch", fmt.Sprintf("%s/%s", a.OS, a.Arch))
+
+	if len(a.NetworkIPs) > 0 {
+		status.Add("Network IPs", fmt.Sprintf("%v", a.NetworkIPs))
+	}
+
+	out.Println(status.String())
+
+	if len(a.GPUs) > 0 {
+		out.Println()
+		out.Println(styles.Subtitle.Render(fmt.Sprintf("GPUs (%d)", len(a.GPUs))))
+		out.Println()
+
+		var rows [][]string
+		for _, g := range a.GPUs {
+			vramGb := fmt.Sprintf("%.1f GB", float64(g.VRAMMb)/1024)
+			rows = append(rows, []string{
+				g.GPUID,
+				g.Vendor,
+				g.Model,
+				vramGb,
+				g.DriverVersion,
+			})
+		}
+
+		table := tui.NewTable().
+			Headers("GPU ID", "VENDOR", "MODEL", "VRAM", "DRIVER").
+			Rows(rows)
+
+		out.Println(table.String())
+	}
+
+	if len(a.Workers) > 0 {
+		out.Println()
+		out.Println(styles.Subtitle.Render(fmt.Sprintf("Workers (%d)", len(a.Workers))))
+		out.Println()
+
+		var rows [][]string
+		for _, w := range a.Workers {
+			statusIcon := tui.StatusIcon(w.Status)
+			statusStyled := styles.StatusStyle(w.Status).Render(statusIcon + " " + w.Status)
+			rows = append(rows, []string{
+				w.WorkerID,
+				w.Name,
+				statusStyled,
+				fmt.Sprintf("%d", w.ListenPort),
+			})
+		}
+
+		table := tui.NewTable().
+			Headers("WORKER ID", "NAME", "STATUS", "PORT").
+			Rows(rows)
+
+		out.Println(table.String())
+	}
 }
 
 func newStatusCmd() *cobra.Command {

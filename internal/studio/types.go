@@ -160,6 +160,8 @@ type CreateOptions struct {
 	// Platform specifies the container image platform (e.g., linux/amd64, linux/arm64)
 	// If empty, auto-detect from VM/host architecture
 	Platform string `json:"platform,omitempty"`
+	// UseLocalGPU enables local GPU passthrough (--gpus all) when no remote GPU share link is provided
+	UseLocalGPU bool `json:"use_local_gpu,omitempty"`
 }
 
 // PortMapping represents a port mapping

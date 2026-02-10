@@ -42,6 +42,12 @@ const (
 	// HardMemLimiterEnv sets memory limit in megabytes
 	HardMemLimiterEnv = "TF_GPU_MEMORY_LIMIT"
 
+	// URL auth environment variables
+	// EnvURLAuth enables URL-based authentication on workers
+	EnvURLAuth = "TF_ENABLE_URL_AUTH"
+	// EnvAuthorizedKeyPath points to a file containing authorized share codes (one per line)
+	EnvAuthorizedKeyPath = "TF_AUTHORIZED_KEY_PATH"
+
 	// GPU visibility environment variables
 	envCUDAVisibleDevices = "CUDA_VISIBLE_DEVICES"
 	envHIPVisibleDevices  = "HIP_VISIBLE_DEVICES"
@@ -249,8 +255,9 @@ func (a *Agent) Start() error {
 	}
 
 	// Start background tasks
-	a.wg.Add(1)
+	a.wg.Add(2)
 	go a.statusReportLoop()
+	go a.sseConfigListener()
 
 	klog.Infof("Agent started: agent_id=%s pid=%d", a.agentID, os.Getpid())
 
@@ -354,6 +361,13 @@ func (a *Agent) pullConfig() error {
 		return err
 	}
 
+	// Write share codes files for each worker
+	for _, w := range resp.Workers {
+		if err := a.writeShareCodes(w.WorkerID, w.ShareCodes); err != nil {
+			klog.Warningf("Failed to write share codes for worker %s: %v", w.WorkerID, err)
+		}
+	}
+
 	// Reconcile workers with hypervisor if available
 	if a.reconciler != nil {
 		infos, err := a.convertToWorkerInfos(resp.Workers)
@@ -430,6 +444,8 @@ func (a *Agent) convertToWorkerInfos(apiWorkers []api.WorkerConfig) ([]*hvApi.Wo
 		envVars["TF_LICENSE"] = cfg.License.Plain
 		envVars["TF_LICENSE_SIGN"] = cfg.License.Encrypted
 		envVars["TF_ENABLE_LOG"] = "1"
+		envVars[EnvURLAuth] = "1"
+		envVars[EnvAuthorizedKeyPath] = filepath.Join(a.paths.ConfigDir(), w.WorkerID+"_share_codes")
 
 		// Set hard limiter environment variables for Fractional GPU support
 		// TODO: use MIG for partitioned
@@ -1204,6 +1220,13 @@ func (a *Agent) handleReportResponse(resp *api.AgentStatusResponse) {
 		}
 	}
 
+	// Write share codes if server returned them
+	for workerID, codes := range resp.WorkerShareCodes {
+		if err := a.writeShareCodes(workerID, codes); err != nil {
+			klog.Warningf("Failed to write share codes for worker %s: %v", workerID, err)
+		}
+	}
+
 	// Pull new config if version changed
 	if resp.ConfigVersion > a.configVersion {
 		klog.Infof("Config version changed: old=%d new=%d, pulling new config", a.configVersion, resp.ConfigVersion)
@@ -1237,6 +1260,26 @@ func parseLicenseExpiration(licensePlain string) int64 {
 		}
 	}
 	return 0
+}
+
+// writeShareCodes writes share codes for a worker to a file.
+// The file is located at ~/.gpugo/config/{workerID}_share_codes
+// with one share code per line. Workers read this file for URL-based auth.
+func (a *Agent) writeShareCodes(workerID string, codes []string) error {
+	path := filepath.Join(a.paths.ConfigDir(), workerID+"_share_codes")
+
+	// Ensure config directory exists
+	if err := os.MkdirAll(a.paths.ConfigDir(), 0755); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+
+	content := strings.Join(codes, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		return fmt.Errorf("failed to write share codes file: %w", err)
+	}
+
+	klog.V(4).Infof("Wrote share codes for worker %s: path=%s count=%d", workerID, path, len(codes))
+	return nil
 }
 
 // GetHypervisorManager returns the hypervisor manager if available

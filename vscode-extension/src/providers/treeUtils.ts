@@ -105,6 +105,7 @@ export const StatusIcons = {
     running: (color = 'charts.green') => new vscode.ThemeIcon('vm-running', new vscode.ThemeColor(color)),
     stopped: () => new vscode.ThemeIcon('vm-outline'),
     pending: () => new vscode.ThemeIcon('loading~spin'),
+    unknown: () => new vscode.ThemeIcon('question', new vscode.ThemeColor('descriptionForeground')),
     online: (icon = 'server', color = 'charts.green') => new vscode.ThemeIcon(icon, new vscode.ThemeColor(color)),
     offline: (icon = 'server', color = 'charts.red') => new vscode.ThemeIcon(icon, new vscode.ThemeColor(color)),
     error: () => new vscode.ThemeIcon('error', new vscode.ThemeColor('charts.red')),
@@ -115,7 +116,7 @@ export const StatusIcons = {
  */
 export function getStatusIcon(status: string, entityType: 'studio' | 'worker' | 'agent' = 'worker'): vscode.ThemeIcon {
     const statusLower = status.toLowerCase();
-    
+
     if (statusLower === 'running' || statusLower === 'online') {
         if (entityType === 'studio') {
             return StatusIcons.running();
@@ -125,7 +126,7 @@ export function getStatusIcon(status: string, entityType: 'studio' | 'worker' | 
         }
         return new vscode.ThemeIcon('broadcast', new vscode.ThemeColor('charts.green'));
     }
-    
+
     if (statusLower === 'stopped' || statusLower === 'exited' || statusLower === 'offline') {
         if (entityType === 'studio') {
             return StatusIcons.stopped();
@@ -135,8 +136,15 @@ export function getStatusIcon(status: string, entityType: 'studio' | 'worker' | 
         }
         return new vscode.ThemeIcon('broadcast', new vscode.ThemeColor('charts.red'));
     }
-    
-    return StatusIcons.pending();
+
+    // Transitional states get a spinner
+    const transitionalStates = ['starting', 'stopping', 'pending', 'creating', 'deleting', 'pulling', 'restarting'];
+    if (transitionalStates.includes(statusLower)) {
+        return StatusIcons.pending();
+    }
+
+    // Unknown or unrecognized states get a static icon (no spin)
+    return StatusIcons.unknown();
 }
 
 /**

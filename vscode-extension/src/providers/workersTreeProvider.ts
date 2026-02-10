@@ -77,7 +77,7 @@ export class WorkersTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
                 Logger.log(`Found ${this.workers.length} workers`);
                 
                 if (this.workers.length === 0) {
-                    return [createEmptyItem('No workers found', 'Create one from your GPU server')];
+                    return [createEmptyItem('No vGPUs found', 'Create one from your GPU server')];
                 }
 
                 return this.workers.map(worker => 
@@ -85,7 +85,7 @@ export class WorkersTreeProvider implements vscode.TreeDataProvider<vscode.TreeI
                 );
             } catch (error) {
                 Logger.error('Error fetching workers:', error);
-                return [createErrorItem('Error loading workers', error)];
+                return [createErrorItem('Error loading vGPUs', error)];
             }
         }
 

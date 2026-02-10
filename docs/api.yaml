@@ -221,6 +221,9 @@ components:
           type: string
         gpuCount:
           type: number
+        gpu_summary:
+          type: string
+          nullable: true
         last_seen_at:
           type: string
           nullable: true
@@ -233,6 +236,7 @@ components:
         - os
         - arch
         - gpuCount
+        - gpu_summary
         - last_seen_at
         - created_at
     AgentConfigResponse:
@@ -439,6 +443,8 @@ components:
           type: string
         agent_id:
           type: string
+        agent_hostname:
+          type: string
         name:
           type: string
         gpu_ids:
@@ -450,6 +456,30 @@ components:
           items:
             type: integer
             minimum: 0
+        gpus:
+          type: array
+          items:
+            type: object
+            properties:
+              gpu_id:
+                type: string
+              gpu_index:
+                type: integer
+                minimum: 0
+              vendor:
+                type: string
+              model:
+                type: string
+              vram_mb:
+                type: integer
+                minimum: 0
+                exclusiveMinimum: true
+            required:
+              - gpu_id
+              - gpu_index
+              - vendor
+              - model
+              - vram_mb
         listen_port:
           type: number
         enabled:
@@ -461,17 +491,23 @@ components:
             - running
             - stopping
             - stopped
+        started_at:
+          type: string
+          nullable: true
         created_at:
           type: string
       required:
         - worker_id
         - agent_id
+        - agent_hostname
         - name
         - gpu_ids
         - gpu_indices
+        - gpus
         - listen_port
         - enabled
         - status
+        - started_at
         - created_at
     CreateWorkerRequest:
       type: object
@@ -644,6 +680,9 @@ paths:
                           type: string
                         gpuCount:
                           type: number
+                        gpu_summary:
+                          type: string
+                          nullable: true
                         last_seen_at:
                           type: string
                           nullable: true
@@ -656,6 +695,7 @@ paths:
                         - os
                         - arch
                         - gpuCount
+                        - gpu_summary
                         - last_seen_at
                         - created_at
                 required:
@@ -1014,6 +1054,8 @@ paths:
                           type: string
                         agent_id:
                           type: string
+                        agent_hostname:
+                          type: string
                         name:
                           type: string
                         gpu_ids:
@@ -1025,6 +1067,30 @@ paths:
                           items:
                             type: integer
                             minimum: 0
+                        gpus:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              gpu_id:
+                                type: string
+                              gpu_index:
+                                type: integer
+                                minimum: 0
+                              vendor:
+                                type: string
+                              model:
+                                type: string
+                              vram_mb:
+                                type: integer
+                                minimum: 0
+                                exclusiveMinimum: true
+                            required:
+                              - gpu_id
+                              - gpu_index
+                              - vendor
+                              - model
+                              - vram_mb
                         listen_port:
                           type: number
                         enabled:
@@ -1036,17 +1102,23 @@ paths:
                             - running
                             - stopping
                             - stopped
+                        started_at:
+                          type: string
+                          nullable: true
                         created_at:
                           type: string
                       required:
                         - worker_id
                         - agent_id
+                        - agent_hostname
                         - name
                         - gpu_ids
                         - gpu_indices
+                        - gpus
                         - listen_port
                         - enabled
                         - status
+                        - started_at
                         - created_at
                 required:
                   - workers
@@ -1103,6 +1175,8 @@ paths:
                     type: string
                   agent_id:
                     type: string
+                  agent_hostname:
+                    type: string
                   name:
                     type: string
                   gpu_ids:
@@ -1114,6 +1188,30 @@ paths:
                     items:
                       type: integer
                       minimum: 0
+                  gpus:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        gpu_id:
+                          type: string
+                        gpu_index:
+                          type: integer
+                          minimum: 0
+                        vendor:
+                          type: string
+                        model:
+                          type: string
+                        vram_mb:
+                          type: integer
+                          minimum: 0
+                          exclusiveMinimum: true
+                      required:
+                        - gpu_id
+                        - gpu_index
+                        - vendor
+                        - model
+                        - vram_mb
                   listen_port:
                     type: number
                   enabled:
@@ -1125,17 +1223,23 @@ paths:
                       - running
                       - stopping
                       - stopped
+                  started_at:
+                    type: string
+                    nullable: true
                   created_at:
                     type: string
                 required:
                   - worker_id
                   - agent_id
+                  - agent_hostname
                   - name
                   - gpu_ids
                   - gpu_indices
+                  - gpus
                   - listen_port
                   - enabled
                   - status
+                  - started_at
                   - created_at
   /api/v1/tokens/generate:
     post:

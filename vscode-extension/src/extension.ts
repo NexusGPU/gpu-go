@@ -5,7 +5,6 @@ import { WorkersTreeProvider } from './providers/workersTreeProvider';
 import { DevicesTreeProvider } from './providers/devicesTreeProvider';
 import { WorkerDetailPanel } from './views/workerDetailPanel';
 import { DeviceDetailPanel } from './views/deviceDetailPanel';
-import { CreateWorkerPanel } from './views/createWorkerPanel';
 import { CreateStudioPanel } from './views/createStudioPanel';
 import { CLI } from './cli/cli';
 import { Logger } from './logger';
@@ -219,8 +218,16 @@ function registerCommands(context: vscode.ExtensionContext, cli: CLI) {
 
     // Worker commands
     context.subscriptions.push(
+        vscode.commands.registerCommand('gpugo.addGpuHost', async () => {
+            const dashboardUrl = cli.getDashboardUrl();
+            vscode.env.openExternal(vscode.Uri.parse(`${dashboardUrl}/dashboard/agents/register`));
+        })
+    );
+
+    context.subscriptions.push(
         vscode.commands.registerCommand('gpugo.createWorker', async () => {
-            CreateWorkerPanel.createOrShow(context.extensionUri, cli);
+            const dashboardUrl = cli.getDashboardUrl();
+            vscode.env.openExternal(vscode.Uri.parse(`${dashboardUrl}/workers/new`));
         })
     );
 
@@ -244,7 +251,7 @@ function registerCommands(context: vscode.ExtensionContext, cli: CLI) {
     context.subscriptions.push(
         vscode.commands.registerCommand('gpugo.openDeviceDetails', async (item) => {
             if (item?.deviceId) {
-                DeviceDetailPanel.createOrShow(context.extensionUri, cli, item.deviceId);
+                DeviceDetailPanel.createOrShow(context.extensionUri, cli, item.deviceId, item.gpu);
             }
         })
     );

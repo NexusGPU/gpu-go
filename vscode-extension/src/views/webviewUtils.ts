@@ -29,11 +29,13 @@ export function getWebviewContent(
         }
 
         body {
-            padding: var(--spacing-lg);
+            padding: var(--spacing-lg) var(--spacing-xl);
             color: var(--vscode-foreground);
             font-family: var(--vscode-font-family);
             font-size: var(--vscode-font-size);
             line-height: 1.5;
+            max-width: 900px;
+            margin: 0 auto;
         }
 
         h1 {
@@ -173,10 +175,134 @@ export function getWebviewContent(
             border-radius: 4px;
         }
 
+        /* Detail grid layout */
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: var(--spacing-md);
+            margin: var(--spacing-md) 0;
+            background: var(--vscode-textBlockQuote-background);
+            border-radius: 8px;
+            padding: var(--spacing-md) var(--spacing-lg);
+        }
+
+        .detail-item {
+            display: flex;
+            flex-direction: column;
+            gap: var(--spacing-xs);
+        }
+
+        .detail-label {
+            font-size: 0.85em;
+            color: var(--vscode-descriptionForeground);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .detail-value {
+            font-family: var(--vscode-editor-font-family);
+            font-size: var(--vscode-editor-font-size);
+            word-break: break-all;
+        }
+
+        /* GPU cards */
+        .gpu-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: var(--spacing-md);
+            margin: var(--spacing-md) 0;
+        }
+
+        .gpu-card {
+            border: 1px solid var(--vscode-widget-border, var(--vscode-editorWidget-border, rgba(128,128,128,0.35)));
+            border-radius: 8px;
+            overflow: hidden;
+            transition: border-color 0.15s ease;
+        }
+
+        .gpu-card:hover {
+            border-color: var(--vscode-focusBorder);
+        }
+
+        .gpu-card-header {
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-sm);
+            padding: var(--spacing-sm) var(--spacing-md);
+            background: var(--vscode-textBlockQuote-background);
+            border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-editorWidget-border, rgba(128,128,128,0.35)));
+        }
+
+        .gpu-card-icon {
+            color: var(--vscode-charts-yellow);
+        }
+
+        .gpu-card-title {
+            flex: 1;
+            font-weight: 600;
+            font-size: 0.95em;
+        }
+
+        .gpu-card-body {
+            padding: var(--spacing-md);
+            display: flex;
+            flex-direction: column;
+            gap: var(--spacing-sm);
+        }
+
+        .gpu-card-stat {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .gpu-stat-label {
+            font-size: 0.85em;
+            color: var(--vscode-descriptionForeground);
+        }
+
+        .gpu-stat-value {
+            font-family: var(--vscode-editor-font-family);
+            font-size: var(--vscode-editor-font-size);
+        }
+
+        .gpu-id-value {
+            font-size: 0.85em;
+            opacity: 0.8;
+        }
+
+        /* Share links */
+        .share-links {
+            display: flex;
+            flex-direction: column;
+            gap: var(--spacing-sm);
+            margin: var(--spacing-md) 0;
+        }
+
+        .share-link-item {
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-sm);
+            padding: var(--spacing-sm) var(--spacing-md);
+            background: var(--vscode-textCodeBlock-background);
+            border-radius: 4px;
+        }
+
+        .share-link-item code {
+            flex: 1;
+            font-family: var(--vscode-editor-font-family);
+        }
+
+        .share-link-item .copy-share-btn,
+        .share-link-item vscode-button[appearance="icon"] {
+            color: var(--vscode-foreground);
+        }
+
         /* Responsive adjustments */
         @media (max-width: 600px) {
             body {
                 padding: var(--spacing-md);
+                max-width: 100%;
             }
 
             .header {

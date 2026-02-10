@@ -106,6 +106,7 @@ Examples:
 	cmd.AddCommand(newSSHCmd())
 	cmd.AddCommand(newLogsCmd())
 	cmd.AddCommand(newImagesCmd())
+	cmd.AddCommand(newTagsCmd())
 	cmd.AddCommand(newBackendsCmd())
 
 	return cmd
@@ -208,7 +209,7 @@ Examples:
 
 	cmd.Flags().StringVarP(&mode, "mode", "m", "", "Container/VM mode (wsl, colima, apple-container, docker, k8s, auto)")
 	cmd.Flags().StringVarP(&image, "image", "i", "tensorfusion/studio-torch:latest", "Container image")
-	cmd.Flags().StringVarP(&shareLink, "share-link", "s", "", "Share link or share code to remote vGPU worker (required)")
+	cmd.Flags().StringVarP(&shareLink, "share-link", "s", "", "Share link or share code to remote vGPU worker (recommended for GPU access)")
 	cmd.Flags().StringVar(&serverURL, "server", api.GetDefaultBaseURL(), "Server URL for resolving share links")
 	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "SSH public key to authorize")
 	cmd.Flags().StringArrayVarP(&ports, "port", "p", nil, "Port mappings (host:container)")
@@ -246,6 +247,9 @@ func runCreate(cmd *cobra.Command, args []string) error {
 			klog.Errorf("Failed to resolve share link: error=%v", err)
 			return fmt.Errorf("failed to resolve share link '%s': %w", shareLink, err)
 		}
+
+		// Append share code to connection URL for authentication
+		shareInfo.ConnectionURL = shareInfo.ConnectionURL + "+" + shortCode
 		klog.Infof("Resolved share link: worker_id=%s vendor=%s connection_url=%s",
 			shareInfo.WorkerID, shareInfo.HardwareVendor, shareInfo.ConnectionURL)
 
@@ -256,6 +260,12 @@ func runCreate(cmd *cobra.Command, args []string) error {
 			klog.Errorf("Failed to ensure GPU client libraries: error=%v", err)
 			return fmt.Errorf("failed to download GPU client libraries: %w", err)
 		}
+	} else if !out.IsJSON() {
+		styles := tui.DefaultStyles()
+		out.Printf("%s No share link provided. Studio will have no remote GPU access.\n",
+			styles.Warning.Render("!"))
+		out.Println("   Use -s <share-link> to connect to a remote GPU worker.")
+		out.Println()
 	}
 
 	opts, err := buildCreateOptions(name, shareInfo)
@@ -400,9 +410,10 @@ func buildCreateOptions(name string, shareInfo *api.SharePublicInfo) (*studio.Cr
 			CPUs:   cpus,
 			Memory: memory,
 		},
-		Command:  command,
-		Endpoint: endpointOverride,
-		Platform: platform,
+		Command:     command,
+		Endpoint:    endpointOverride,
+		Platform:    platform,
+		UseLocalGPU: gpuWorkerURL == "" && (studioMode == studio.ModeDocker || studioMode == studio.ModeWSL || studioMode == studio.ModeAuto),
 	}, nil
 }
 
@@ -894,8 +905,95 @@ func (r *imagesResult) RenderTUI(out *tui.Output) {
 	out.Println(table.String())
 }
 
+func newTagsCmd() *cobra.Command {
+	var registryURL string
+	var limit int
+
+	cmd := &cobra.Command{
+		Use:   "tags <image>",
+		Short: "List available tags for a container image",
+		Long: `List available tags for a container image from its registry.
+
+Uses the Docker V2 Registry API with credentials from ~/.docker/config.json.
+Supports Docker Hub, AWS ECR, GCP GCR/Artifact Registry, Azure ACR, and
+local registries — any registry that Docker CLI can authenticate to.
+
+Examples:
+  # List tags for a Docker Hub image
+  ggo studio tags tensorfusion/studio-torch
+
+  # List tags for a private registry image
+  ggo studio tags myapp --registry gcr.io/my-project
+
+  # List tags from a local registry
+  ggo studio tags test/nginx --registry localhost:5555
+
+  # Limit number of results
+  ggo studio tags tensorfusion/studio-torch --limit 10`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
+			out := getOutput()
+
+			imageRef := args[0]
+			if registryURL != "" && registryURL != "docker.io" {
+				imageRef = registryURL + "/" + imageRef
+			}
+
+			tags, err := studio.ListRemoteTags(ctx, imageRef, limit)
+			if err != nil {
+				cmd.SilenceUsage = true
+				return err
+			}
+
+			return out.Render(&tagsResult{tags: tags, image: args[0]})
+		},
+	}
+
+	cmd.Flags().StringVar(&registryURL, "registry", "", "Container registry URL (default: docker.io)")
+	cmd.Flags().IntVar(&limit, "limit", 0, "Maximum number of tags to return (0 = all)")
+
+	return cmd
+}
+
+// tagsResult implements Renderable for tags command
+type tagsResult struct {
+	tags  []string
+	image string
+}
+
+type tagItem struct {
+	Name string `json:"name"`
+}
+
+func (r *tagsResult) RenderJSON() any {
+	items := make([]tagItem, len(r.tags))
+	for i, t := range r.tags {
+		items[i] = tagItem{Name: t}
+	}
+	return tui.NewListResult(items)
+}
+
+func (r *tagsResult) RenderTUI(out *tui.Output) {
+	if len(r.tags) == 0 {
+		out.Info(fmt.Sprintf("No tags found for '%s'", r.image))
+		return
+	}
+
+	styles := tui.DefaultStyles()
+	out.Println()
+	out.Println(styles.Subtitle.Render(fmt.Sprintf("Tags for %s (%d)", r.image, len(r.tags))))
+	out.Println()
+	for _, tag := range r.tags {
+		out.Printf("  %s\n", tag)
+	}
+	out.Println()
+}
+
 func newBackendsCmd() *cobra.Command {
-	return &cobra.Command{
+	var showAll bool
+
+	cmd := &cobra.Command{
 		Use:   "backends",
 		Short: "List available container/VM backends",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -903,10 +1001,19 @@ func newBackendsCmd() *cobra.Command {
 			mgr := getManager()
 			out := getOutput()
 
+			if showAll {
+				statuses := mgr.ListAllBackends(ctx)
+				return out.Render(&allBackendsResult{statuses: statuses})
+			}
+
 			backends := mgr.ListAvailableBackends(ctx)
 			return out.Render(&backendsResult{backends: backends})
 		},
 	}
+
+	cmd.Flags().BoolVar(&showAll, "all", false, "Show all registered backends including unavailable ones")
+
+	return cmd
 }
 
 // backendsResult implements Renderable for backends command
@@ -956,6 +1063,59 @@ func (r *backendsResult) RenderTUI(out *tui.Output) {
 			styles.Bold.Render(b.Name()),
 			string(b.Mode()),
 			styles.Success.Render("● available"),
+		})
+	}
+
+	table := tui.NewTable().
+		Headers("NAME", "MODE", "STATUS").
+		Rows(rows)
+
+	out.Println(table.String())
+}
+
+// allBackendsResult implements Renderable for backends --all command
+type allBackendsResult struct {
+	statuses []studio.BackendStatus
+}
+
+func (r *allBackendsResult) RenderJSON() any {
+	type backendInfo struct {
+		Name      string `json:"name"`
+		Mode      string `json:"mode"`
+		Available bool   `json:"available"`
+		Installed bool   `json:"installed"`
+	}
+	var result []backendInfo
+	for _, s := range r.statuses {
+		result = append(result, backendInfo{
+			Name:      s.Backend.Name(),
+			Mode:      string(s.Backend.Mode()),
+			Available: s.Available,
+			Installed: s.Installed,
+		})
+	}
+	return tui.NewListResult(result)
+}
+
+func (r *allBackendsResult) RenderTUI(out *tui.Output) {
+	styles := tui.DefaultStyles()
+
+	out.Println()
+	out.Println(styles.Title.Render("All Backends"))
+	out.Println()
+
+	var rows [][]string
+	for _, s := range r.statuses {
+		status := styles.Error.Render("○ not installed")
+		if s.Available {
+			status = styles.Success.Render("● available")
+		} else if s.Installed {
+			status = styles.Warning.Render("◐ not running")
+		}
+		rows = append(rows, []string{
+			styles.Bold.Render(s.Backend.Name()),
+			string(s.Backend.Mode()),
+			status,
 		})
 	}
 
