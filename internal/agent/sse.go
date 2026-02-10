@@ -11,11 +11,11 @@ import (
 )
 
 const (
-	sseEndpoint       = "https://sse.tensor-fusion.ai/stream"
-	sseReconnectMin   = 1 * time.Second
-	sseReconnectMax   = 30 * time.Second
-	sseDebounceDelay  = 500 * time.Millisecond
-	sseTopicHeader    = "x-sse-topic"
+	sseEndpoint      = "https://sse.tensor-fusion.ai/stream"
+	sseReconnectMin  = 1 * time.Second
+	sseReconnectMax  = 30 * time.Second
+	sseDebounceDelay = 500 * time.Millisecond
+	sseTopicHeader   = "x-sse-topic"
 )
 
 // sseConfigListener connects to the SSE endpoint and triggers config re-fetch on new events.
@@ -70,7 +70,7 @@ func (a *Agent) listenSSE() error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		klog.Warningf("SSE endpoint returned status %d", resp.StatusCode)

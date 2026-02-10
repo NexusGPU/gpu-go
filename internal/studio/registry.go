@@ -196,7 +196,7 @@ func getRegistryToken(ctx context.Context, registry, repo, username, password st
 	if err != nil {
 		return "", fmt.Errorf("token request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("token endpoint returned %d", resp.StatusCode)
@@ -263,7 +263,7 @@ func ListRemoteTags(ctx context.Context, image string, limit int) ([]string, err
 	if err != nil {
 		return nil, fmt.Errorf("registry request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusUnauthorized {
 		return nil, fmt.Errorf("authentication required for %s/%s — run 'docker login %s'", registry, repo, registry)

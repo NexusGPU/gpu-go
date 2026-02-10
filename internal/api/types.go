@@ -141,7 +141,7 @@ type AgentStatusRequest struct {
 type AgentStatusResponse struct {
 	Success          bool                `json:"success"`
 	ConfigVersion    int                 `json:"config_version"`
-	License          *License            `json:"license,omitempty"` // null if no regeneration needed
+	License          *License            `json:"license,omitempty"`            // null if no regeneration needed
 	WorkerShareCodes map[string][]string `json:"worker_share_codes,omitempty"` // workerID -> []shareCode
 }
 
