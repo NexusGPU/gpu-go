@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -332,7 +333,7 @@ func renderUnixEnv(shareInfo *api.SharePublicInfo, config *studio.GPUEnvConfig, 
 		out.Println()
 		out.Printf("   Connection URL: %s\n", shareInfo.ConnectionURL)
 		out.Printf("   Hardware:       %s\n", shareInfo.HardwareVendor)
-		out.Printf("   Log Path:       %s\n", config.LogPath)
+		out.Printf("   Log Path:       %s\n", envResult.EnvVars["TF_LOG_PATH"])
 		out.Println()
 	}
 
@@ -448,10 +449,26 @@ func launchGPUShell(config *studio.GPUEnvConfig, envResult *studio.GPUEnvResult,
 
 	// Print GPU environment banner
 	fmt.Printf("\n%s GPU environment activated %s\n", styles().Success.Render("✓"), styles().Muted.Render("(type 'exit' to deactivate)"))
-	fmt.Println()
+	fmt.Printf("%s\n\n", styles().Muted.Render("Ctrl+C interrupts the current command, not the GPU environment."))
+
+	// Ignore SIGINT in parent process - let the child shell handle Ctrl+C naturally.
+	// Without this, Ctrl+C kills both the parent ggo process and the child shell,
+	// causing the entire rGPU environment to exit unexpectedly.
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt)
+	go func() {
+		for range sigChan {
+			// Intentionally ignored - the child shell handles Ctrl+C
+		}
+	}()
 
 	// Run the shell and wait for it to exit
-	return cmd.Run()
+	err := cmd.Run()
+
+	// Restore default signal handling after shell exits
+	signal.Stop(sigChan)
+
+	return err
 }
 
 // styles returns the default TUI styles
@@ -837,7 +854,7 @@ func renderWindowsEnv(shareInfo *api.SharePublicInfo, config *studio.GPUEnvConfi
 		out.Println()
 		out.Printf("   Connection URL: %s\n", shareInfo.ConnectionURL)
 		out.Printf("   Hardware:       %s\n", shareInfo.HardwareVendor)
-		out.Printf("   Log Path:       %s\n", config.LogPath)
+		out.Printf("   Log Path:       %s\n", envResult.EnvVars["TF_LOG_PATH"])
 		out.Println()
 	}
 
@@ -990,12 +1007,13 @@ func launchGPUShellWindows(config *studio.GPUEnvConfig, envResult *studio.GPUEnv
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
 
-	// Add libs path to PATH - libs directory contains only .dll files
+	// Add libs path and GPU bin directory to PATH
+	binDir := getGPUBinDir()
 	existingPath := os.Getenv("PATH")
 	if existingPath != "" {
-		env = append(env, fmt.Sprintf("PATH=%s;%s", libsPath, existingPath))
+		env = append(env, fmt.Sprintf("PATH=%s;%s;%s", binDir, libsPath, existingPath))
 	} else {
-		env = append(env, fmt.Sprintf("PATH=%s", libsPath))
+		env = append(env, fmt.Sprintf("PATH=%s;%s", binDir, libsPath))
 	}
 
 	// Set CUDA_PATH - point to libs directory
@@ -1008,16 +1026,33 @@ func launchGPUShellWindows(config *studio.GPUEnvConfig, envResult *studio.GPUEnv
 	// Mark as GPU Go activated
 	env = append(env, "_GGO_ACTIVE=1")
 	env = append(env, fmt.Sprintf("_GGO_LIBS_PATH=%s", libsPath))
+	env = append(env, fmt.Sprintf("_GGO_BIN_PATH=%s", binDir))
 
 	cmd.Env = env
 
 	// Print GPU environment banner
 	styles := tui.DefaultStyles()
 	fmt.Printf("\n%s GPU environment activated %s\n", styles.Success.Render("✓"), styles.Muted.Render("(type 'exit' to deactivate)"))
-	fmt.Println()
+	fmt.Printf("%s\n\n", styles.Muted.Render("Ctrl+C interrupts the current command, not the GPU environment."))
+
+	// Ignore SIGINT (Ctrl+C) in parent process - let the child shell handle it.
+	// On Windows, CTRL_C_EVENT is sent to all processes in the console.
+	// Without this, the Go runtime terminates ggo on Ctrl+C, killing the shell.
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt)
+	go func() {
+		for range sigChan {
+			// Intentionally ignored - the child shell handles Ctrl+C
+		}
+	}()
 
 	// Run the shell and wait for it to exit
-	return cmd.Run()
+	err := cmd.Run()
+
+	// Restore default signal handling after shell exits
+	signal.Stop(sigChan)
+
+	return err
 }
 
 // tempEnvResultWindows implements Renderable for Windows temporary env setup
@@ -1132,7 +1167,7 @@ func setupLongTermUnix(shareInfo *api.SharePublicInfo, config *studio.GPUEnvConf
 		out.Printf("   Config directory: %s\n", outputDir)
 		out.Printf("   Connection URL:   %s\n", shareInfo.ConnectionURL)
 		out.Printf("   Hardware:         %s\n", shareInfo.HardwareVendor)
-		out.Printf("   Log Path:         %s\n", config.LogPath)
+		out.Printf("   Log Path:         %s\n", envResult.EnvVars["TF_LOG_PATH"])
 		out.Println()
 	}
 
@@ -1265,7 +1300,7 @@ func setupLongTermWindows(shareInfo *api.SharePublicInfo, config *studio.GPUEnvC
 		out.Printf("   Config directory: %s\n", outputDir)
 		out.Printf("   Connection URL:   %s\n", shareInfo.ConnectionURL)
 		out.Printf("   Hardware:         %s\n", shareInfo.HardwareVendor)
-		out.Printf("   Log Path:         %s\n", config.LogPath)
+		out.Printf("   Log Path:         %s\n", envResult.EnvVars["TF_LOG_PATH"])
 		out.Println()
 	}
 

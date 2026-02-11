@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	sseEndpoint      = "https://sse.tensor-fusion.ai/stream"
+	sseEndpoint      = "https://sse.tensor-fusion.ai/v1/stream"
 	sseReconnectMin  = 1 * time.Second
 	sseReconnectMax  = 30 * time.Second
 	sseDebounceDelay = 500 * time.Millisecond

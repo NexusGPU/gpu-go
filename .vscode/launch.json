@@ -41,6 +41,18 @@
                 "agent", "status"
             ],
             "program": "${workspaceFolder}/cmd/ggo/main.go",
+        },
+        {
+            "name": "Debug GPU Go Studio Create",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "console": "integratedTerminal",
+            "args": [
+                "studio", "create", "my-studio-abc", "-s", "https://gpu.tf/s/bhchnf", 
+                // "-m", "colima", "--platform", "linux/arm64", "-i", "nvcr.io/nvidia/pytorch:26.01-py3-igpu", "-c", "sleep 1d"
+            ],
+            "program": "${workspaceFolder}/cmd/ggo/main.go",
         }
     ]
 }

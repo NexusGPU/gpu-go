@@ -247,10 +247,6 @@ func TestManager_Lifecycle(t *testing.T) {
 	assert.NotContains(t, backend.envs, "env-1")
 }
 
-func TestManager_SSHConfig(t *testing.T) {
-	t.Skip("Skipping SSH config test to avoid modifying user's ~/.ssh/config")
-}
-
 func TestManager_ListAvailableBackends(t *testing.T) {
 	m := NewManager()
 	m.RegisterBackend(&MockBackend{mode: ModeDocker, available: true})

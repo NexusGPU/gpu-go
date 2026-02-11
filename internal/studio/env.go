@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/NexusGPU/gpu-go/internal/platform"
 )
@@ -40,7 +41,7 @@ type GPUEnvConfig struct {
 	ConnectionURL string // TENSOR_FUSION_OPERATOR_CONNECTION_INFO value
 	CachePath     string // Path to gpugo cache directory (for binaries like tensor-fusion-worker)
 	LibsPath      string // Path to gpugo libs directory (for .so/.dll files, used in LD paths)
-	LogPath       string // Path to logs directory
+	LogPath       string // Path to logs directory (parent of logs-YYYY-mm-dd.txt)
 	StudioName    string // Name of the studio (for creating config files)
 	IsContainer   bool   // Whether this is for a container (affects paths)
 }
@@ -129,6 +130,18 @@ func FindActualLibraryFiles(cachePath string, vendor GPUVendor) []string {
 	return libs
 }
 
+// gpuSMIBinaryName returns the GPU monitoring binary name for a vendor
+func gpuSMIBinaryName(vendor GPUVendor) string {
+	switch vendor {
+	case VendorNvidia:
+		return "nvidia-smi"
+	case VendorAMD, VendorHygon:
+		return "amdsmi"
+	default:
+		return ""
+	}
+}
+
 // GetWindowsLibraryNames returns the DLL names for a vendor (Windows)
 func GetWindowsLibraryNames(vendor GPUVendor) []string {
 	switch vendor {
@@ -168,29 +181,33 @@ func SetupGPUEnv(paths *platform.Paths, config *GPUEnvConfig) (*GPUEnvResult, er
 		libsPath = paths.LibsDir()
 	}
 
-	logPath := config.LogPath
-	if logPath == "" {
-		logPath = paths.StudioLogsDir(config.StudioName)
+	logsDir := config.LogPath
+	if logsDir == "" {
+		logsDir = paths.StudioLogsDir(config.StudioName)
 	}
 
 	// Ensure log directory exists
-	if err := os.MkdirAll(logPath, 0755); err != nil {
+	if err := os.MkdirAll(logsDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create log directory: %w", err)
 	}
 
+	// Compute daily log file path
+	logFilePath := filepath.Join(logsDir, "logs-"+time.Now().Format("2006-01-02")+".txt")
+
 	// Set up environment variables
 	result.EnvVars["TENSOR_FUSION_OPERATOR_CONNECTION_INFO"] = config.ConnectionURL
-	result.EnvVars["TF_LOG_PATH"] = logPath
+	result.EnvVars["TF_LOG_PATH"] = logFilePath
 	result.EnvVars["TF_LOG_LEVEL"] = getEnvDefault("TF_LOG_LEVEL", "info")
-	result.EnvVars["TF_ENABLE_LOG"] = getEnvDefault("TF_ENABLE_LOG", "0")
+	result.EnvVars["TF_ENABLE_LOG"] = getEnvDefault("TF_ENABLE_LOG", "1")
 
 	// Add cache path to PATH (for tensor-fusion-worker binary)
-	if config.IsContainer {
-		// In container, cache will be mounted to /opt/gpugo/cache
-		result.EnvVars["PATH"] = "/opt/gpugo/cache:" + os.Getenv("PATH")
-	} else {
+	if !config.IsContainer {
+		// On host, prepend cache path to existing PATH
 		result.EnvVars["PATH"] = cachePath + ":" + os.Getenv("PATH")
 	}
+	// For containers: don't override PATH — this would clobber the image's PATH
+	// (e.g., Python, Node, Java paths). Instead, individual binaries are mounted
+	// directly into /usr/local/bin/ via volume mounts below.
 
 	// Create ld.so.conf file (contains libs directory for LD_LIBRARY_PATH effect)
 	ldConfPath := paths.LDSoConfPath(config.StudioName)
@@ -226,16 +243,33 @@ func SetupGPUEnv(paths *platform.Paths, config *GPUEnvConfig) (*GPUEnvResult, er
 			ReadOnly:      true,
 		})
 
-		// Mount cache directory (for binaries like tensor-fusion-worker if needed)
-		result.VolumeMounts = append(result.VolumeMounts, VolumeMount{
-			HostPath:      cachePath,
-			ContainerPath: "/opt/gpugo/cache",
-			ReadOnly:      true,
-		})
+		// Mount individual binaries to /usr/local/bin/ instead of mounting the
+		// entire cache folder. This avoids overriding the container's PATH and
+		// preserves the image's original PATH configuration.
+		workerPath := filepath.Join(cachePath, "tensor-fusion-worker")
+		if _, err := os.Stat(workerPath); err == nil {
+			result.VolumeMounts = append(result.VolumeMounts, VolumeMount{
+				HostPath:      workerPath,
+				ContainerPath: "/usr/local/bin/tensor-fusion-worker",
+				ReadOnly:      true,
+			})
+		}
+
+		// Mount GPU SMI binary (nvidia-smi / amdsmi) if available
+		if smiName := gpuSMIBinaryName(config.Vendor); smiName != "" {
+			smiPath := filepath.Join(cachePath, "bin", smiName)
+			if _, err := os.Stat(smiPath); err == nil {
+				result.VolumeMounts = append(result.VolumeMounts, VolumeMount{
+					HostPath:      smiPath,
+					ContainerPath: "/usr/local/bin/" + smiName,
+					ReadOnly:      true,
+				})
+			}
+		}
 
 		// Mount logs directory
 		result.VolumeMounts = append(result.VolumeMounts, VolumeMount{
-			HostPath:      logPath,
+			HostPath:      logsDir,
 			ContainerPath: "/var/log/tensor-fusion",
 			ReadOnly:      false,
 		})
@@ -255,7 +289,7 @@ func SetupGPUEnv(paths *platform.Paths, config *GPUEnvConfig) (*GPUEnvResult, er
 		})
 
 		// Update env vars for container paths
-		result.EnvVars["TF_LOG_PATH"] = "/var/log/tensor-fusion"
+		result.EnvVars["TF_LOG_PATH"] = "/var/log/tensor-fusion/logs-" + time.Now().Format("2006-01-02") + ".txt"
 	}
 
 	return result, nil

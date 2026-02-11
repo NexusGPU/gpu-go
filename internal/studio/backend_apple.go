@@ -132,7 +132,7 @@ func (b *AppleContainerBackend) Create(ctx context.Context, opts *CreateOptions)
 		StudioName:     opts.Name,
 		GPUWorkerURL:   gpuWorkerURL,
 		HardwareVendor: opts.HardwareVendor,
-		MountUserHome:  !opts.NoUserVolume,
+		MountUserHome:  false, // /Users is mounted directly into the container
 		SkipFileMounts: true,
 	}
 
@@ -157,6 +157,11 @@ func (b *AppleContainerBackend) Create(ctx context.Context, opts *CreateOptions)
 		args = append(args, "-v", mountOpt)
 	}
 
+	// Mount /Users into container so host files are accessible at the same path
+	if !opts.NoUserVolume {
+		args = append(args, "-v", "/Users:/Users")
+	}
+
 	// Add resource limits
 	if opts.Resources.CPUs > 0 {
 		cpus := int64(math.Ceil(opts.Resources.CPUs))
@@ -166,15 +171,13 @@ func (b *AppleContainerBackend) Create(ctx context.Context, opts *CreateOptions)
 		args = append(args, "--cpus", strconv.FormatInt(cpus, 10))
 	}
 
-	// Set default memory to 1/4 of system memory if not specified
+	// Set default memory to 1/4 of system memory minus 1GB (reserve for VM overhead)
 	memoryLimit := opts.Resources.Memory
 	if memoryLimit == "" {
 		memGB, err := getSystemMemoryGB()
 		if err == nil && memGB > 0 {
-			memAllocated := (memGB + 3) / 4
-			if memAllocated < 1 {
-				memAllocated = 1
-			}
+			// Subtract 1GB for VM overhead
+			memAllocated := max((memGB+3)/4-1, 1)
 			memoryLimit = fmt.Sprintf("%dG", memAllocated)
 		}
 	}

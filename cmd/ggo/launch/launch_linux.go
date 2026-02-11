@@ -148,8 +148,8 @@ func runLaunch(args []string, shareLink, serverURL string, verbose bool) error {
 
 	// Setup log path (consistent with ggo use)
 	studioName := "current-os"
-	logPath := paths.StudioLogsDir(studioName)
-	if err := os.MkdirAll(logPath, 0755); err != nil {
+	logPath := paths.StudioLogFilePath(studioName)
+	if err := os.MkdirAll(filepath.Dir(logPath), 0755); err != nil {
 		klog.Warningf("Failed to create log directory: %v", err)
 	}
 
@@ -192,7 +192,16 @@ func runLaunch(args []string, shareLink, serverURL string, verbose bool) error {
 	env = setEnvVar(env, "TENSOR_FUSION_OPERATOR_CONNECTION_INFO", connectionInfo)
 	env = setEnvVar(env, "TF_LOG_PATH", logPath)
 	env = setEnvVar(env, "TF_LOG_LEVEL", getEnvDefault("TF_LOG_LEVEL", "info"))
-	env = setEnvVar(env, "TF_ENABLE_LOG", getEnvDefault("TF_ENABLE_LOG", "0"))
+	env = setEnvVar(env, "TF_ENABLE_LOG", getEnvDefault("TF_ENABLE_LOG", "1"))
+
+	// Add GPU bin directory to PATH (for nvidia-smi, amdsmi, etc.)
+	binDir := filepath.Join(cacheDir, "bin")
+	existingPath := os.Getenv("PATH")
+	if existingPath != "" {
+		env = setEnvVar(env, "PATH", binDir+":"+existingPath)
+	} else {
+		env = setEnvVar(env, "PATH", binDir)
+	}
 
 	// Build LD_LIBRARY_PATH
 	existingLDPath := os.Getenv("LD_LIBRARY_PATH")

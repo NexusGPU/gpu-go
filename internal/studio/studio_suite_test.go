@@ -2,14 +2,5 @@
 
 package studio
 
-import (
-	"testing"
-
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
-)
-
-func TestStudioGinkgo(t *testing.T) {
-	RegisterFailHandler(Fail)
-	RunSpecs(t, "Studio Suite")
-}
+// Ginkgo suite entrypoint lives in studio_ginkgo_test.go.
+// Keep this darwin file without RunSpecs to avoid duplicate suite execution on macOS.

@@ -457,11 +457,8 @@ Host %s
     UserKnownHostsFile /dev/null
 `, env.Name, hostName, env.SSHHost, env.SSHPort, env.SSHUser)
 
-	// Check if entry already exists
-	if strings.Contains(existingConfig, fmt.Sprintf("Host %s", hostName)) {
-		// Update existing entry by removing old and adding new
-		existingConfig = m.removeSSHConfigEntry(existingConfig, hostName)
-	}
+	// Keep a single entry per studio host by removing any existing one first.
+	existingConfig = m.removeSSHConfigEntry(existingConfig, hostName)
 
 	// Append new entry
 	newConfig := existingConfig + entry
@@ -499,33 +496,48 @@ func (m *Manager) RemoveSSHConfig(envName string) error {
 
 func (m *Manager) removeSSHConfigEntry(config, hostName string) string {
 	lines := strings.Split(config, "\n")
-	var result []string
-	inEntry := false
+	result := make([]string, 0, len(lines))
 
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-
-		// Check if this is the start of our entry
-		if strings.HasPrefix(trimmed, "# GPU Go Studio Environment:") {
-			inEntry = true
-			continue
-		}
-		if strings.HasPrefix(trimmed, "Host "+hostName) {
-			inEntry = true
+	for i := 0; i < len(lines); {
+		trimmed := strings.TrimSpace(lines[i])
+		if !isHostLineFor(trimmed, hostName) {
+			result = append(result, lines[i])
+			i++
 			continue
 		}
 
-		// Check if we're exiting the entry
-		if inEntry && (strings.HasPrefix(trimmed, "Host ") || strings.HasPrefix(trimmed, "# ")) {
-			inEntry = false
+		// Remove a directly associated studio marker comment and optional blank separator.
+		if len(result) > 0 && strings.HasPrefix(strings.TrimSpace(result[len(result)-1]), "# GPU Go Studio Environment:") {
+			result = result[:len(result)-1]
+			if len(result) > 0 && strings.TrimSpace(result[len(result)-1]) == "" {
+				result = result[:len(result)-1]
+			}
 		}
 
-		if !inEntry {
-			result = append(result, line)
+		i++
+		for i < len(lines) {
+			next := strings.TrimSpace(lines[i])
+			if strings.HasPrefix(next, "Host ") || strings.HasPrefix(next, "# GPU Go Studio Environment:") {
+				break
+			}
+			i++
 		}
 	}
 
 	return strings.Join(result, "\n")
+}
+
+func isHostLineFor(trimmedLine, hostName string) bool {
+	fields := strings.Fields(trimmedLine)
+	if len(fields) < 2 || fields[0] != "Host" {
+		return false
+	}
+	for _, host := range fields[1:] {
+		if host == hostName {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Manager) getSSHConfigPath() string {

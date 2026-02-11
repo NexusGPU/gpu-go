@@ -36,7 +36,7 @@ ggo use abc123 --long-term
 | `TENSOR_FUSION_OPERATOR_CONNECTION_INFO` | 远程 GPU 连接信息（必需） |
 | `TF_LOG_LEVEL` | 日志级别，默认 `info` |
 | `TF_ENABLE_LOG` | 启用日志，默认 `1` |
-| `TF_LOG_PATH` | 日志输出路径 |
+| `TF_LOG_PATH` | 日志输出路径（格式：`logs-YYYY-mm-dd.txt`） |
 
 ### Linux 库配置
 

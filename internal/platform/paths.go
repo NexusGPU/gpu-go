@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // Platform constants for runtime.GOOS comparisons
@@ -212,6 +213,14 @@ func (p *Paths) StudioDir() string {
 // All platforms: ~/.gpugo/studio/{name}/logs
 func (p *Paths) StudioLogsDir(name string) string {
 	return filepath.Join(p.StudioDir(), NormalizeName(name), "logs")
+}
+
+// StudioLogFilePath returns the path to the daily log file for a studio
+// Format: ~/.gpugo/studio/{name}/logs/logs-YYYY-mm-dd.txt
+// Caller must ensure the parent directory exists (e.g. via EnsureStudioDirs or MkdirAll on StudioLogsDir)
+func (p *Paths) StudioLogFilePath(name string) string {
+	fileName := "logs-" + time.Now().Format("2006-01-02") + ".txt"
+	return filepath.Join(p.StudioLogsDir(name), fileName)
 }
 
 // StudioConfigDir returns the config directory for a specific studio

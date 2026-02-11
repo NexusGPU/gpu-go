@@ -425,7 +425,7 @@ func (b *ColimaBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 		StudioName:     opts.Name,
 		GPUWorkerURL:   gpuWorkerURL,
 		HardwareVendor: opts.HardwareVendor,
-		MountUserHome:  !opts.NoUserVolume,
+		MountUserHome:  false, // /Users is mounted directly into the container
 	}
 
 	setupResult, err := SetupContainerGPUEnv(ctx, setupConfig)
@@ -449,18 +449,23 @@ func (b *ColimaBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 		args = append(args, "-v", mountOpt)
 	}
 
+	// Mount /Users into container so host files are accessible at the same path
+	if !opts.NoUserVolume && runtime.GOOS == OSDarwin {
+		args = append(args, "-v", "/Users:/Users")
+	}
+
 	// Add resource limits
 	if opts.Resources.CPUs > 0 {
 		args = append(args, "--cpus", fmt.Sprintf("%.2f", opts.Resources.CPUs))
 	}
 
-	// Set default memory to 1/4 of system memory if not specified
+	// Set default memory to 1/4 of system memory minus 1GB (reserve for VM overhead)
 	memoryLimit := opts.Resources.Memory
 	if memoryLimit == "" {
 		memGB, err := getSystemMemoryGB()
 		if err == nil && memGB > 0 {
-			// Calculate 1/4 of system memory (round up)
-			memAllocated := (memGB + 3) / 4 // Round up division
+			// Calculate 1/4 of system memory (round up), then subtract 1GB for VM overhead
+			memAllocated := (memGB+3)/4 - 1
 			if memAllocated < 1 {
 				memAllocated = 1 // Minimum 1GB
 			}
