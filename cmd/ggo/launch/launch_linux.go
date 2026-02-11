@@ -103,6 +103,8 @@ func runLaunch(args []string, shareLink, serverURL string, verbose bool) error {
 		return fmt.Errorf("failed to get share info: %w", err)
 	}
 
+	// Append share code to connection URL for authentication (consistent with ggo use / studio)
+	shareInfo.ConnectionURL = shareInfo.ConnectionURL + "+" + shortCode
 	klog.Infof("Found GPU worker: worker_id=%s vendor=%s connection_url=%s", shareInfo.WorkerID, shareInfo.HardwareVendor, shareInfo.ConnectionURL)
 
 	connectionInfo := shareInfo.ConnectionURL
