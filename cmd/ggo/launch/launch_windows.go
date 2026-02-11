@@ -189,9 +189,10 @@ func runLaunch(args []string, shareLink, serverURL string, verbose bool) error {
 
 	// Get required DLLs based on vendor
 	requiredDLLs := studio.GetWindowsLibraryNames(vendor)
+	libDir := filepath.Join(cacheDir, "libs")
 	missingDLLs := []string{}
 	for _, dll := range requiredDLLs {
-		dllPath := filepath.Join(cacheDir, dll)
+		dllPath := filepath.Join(libDir, dll)
 		if _, err := os.Stat(dllPath); os.IsNotExist(err) {
 			missingDLLs = append(missingDLLs, dll)
 		}
@@ -214,7 +215,7 @@ func runLaunch(args []string, shareLink, serverURL string, verbose bool) error {
 
 	// Set DLL search directory BEFORE launching the process
 	// This ensures our stub DLLs are found before System32
-	if err := SetDllDirectory(cacheDir); err != nil {
+	if err := SetDllDirectory(libDir); err != nil {
 		return fmt.Errorf("failed to set DLL directory: %w", err)
 	}
 
@@ -235,7 +236,7 @@ func runLaunch(args []string, shareLink, serverURL string, verbose bool) error {
 		out.Println()
 	}
 
-	klog.Infof("SetDllDirectory set to: %s", cacheDir)
+	klog.Infof("SetDllDirectory set to: %s", libDir)
 	klog.Infof("Launching: %v", args)
 
 	// Find the executable
