@@ -40,7 +40,11 @@ func readCPUUsageInstant() float64 {
 		klog.V(4).Infof("Failed to open /proc/stat: %v", err)
 		return 0
 	}
-	defer f.Close()
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil {
+			klog.V(4).Infof("Failed to close /proc/stat: %v", closeErr)
+		}
+	}()
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
@@ -78,7 +82,11 @@ func readMemInfo() (int64, int64) {
 		klog.V(4).Infof("Failed to open /proc/meminfo: %v", err)
 		return 0, 0
 	}
-	defer f.Close()
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil {
+			klog.V(4).Infof("Failed to close /proc/meminfo: %v", closeErr)
+		}
+	}()
 
 	var totalKb, availableKb int64
 	scanner := bufio.NewScanner(f)
