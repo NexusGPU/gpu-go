@@ -54,6 +54,8 @@ func ConvertMetricsToGPUMetrics(metrics map[string]*hvapi.GPUUsageMetrics) map[s
 			VRAMUsedMb:  int64(m.MemoryBytes / (1024 * 1024)),
 			Temperature: m.Temperature,
 			PowerUsageW: float64(m.PowerUsage),
+			PCIeRxKB:    m.Rx,
+			PCIeTxKB:    m.Tx,
 		}
 	}
 	return result

@@ -135,6 +135,9 @@ type AgentStatusRequest struct {
 	// License optimization - client reports current license expiration
 	// Server only regenerates if < 10 minutes remaining
 	LicenseExpiration *int64 `json:"license_expiration,omitempty"` // Unix timestamp in milliseconds
+	// Metrics contains InfluxDB v2 line protocol string with GPU/system/worker metrics
+	// Forwarded by the backend to GreptimeDB for time-series storage
+	Metrics string `json:"metrics,omitempty"`
 }
 
 // AgentStatusResponse represents the response from agent status report
@@ -241,6 +244,8 @@ type GPUMetrics struct {
 	VRAMTotalMb int64   `json:"vram_total_mb"`
 	Temperature float64 `json:"temperature"`
 	PowerUsageW float64 `json:"power_usage_w"`
+	PCIeRxKB    float64 `json:"pcie_rx_kb"`
+	PCIeTxKB    float64 `json:"pcie_tx_kb"`
 }
 
 // AgentMetricsRequest represents the request body for agent metrics report

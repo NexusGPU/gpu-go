@@ -386,6 +386,9 @@ components:
             - shutdown
         license_expiration:
           type: integer
+        metrics:
+          type: string
+          description: InfluxDB v2 line protocol string with GPU/system/worker metrics
       required:
         - timestamp
         - gpus
@@ -946,6 +949,9 @@ paths:
                     - shutdown
                 license_expiration:
                   type: integer
+                metrics:
+                  type: string
+                  description: InfluxDB v2 line protocol string with GPU/system/worker metrics
               required:
                 - timestamp
                 - gpus

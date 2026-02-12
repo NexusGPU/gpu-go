@@ -965,12 +965,17 @@ func (a *Agent) reportStatus() error {
 		return err
 	}
 
-	// 6. Send request
+	// 6. Collect metrics (best-effort, never blocks status report)
+	now := time.Now()
+	metricsStr := a.collectMetricsLineProtocol(gpuStatuses, workerStatuses, now)
+
+	// 7. Send request
 	req := &api.AgentStatusRequest{
-		Timestamp:         time.Now(),
+		Timestamp:         now,
 		GPUs:              gpuStatuses,
 		Workers:           workerStatuses,
 		LicenseExpiration: licenseExpiration,
+		Metrics:           metricsStr,
 	}
 
 	resp, err := a.client.ReportAgentStatus(a.ctx, a.agentID, req)
@@ -978,7 +983,7 @@ func (a *Agent) reportStatus() error {
 		return err
 	}
 
-	// 7. Handle response
+	// 8. Handle response
 	a.handleReportResponse(resp)
 
 	return nil
@@ -1266,6 +1271,10 @@ func parseLicenseExpiration(licensePlain string) int64 {
 // The file is located at ~/.gpugo/config/{workerID}_share_codes
 // with one share code per line. Workers read this file for URL-based auth.
 func (a *Agent) writeShareCodes(workerID string, codes []string) error {
+	if len(codes) == 0 {
+		return nil
+	}
+
 	path := filepath.Join(a.paths.ConfigDir(), workerID+"_share_codes")
 
 	// Ensure config directory exists
