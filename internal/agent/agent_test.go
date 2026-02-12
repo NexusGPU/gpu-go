@@ -369,6 +369,10 @@ func (m *mockHypervisorManager) StopWorker(workerUID string) error {
 	return nil
 }
 
+func (m *mockHypervisorManager) UpdateWorkerEnv(workerUID string, env map[string]string) error {
+	return nil
+}
+
 func (m *mockHypervisorManager) GetDeviceMetrics() (map[string]*hvApi.GPUUsageMetrics, error) {
 	return nil, nil
 }

@@ -137,10 +137,18 @@ func (r *Reconciler) reconcile() {
 			} else {
 				added++
 			}
-		} else if r.needsUpdate(desiredInfo, actualWorker) {
-			// Worker exists but config changed (non-status fields), restart it
+		} else if r.needsRestart(desiredInfo, actualWorker) {
+			// Structural change (GPU allocation, executable, args) requires restart
 			if err := r.restartWorker(desiredInfo); err != nil {
 				klog.Errorf("Failed to restart worker: worker_id=%s error=%v", workerID, err)
+			} else {
+				updated++
+			}
+		} else if r.needsEnvUpdate(desiredInfo, actualWorker) {
+			// Env-only change: update in place without restarting the running process.
+			// New env vars take effect on next process restart (crash recovery).
+			if err := r.manager.UpdateWorkerEnv(workerID, desiredInfo.WorkerRunningInfo.Env); err != nil {
+				klog.Errorf("Failed to update worker env: worker_id=%s error=%v", workerID, err)
 			} else {
 				updated++
 			}
@@ -204,8 +212,9 @@ func (r *Reconciler) restartWorker(info *api.WorkerInfo) error {
 	return r.startWorker(info)
 }
 
-// needsUpdate checks if worker config changed (non-status fields only)
-func (r *Reconciler) needsUpdate(desired, actual *api.WorkerInfo) bool {
+// needsRestart checks if structural config changed (GPU allocation, executable, args)
+// that requires stopping and restarting the worker process.
+func (r *Reconciler) needsRestart(desired, actual *api.WorkerInfo) bool {
 	// Check if GPU allocation changed
 	if len(desired.AllocatedDevices) != len(actual.AllocatedDevices) {
 		return true
@@ -238,15 +247,23 @@ func (r *Reconciler) needsUpdate(desired, actual *api.WorkerInfo) bool {
 				return true
 			}
 		}
-		// Check environment variables (including fractional GPU config)
-		if !maps.Equal(desired.WorkerRunningInfo.Env, actual.WorkerRunningInfo.Env) {
-			return true
-		}
 	} else if desired.WorkerRunningInfo != nil || actual.WorkerRunningInfo != nil {
 		// One is nil, the other is not - they differ
 		return true
 	}
 
+	return false
+}
+
+// needsEnvUpdate checks if only environment variables changed.
+// Env changes are applied in place without restarting the running process;
+// the new values take effect on next process restart (crash recovery).
+func (r *Reconciler) needsEnvUpdate(desired, actual *api.WorkerInfo) bool {
+	if desired.WorkerRunningInfo != nil && actual.WorkerRunningInfo != nil {
+		if !maps.Equal(desired.WorkerRunningInfo.Env, actual.WorkerRunningInfo.Env) {
+			return true
+		}
+	}
 	return false
 }
 

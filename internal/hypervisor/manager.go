@@ -29,6 +29,7 @@ type HypervisorManager interface {
 	ListWorkers() []*api.WorkerInfo
 	StartWorker(workerInfo *api.WorkerInfo) error
 	StopWorker(workerUID string) error
+	UpdateWorkerEnv(workerUID string, env map[string]string) error
 	GetDeviceMetrics() (map[string]*api.GPUUsageMetrics, error)
 	GetWorkerAllocation(workerUID string) (*api.WorkerAllocation, bool)
 	RegisterWorkerHandler(handler framework.WorkerChangeHandler) error
@@ -398,6 +399,19 @@ func (m *Manager) StopWorker(workerUID string) error {
 
 	klog.Infof("Worker stopped: worker_uid=%s", workerUID)
 	return nil
+}
+
+// UpdateWorkerEnv updates environment variables for a worker without restarting its process.
+// The new env vars take effect on next process restart (crash recovery).
+func (m *Manager) UpdateWorkerEnv(workerUID string, env map[string]string) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if !m.started {
+		return ErrNotStarted
+	}
+
+	return m.backend.UpdateWorkerEnv(workerUID, env)
 }
 
 // GetWorkerAllocation returns the allocation for a specific worker
