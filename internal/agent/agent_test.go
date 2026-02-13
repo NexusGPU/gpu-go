@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -277,6 +278,70 @@ func TestAgent_ReportStatus(t *testing.T) {
 	assert.Equal(t, 12345, receivedReq.Workers[0].PID)
 }
 
+func TestAgent_ReportStatus_ReadsConnectionFilesEveryTime(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "config")
+	stateDir := filepath.Join(tmpDir, "state")
+	connectionsDir := filepath.Join(tmpDir, "connections")
+	require.NoError(t, os.MkdirAll(connectionsDir, 0755))
+
+	var mu sync.Mutex
+	var receivedReqs []api.AgentStatusRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req api.AgentStatusRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		mu.Lock()
+		receivedReqs = append(receivedReqs, req)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(api.SuccessResponse{Success: true})
+	}))
+	defer server.Close()
+
+	configMgr := config.NewManager(configDir, stateDir)
+	err := configMgr.SaveGPUs([]config.GPUConfig{
+		{GPUID: "GPU-0", GPUIndex: 0, Vendor: "nvidia", Model: "RTX 4090", VRAMMb: 24576},
+	})
+	require.NoError(t, err)
+	err = configMgr.SaveWorkers([]config.WorkerConfig{
+		{WorkerID: "worker_1", GPUIDs: []string{"GPU-0"}, ListenPort: 9001, Enabled: true, Status: "running", PID: 12345},
+	})
+	require.NoError(t, err)
+	err = os.WriteFile(filepath.Join(connectionsDir, "worker_1.txt"), []byte("10.1.1.1,1234,11\n"), 0644)
+	require.NoError(t, err)
+
+	client := api.NewClient(
+		api.WithBaseURL(server.URL),
+		api.WithAgentSecret("gpugo_secret123"),
+	)
+	agent := &Agent{
+		client:         client,
+		config:         configMgr,
+		ctx:            context.Background(),
+		agentID:        "agent_test123",
+		paths:          platform.DefaultPaths().WithConfigDir(configDir),
+		connectionsDir: connectionsDir,
+	}
+
+	err = agent.reportStatus()
+	require.NoError(t, err)
+
+	err = os.WriteFile(filepath.Join(connectionsDir, "worker_1.txt"), []byte("10.2.2.2,5678,22\n"), 0644)
+	require.NoError(t, err)
+	err = agent.reportStatus()
+	require.NoError(t, err)
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Len(t, receivedReqs, 2)
+	require.Len(t, receivedReqs[0].Workers, 1)
+	require.Len(t, receivedReqs[0].Workers[0].Connections, 1)
+	assert.Equal(t, "10.1.1.1", receivedReqs[0].Workers[0].Connections[0].ClientIP)
+	require.Len(t, receivedReqs[1].Workers, 1)
+	require.Len(t, receivedReqs[1].Workers[0].Connections, 1)
+	assert.Equal(t, "10.2.2.2", receivedReqs[1].Workers[0].Connections[0].ClientIP)
+}
+
 func TestAgent_HandleHeartbeatResponse(t *testing.T) {
 	tmpDir := t.TempDir()
 	configDir := filepath.Join(tmpDir, "config")
@@ -490,6 +555,44 @@ func TestAgent_WithHypervisor(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	agent.Stop()
+}
+
+func TestAgent_ConvertToWorkerInfos_IncludesConnectionInfoPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "config")
+	stateDir := filepath.Join(tmpDir, "state")
+
+	configMgr := config.NewManager(configDir, stateDir)
+	cfg := &config.Config{
+		ConfigVersion: 1,
+		AgentID:       "agent_test123",
+		AgentSecret:   "gpugo_secret123",
+		ServerURL:     "http://localhost",
+		License: api.License{
+			Plain:     "test|pro|9999999999",
+			Encrypted: "enc",
+		},
+	}
+	err := configMgr.SaveConfig(cfg)
+	require.NoError(t, err)
+
+	agent := NewAgent(api.NewClient(), configMgr)
+	agent.workerBinaryPath = "/bin/true"
+	agent.connectionsDir = filepath.Join(tmpDir, "connections")
+
+	infos, err := agent.convertToWorkerInfos([]api.WorkerConfig{
+		{
+			WorkerID:   "worker_1",
+			GPUIDs:     []string{"gpu-0"},
+			ListenPort: 9001,
+			Enabled:    true,
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, infos, 1)
+	require.NotNil(t, infos[0].WorkerRunningInfo)
+
+	assert.Equal(t, agent.connectionsDir, infos[0].WorkerRunningInfo.Env[EnvConnectionInfoPath])
 }
 
 func TestAgent_LicenseParsing(t *testing.T) {

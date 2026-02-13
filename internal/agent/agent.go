@@ -446,6 +446,7 @@ func (a *Agent) convertToWorkerInfos(apiWorkers []api.WorkerConfig) ([]*hvApi.Wo
 		envVars["TF_ENABLE_LOG"] = "1"
 		envVars[EnvURLAuth] = "1"
 		envVars[EnvAuthorizedKeyPath] = filepath.Join(a.paths.ConfigDir(), w.WorkerID+"_share_codes")
+		envVars[EnvConnectionInfoPath] = a.connectionsDir
 
 		// Set hard limiter environment variables for Fractional GPU support
 		// TODO: use MIG for partitioned
@@ -1070,7 +1071,7 @@ func (a *Agent) collectWorkerStatus(
 		return a.collectWorkerStatusFromHypervisor(forceRefresh, connectionChanges, currentConnections, gpuChanges)
 	}
 	// Fallback to config-based status
-	return a.collectWorkerStatusFromConfig(forceRefresh, gpuChanges)
+	return a.collectWorkerStatusFromConfig(forceRefresh, currentConnections, gpuChanges)
 }
 
 // collectWorkerStatusFromHypervisor gets worker status from hypervisor
@@ -1162,7 +1163,11 @@ func (a *Agent) collectWorkerStatusFromHypervisor(
 }
 
 // collectWorkerStatusFromConfig gets worker status from local config (fallback)
-func (a *Agent) collectWorkerStatusFromConfig(forceRefresh bool, gpuChanges map[string]bool) ([]api.WorkerStatus, error) {
+func (a *Agent) collectWorkerStatusFromConfig(
+	forceRefresh bool,
+	currentConnections map[string][]string,
+	gpuChanges map[string]bool,
+) ([]api.WorkerStatus, error) {
 	workerConfigs, err := a.config.LoadWorkers()
 	if err != nil {
 		return nil, err
@@ -1179,6 +1184,10 @@ func (a *Agent) collectWorkerStatusFromConfig(forceRefresh bool, gpuChanges map[
 		workerChanged := true
 		connectionChanged := true
 		gpuChanged := forceRefresh || len(gpuChanges) > 0
+		connections := w.Connections
+		if connLines, ok := currentConnections[w.WorkerID]; ok {
+			connections = parseConnectionsToAPI(connLines)
+		}
 
 		gpuIndices := resolveWorkerGPUIndices(w.WorkerID, w.GPUIndices, w.GPUIDs, gpuIndexByID)
 		workerStatuses[i] = api.WorkerStatus{
@@ -1187,7 +1196,7 @@ func (a *Agent) collectWorkerStatusFromConfig(forceRefresh bool, gpuChanges map[
 			PID:               w.PID,
 			GPUIDs:            w.GPUIDs,
 			GPUIndices:        gpuIndices,
-			Connections:       w.Connections,
+			Connections:       connections,
 			WorkerChanged:     &workerChanged,
 			ConnectionChanged: &connectionChanged,
 			GPUChanged:        &gpuChanged,

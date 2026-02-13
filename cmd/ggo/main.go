@@ -10,6 +10,7 @@ import (
 	"github.com/NexusGPU/gpu-go/cmd/ggo/libs"
 	"github.com/NexusGPU/gpu-go/cmd/ggo/share"
 	"github.com/NexusGPU/gpu-go/cmd/ggo/studio"
+	"github.com/NexusGPU/gpu-go/cmd/ggo/system"
 	"github.com/NexusGPU/gpu-go/cmd/ggo/use"
 	"github.com/NexusGPU/gpu-go/cmd/ggo/version"
 	"github.com/NexusGPU/gpu-go/cmd/ggo/worker"
@@ -57,6 +58,8 @@ func init() {
 	rootCmd.AddCommand(deps.NewDepsCmd())
 	rootCmd.AddCommand(studio.NewStudioCmd())
 	rootCmd.AddCommand(libs.NewLibsCmd())
+	rootCmd.AddCommand(system.NewUpdateCmd())
+	rootCmd.AddCommand(system.NewUninstallCmd())
 
 	// Auth commands (login/logout at root level for convenience)
 	rootCmd.AddCommand(auth.NewLoginCmd())

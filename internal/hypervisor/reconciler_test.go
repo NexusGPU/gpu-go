@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/NexusGPU/tensor-fusion/pkg/hypervisor/api"
+	"github.com/NexusGPU/tensor-fusion/pkg/hypervisor/framework"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -81,6 +82,32 @@ func (m *MockManager) GetVendor() string {
 func (m *MockManager) GetStateDir() string {
 	return "/tmp/test-state"
 }
+
+func (m *MockManager) Start() error {
+	return nil
+}
+
+func (m *MockManager) Stop() error {
+	return nil
+}
+
+func (m *MockManager) UpdateWorkerEnv(workerUID string, env map[string]string) error {
+	return nil
+}
+
+func (m *MockManager) GetDeviceMetrics() (map[string]*api.GPUUsageMetrics, error) {
+	return map[string]*api.GPUUsageMetrics{}, nil
+}
+
+func (m *MockManager) GetWorkerAllocation(workerUID string) (*api.WorkerAllocation, bool) {
+	return nil, false
+}
+
+func (m *MockManager) RegisterWorkerHandler(handler framework.WorkerChangeHandler) error {
+	return nil
+}
+
+func (m *MockManager) RegisterDeviceHandler(handler framework.DeviceChangeHandler) {}
 
 // testReconciler wraps Reconciler with a mock manager
 type testReconciler struct {
@@ -282,6 +309,42 @@ func TestReconciler_TriggerReconcile(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("TriggerReconcile should send signal to channel")
 	}
+}
+
+func TestReconciler_RequestWorkerRestarts(t *testing.T) {
+	mockMgr := NewMockManager()
+
+	worker := &api.WorkerInfo{
+		WorkerUID:        "worker-1",
+		AllocatedDevices: []string{"gpu-0"},
+		WorkerRunningInfo: &api.WorkerRunningInfo{
+			Executable: "remote-gpu-worker",
+			Args:       []string{"-p", "9001"},
+			Env:        map[string]string{"TF_LICENSE": "license"},
+		},
+	}
+	mockMgr.workers[worker.WorkerUID] = worker
+
+	r := NewReconciler(ReconcilerConfig{Manager: mockMgr})
+	r.SetDesiredWorkers([]*api.WorkerInfo{worker})
+
+	// Baseline reconcile should not restart.
+	r.reconcile()
+	assert.Equal(t, 0, mockMgr.startedCount)
+	assert.Equal(t, 0, mockMgr.stoppedCount)
+
+	// Request explicit restart and verify one restart happens.
+	queued := r.RequestWorkerRestarts([]string{"worker-1", "worker-1"})
+	assert.Equal(t, 1, queued)
+
+	r.reconcile()
+	assert.Equal(t, 1, mockMgr.startedCount)
+	assert.Equal(t, 1, mockMgr.stoppedCount)
+
+	// Force-restart request should be consumed after success.
+	r.reconcile()
+	assert.Equal(t, 1, mockMgr.startedCount)
+	assert.Equal(t, 1, mockMgr.stoppedCount)
 }
 
 func TestReconcilerStatus_String(t *testing.T) {

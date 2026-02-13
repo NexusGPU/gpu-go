@@ -20,6 +20,7 @@ type Reconciler struct {
 	cancel          context.CancelFunc
 	reconcileSignal chan struct{}
 	desiredWorkers  map[string]*api.WorkerInfo
+	forceRestarts   map[string]struct{}
 
 	// Callbacks for status updates
 	onWorkerStarted     func(workerID string)
@@ -47,6 +48,7 @@ func NewReconciler(cfg ReconcilerConfig) *Reconciler {
 		cancel:              cancel,
 		reconcileSignal:     make(chan struct{}, 1),
 		desiredWorkers:      make(map[string]*api.WorkerInfo),
+		forceRestarts:       make(map[string]struct{}),
 		onWorkerStarted:     cfg.OnWorkerStarted,
 		onWorkerStopped:     cfg.OnWorkerStopped,
 		onReconcileComplete: cfg.OnReconcileComplete,
@@ -93,6 +95,30 @@ func (r *Reconciler) TriggerReconcile() {
 	}
 }
 
+// RequestWorkerRestarts queues explicit worker restart requests and triggers reconciliation.
+// Returns the number of newly queued workers.
+func (r *Reconciler) RequestWorkerRestarts(workerIDs []string) int {
+	r.mu.Lock()
+	queued := 0
+	for _, workerID := range workerIDs {
+		if workerID == "" {
+			continue
+		}
+		if _, exists := r.forceRestarts[workerID]; exists {
+			continue
+		}
+		r.forceRestarts[workerID] = struct{}{}
+		queued++
+	}
+	r.mu.Unlock()
+
+	if queued > 0 {
+		r.TriggerReconcile()
+	}
+
+	return queued
+}
+
 func (r *Reconciler) reconcileLoop() {
 	// Initial reconciliation
 	r.reconcile()
@@ -113,10 +139,14 @@ func (r *Reconciler) reconcileLoop() {
 }
 
 func (r *Reconciler) reconcile() {
-	r.mu.RLock()
+	r.mu.Lock()
 	desired := make(map[string]*api.WorkerInfo, len(r.desiredWorkers))
 	maps.Copy(desired, r.desiredWorkers)
-	r.mu.RUnlock()
+	forceRestarts := make(map[string]struct{}, len(r.forceRestarts))
+	maps.Copy(forceRestarts, r.forceRestarts)
+	// Drain current restart requests; requests arriving during reconcile are queued for next cycle.
+	r.forceRestarts = make(map[string]struct{}, len(r.forceRestarts))
+	r.mu.Unlock()
 
 	// Get actual workers from hypervisor manager (SSoT)
 	actual := r.manager.ListWorkers()
@@ -126,21 +156,32 @@ func (r *Reconciler) reconcile() {
 	}
 
 	var added, removed, updated int
+	retryRestarts := make(map[string]struct{})
 
 	// 1. Find workers to start (in desired but not in actual)
 	for workerID, desiredInfo := range desired {
 		actualWorker, exists := actualMap[workerID]
+		_, forceRestart := forceRestarts[workerID]
 		if !exists {
 			// Worker doesn't exist, start it
 			if err := r.startWorker(desiredInfo); err != nil {
 				klog.Errorf("Failed to start worker: worker_id=%s error=%v", workerID, err)
+				if forceRestart {
+					retryRestarts[workerID] = struct{}{}
+				}
 			} else {
 				added++
 			}
-		} else if r.needsRestart(desiredInfo, actualWorker) {
+		} else if forceRestart || r.needsRestart(desiredInfo, actualWorker) {
+			if forceRestart {
+				klog.Infof("Force restart requested for worker: worker_id=%s", workerID)
+			}
 			// Structural change (GPU allocation, executable, args) requires restart
 			if err := r.restartWorker(desiredInfo); err != nil {
 				klog.Errorf("Failed to restart worker: worker_id=%s error=%v", workerID, err)
+				if forceRestart {
+					retryRestarts[workerID] = struct{}{}
+				}
 			} else {
 				updated++
 			}
@@ -164,6 +205,14 @@ func (r *Reconciler) reconcile() {
 				removed++
 			}
 		}
+	}
+
+	if len(retryRestarts) > 0 {
+		r.mu.Lock()
+		for workerID := range retryRestarts {
+			r.forceRestarts[workerID] = struct{}{}
+		}
+		r.mu.Unlock()
 	}
 
 	if added > 0 || removed > 0 || updated > 0 {
