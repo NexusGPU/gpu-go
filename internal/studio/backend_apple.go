@@ -132,6 +132,7 @@ func (b *AppleContainerBackend) Create(ctx context.Context, opts *CreateOptions)
 		StudioName:     opts.Name,
 		GPUWorkerURL:   gpuWorkerURL,
 		HardwareVendor: opts.HardwareVendor,
+		Platform:       opts.Platform,
 		MountUserHome:  false, // /Users is mounted directly into the container
 		SkipFileMounts: true,
 	}

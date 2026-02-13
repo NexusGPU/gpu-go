@@ -72,8 +72,17 @@ func (p *Paths) LibDir() string {
 // This is separate from CacheDir which contains all downloaded files (including binaries)
 // The libs directory is used for LD_LIBRARY_PATH, ld.so.conf, and ld.so.preload
 // All platforms: ~/.gpugo/cache/libs (or CacheDir/libs)
+// Used by agent/worker which always runs on the native host architecture.
 func (p *Paths) LibsDir() string {
 	return filepath.Join(p.cacheDir, "libs")
+}
+
+// LibsDirForPlatform returns the arch-specific libs directory for a given OS and architecture.
+// This is used by studio/use/launch which may download libraries for a different platform
+// (e.g., linux/amd64 libs on an arm64 Mac).
+// Layout: ~/.gpugo/cache/libs/{os}-{arch} (e.g., ~/.gpugo/cache/libs/linux-amd64)
+func (p *Paths) LibsDirForPlatform(targetOS, arch string) string {
+	return filepath.Join(p.cacheDir, "libs", targetOS+"-"+arch)
 }
 
 // BinDir returns the directory for binaries

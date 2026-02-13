@@ -661,15 +661,25 @@ func (m *Manager) ComputeUpdateDiff() (*UpdateDiff, error) {
 	return diff, nil
 }
 
-// DownloadLibrary downloads a library to the cache directory
+// DownloadLibrary downloads a library to the default (flat) libs directory
 func (m *Manager) DownloadLibrary(ctx context.Context, lib Library, progressFn func(downloaded, total int64)) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return m.downloadLibraryUnsafe(ctx, lib, progressFn)
+	return m.downloadLibraryToDir(ctx, lib, m.paths.LibsDir(), progressFn)
 }
 
-func (m *Manager) downloadLibraryUnsafe(ctx context.Context, lib Library, progressFn func(downloaded, total int64)) error {
+// DownloadLibraryToDir downloads a library to a specific libs directory.
+func (m *Manager) DownloadLibraryToDir(ctx context.Context, lib Library, libsDir string, progressFn func(downloaded, total int64)) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.downloadLibraryToDir(ctx, lib, libsDir, progressFn)
+}
+
+// downloadLibraryToDir downloads a library to a specific libs directory.
+// Shared libraries (.so/.dll) go to libsDir; binaries go to cache root.
+func (m *Manager) downloadLibraryToDir(ctx context.Context, lib Library, libsDir string, progressFn func(downloaded, total int64)) error {
 	// Ensure cache directory exists
 	cacheDir := m.paths.CacheDir()
 	if err := os.MkdirAll(cacheDir, 0755); err != nil {
@@ -677,13 +687,12 @@ func (m *Manager) downloadLibraryUnsafe(ctx context.Context, lib Library, progre
 	}
 
 	// Ensure libs directory exists for shared libraries
-	libsDir := m.paths.LibsDir()
 	if err := os.MkdirAll(libsDir, 0755); err != nil {
 		return fmt.Errorf("failed to create libs directory: %w", err)
 	}
 
 	// Destination path - shared libraries go to libs dir, binaries to cache dir
-	destPath := m.GetLibraryPath(lib.Name)
+	destPath := m.GetLibraryPathInDir(lib.Name, libsDir)
 	tmpPath := destPath + ".tmp"
 
 	// Check if already downloaded with correct version
@@ -866,7 +875,7 @@ func (m *Manager) DownloadAllRequired(ctx context.Context, progressFn func(lib L
 			}
 		}
 
-		if err := m.downloadLibraryUnsafe(ctx, lib, libProgressFn); err != nil {
+		if err := m.downloadLibraryToDir(ctx, lib, m.paths.LibsDir(), libProgressFn); err != nil {
 			result.Status = DownloadStatusFailed
 			result.Error = err.Error()
 			klog.Errorf("Failed to download library: name=%s error=%v", lib.Name, err)
@@ -913,6 +922,15 @@ func (m *Manager) verifyLibraryUnsafe(path, expectedHash string) bool {
 func (m *Manager) GetLibraryPath(name string) string {
 	if isSharedLibrary(name) {
 		return filepath.Join(m.paths.LibsDir(), name)
+	}
+	return filepath.Join(m.paths.CacheDir(), name)
+}
+
+// GetLibraryPathInDir returns the path to a library in a specific libs directory.
+// For shared libraries, uses the given libsDir; for binaries, uses cache root.
+func (m *Manager) GetLibraryPathInDir(name string, libsDir string) string {
+	if isSharedLibrary(name) {
+		return filepath.Join(libsDir, name)
 	}
 	return filepath.Join(m.paths.CacheDir(), name)
 }
@@ -1115,9 +1133,28 @@ func (m *Manager) EnsureLibrariesByTypes(ctx context.Context, libTypes []string,
 
 // EnsureLibrariesByTypesForPlatform ensures ALL libraries of the specified types exist and are downloaded for a specific platform
 // targetOS and targetArch specify the target platform (e.g., "linux", "arm64")
-// If both are empty, uses the current platform
-// This is useful when running on macOS but needing Linux libraries for containers
+// If both are empty, uses the current platform and the flat libs directory (agent/worker path).
+// If targetOS is specified, uses arch-specific subdirectory (e.g., libs/linux-amd64/) to avoid
+// collisions between different architectures (studio/use/launch path).
 func (m *Manager) EnsureLibrariesByTypesForPlatform(ctx context.Context, libTypes []string, vendorSlug, targetOS, targetArch string, progressFn func(lib Library, downloaded, total int64)) ([]Library, error) {
+	// Resolve effective platform values
+	effectiveOS := targetOS
+	effectiveArch := targetArch
+	if effectiveOS == "" {
+		effectiveOS = runtime.GOOS
+	}
+	if effectiveArch == "" {
+		effectiveArch = runtime.GOARCH
+	}
+
+	// Determine the libs directory:
+	// - If targetOS was explicitly specified, use arch-specific subdir (studio/use/launch)
+	// - Otherwise, use flat libs dir (agent/worker)
+	libsDir := m.paths.LibsDir()
+	if targetOS != "" {
+		libsDir = m.paths.LibsDirForPlatform(effectiveOS, effectiveArch)
+	}
+
 	// Ensure deps manifest exists and is up to date for the target platform
 	if err := m.ensureDepsManifestForPlatform(ctx, targetOS, targetArch); err != nil {
 		return nil, err
@@ -1167,7 +1204,7 @@ func (m *Manager) EnsureLibrariesByTypesForPlatform(ctx context.Context, libType
 	var toDownload []Library
 
 	for _, lib := range targetLibs {
-		filePath := m.GetLibraryPath(lib.Name)
+		filePath := m.GetLibraryPathInDir(lib.Name, libsDir)
 		downloadedLib, exists := downloaded.Libraries[lib.Key()]
 
 		needsDownload := false
@@ -1186,7 +1223,7 @@ func (m *Manager) EnsureLibrariesByTypesForPlatform(ctx context.Context, libType
 		}
 	}
 
-	klog.V(4).Infof("Libraries to download: %d out of %d total (libs will go to: %s)", len(toDownload), len(targetLibs), m.paths.LibsDir())
+	klog.V(4).Infof("Libraries to download: %d out of %d total (libs will go to: %s)", len(toDownload), len(targetLibs), libsDir)
 
 	// Download missing libraries
 	for _, lib := range toDownload {
@@ -1196,8 +1233,8 @@ func (m *Manager) EnsureLibrariesByTypesForPlatform(ctx context.Context, libType
 			}
 		}
 
-		klog.Infof("Downloading library: name=%s version=%s type=%s", lib.Name, lib.Version, lib.Type)
-		if err := m.DownloadLibrary(ctx, lib, libProgressFn); err != nil {
+		klog.Infof("Downloading library: name=%s version=%s type=%s to=%s", lib.Name, lib.Version, lib.Type, libsDir)
+		if err := m.DownloadLibraryToDir(ctx, lib, libsDir, libProgressFn); err != nil {
 			return nil, fmt.Errorf("failed to download library %s: %w", lib.Name, err)
 		}
 	}

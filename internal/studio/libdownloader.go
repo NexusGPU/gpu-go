@@ -64,10 +64,10 @@ func DetectArchitecture() Architecture {
 
 	// Normalize architecture names
 	switch arch.Arch {
-	case "amd64":
-		arch.Arch = "amd64"
-	case "arm64":
-		arch.Arch = "arm64"
+	case ArchAmd64:
+		arch.Arch = ArchAmd64
+	case ArchArm64:
+		arch.Arch = ArchArm64
 	case "386":
 		arch.Arch = "386"
 	default:

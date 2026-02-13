@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/NexusGPU/gpu-go/internal/deps"
@@ -21,6 +20,10 @@ type ContainerSetupConfig struct {
 	GPUWorkerURL string
 	// HardwareVendor is the GPU vendor (nvidia, amd, hygon)
 	HardwareVendor string
+	// Platform is the container platform (e.g., "linux/amd64", "linux/arm64")
+	// Used to determine which arch-specific libs to download and mount.
+	// If empty, defaults to linux/amd64.
+	Platform string
 	// MountUserHome indicates whether to mount the user's home directory
 	MountUserHome bool
 	// SkipSSHMounts disables mounting SSH key files into the container
@@ -43,7 +46,7 @@ type ContainerSetupResult struct {
 
 // SetupContainerGPUEnv sets up the GPU environment for a container
 // This performs the same setup as `ggo use` does for Linux:
-// 1. Downloads GPU client libraries for Linux (using host CPU arch)
+// 1. Downloads GPU client libraries for Linux (using target platform arch)
 // 2. Sets up GPU environment (env vars, ld.so.preload, ld.so.conf.d)
 // 3. Optionally mounts user home directory
 func SetupContainerGPUEnv(ctx context.Context, config *ContainerSetupConfig) (*ContainerSetupResult, error) {
@@ -56,10 +59,20 @@ func SetupContainerGPUEnv(ctx context.Context, config *ContainerSetupConfig) (*C
 	normalizedName := platform.NormalizeName(config.StudioName)
 	vendor := ParseVendor(config.HardwareVendor)
 
+	// Parse target arch from platform string (e.g., "linux/amd64" → "amd64")
+	targetArch := "amd64" // default
+	if config.Platform != "" {
+		if parts := strings.SplitN(config.Platform, "/", 2); len(parts) == 2 {
+			targetArch = parts[1]
+		}
+	}
+	// Arch-specific libs directory (e.g., ~/.gpugo/cache/libs/linux-amd64/)
+	libsDir := paths.LibsDirForPlatform("linux", targetArch)
+
 	// Step 1: Download GPU client libraries for Linux (container target)
-	// Libraries are downloaded for Linux with host CPU architecture
+	// Libraries are downloaded for Linux with the target CPU architecture
 	if config.GPUWorkerURL != "" {
-		if err := ensureGPUClientLibraries(ctx, vendor); err != nil {
+		if err := ensureGPUClientLibraries(ctx, vendor, targetArch); err != nil {
 			klog.Warningf("Failed to download GPU client libraries: %v (continuing anyway)", err)
 		} else {
 			result.LibrariesDownloaded = true
@@ -72,6 +85,7 @@ func SetupContainerGPUEnv(ctx context.Context, config *ContainerSetupConfig) (*C
 			Vendor:        vendor,
 			ConnectionURL: config.GPUWorkerURL,
 			CachePath:     paths.CacheDir(),
+			LibsPath:      libsDir,
 			LogPath:       paths.StudioLogsDir(normalizedName),
 			StudioName:    normalizedName,
 			IsContainer:   true,
@@ -89,7 +103,7 @@ func SetupContainerGPUEnv(ctx context.Context, config *ContainerSetupConfig) (*C
 
 		if config.SkipFileMounts {
 			result.EnvVars["LD_LIBRARY_PATH"] = "/opt/gpugo/libs"
-			if preload := buildContainerLDPreload(paths.LibsDir(), vendor); preload != "" {
+			if preload := buildContainerLDPreload(libsDir, vendor); preload != "" {
 				result.EnvVars["LD_PRELOAD"] = preload
 			}
 		}
@@ -134,7 +148,7 @@ func SetupContainerGPUEnv(ctx context.Context, config *ContainerSetupConfig) (*C
 
 	// Step 5: Download and mount GPU binary (like nvidia-smi) to /usr/local/bin/
 	if !config.SkipFileMounts && config.GPUWorkerURL != "" && config.HardwareVendor != "" {
-		gpuBinMount, err := ensureAndMountGPUBinary(ctx, paths, config.HardwareVendor)
+		gpuBinMount, err := ensureAndMountGPUBinary(ctx, paths, config.HardwareVendor, targetArch)
 		if err != nil {
 			klog.Warningf("Failed to setup GPU binary mount: %v (continuing without it)", err)
 		} else if gpuBinMount != nil {
@@ -152,9 +166,9 @@ func SetupContainerGPUEnv(ctx context.Context, config *ContainerSetupConfig) (*C
 
 // ensureAndMountGPUBinary downloads GPU binary (like nvidia-smi) and returns a volume mount
 // The binary is mounted to /usr/local/bin/ in the container
-func ensureAndMountGPUBinary(ctx context.Context, paths *platform.Paths, vendorSlug string) (*VolumeMount, error) {
-	// Studios run in Linux containers, so download Linux binary with host CPU arch
-	binPath, err := deps.EnsureGPUBinaryForPlatform(ctx, paths, vendorSlug, "linux", runtime.GOARCH)
+func ensureAndMountGPUBinary(ctx context.Context, paths *platform.Paths, vendorSlug, targetArch string) (*VolumeMount, error) {
+	// Studios run in Linux containers, so download Linux binary with target CPU arch
+	binPath, err := deps.EnsureGPUBinaryForPlatform(ctx, paths, vendorSlug, "linux", targetArch)
 	if err != nil {
 		return nil, fmt.Errorf("failed to ensure GPU binary: %w", err)
 	}
@@ -180,8 +194,8 @@ func ensureAndMountGPUBinary(ctx context.Context, paths *platform.Paths, vendorS
 }
 
 // ensureGPUClientLibraries downloads GPU client libraries for Linux containers
-// Libraries are downloaded for Linux platform with the current host CPU architecture
-func ensureGPUClientLibraries(ctx context.Context, vendor GPUVendor) error {
+// Libraries are downloaded for Linux platform with the specified target CPU architecture
+func ensureGPUClientLibraries(ctx context.Context, vendor GPUVendor, targetArch string) error {
 	depsMgr := deps.NewManager()
 
 	// Target library types needed for GPU client functionality
@@ -198,11 +212,11 @@ func ensureGPUClientLibraries(ctx context.Context, vendor GPUVendor) error {
 		vendorSlug = "hygon"
 	}
 
-	klog.Infof("Downloading GPU client libraries for %s (linux/%s)...", vendorSlug, runtime.GOARCH)
+	klog.Infof("Downloading GPU client libraries for %s (linux/%s)...", vendorSlug, targetArch)
 
 	// Studios run in Linux containers, so we always download Linux libraries
-	// CPU architecture matches the host (arm64 on Apple Silicon, amd64 on Intel/AMD)
-	_, err := depsMgr.EnsureLibrariesByTypesForPlatform(ctx, targetTypes, vendorSlug, "linux", "", nil)
+	// Use the specified target architecture from the platform flag
+	_, err := depsMgr.EnsureLibrariesByTypesForPlatform(ctx, targetTypes, vendorSlug, "linux", targetArch, nil)
 	if err != nil {
 		return fmt.Errorf("failed to ensure GPU client libraries: %w", err)
 	}

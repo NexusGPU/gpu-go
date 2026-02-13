@@ -425,6 +425,7 @@ func (b *ColimaBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 		StudioName:     opts.Name,
 		GPUWorkerURL:   gpuWorkerURL,
 		HardwareVendor: opts.HardwareVendor,
+		Platform:       opts.Platform,
 		MountUserHome:  false, // /Users is mounted directly into the container
 	}
 

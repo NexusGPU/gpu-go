@@ -223,7 +223,7 @@ Examples:
 	cmd.Flags().StringVar(&dockerHost, "docker-host", "", "Custom Docker socket path (e.g., unix:///path/to/docker.sock)")
 	cmd.Flags().StringArrayVarP(&command, "command", "c", nil, "Container startup command or ENTRYPOINT args (can be specified multiple times)")
 	cmd.Flags().StringVar(&endpoint, "endpoint", "", "Override GPU worker endpoint URL")
-	cmd.Flags().StringVar(&platform, "platform", "", "Container image platform (e.g., linux/amd64, linux/arm64). Default: auto-detect from VM/host")
+	cmd.Flags().StringVar(&platform, "platform", "", "Container image platform (e.g., linux/amd64, linux/arm64). Default: linux/amd64")
 
 	return cmd
 }
@@ -253,9 +253,17 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		klog.Infof("Resolved share link: worker_id=%s vendor=%s connection_url=%s",
 			shareInfo.WorkerID, shareInfo.HardwareVendor, shareInfo.ConnectionURL)
 
+		// Determine target arch from platform flag (default: amd64)
+		targetArch := "amd64"
+		if platform != "" {
+			if parts := strings.SplitN(platform, "/", 2); len(parts) == 2 {
+				targetArch = parts[1]
+			}
+		}
+
 		// Download required GPU client libraries before creating studio
 		// Filter by vendor from share info to avoid downloading unnecessary libraries
-		if err := ensureRemoteGPUClientLibs(ctx, out, shareInfo.HardwareVendor); err != nil {
+		if err := ensureRemoteGPUClientLibs(ctx, out, shareInfo.HardwareVendor, targetArch); err != nil {
 			cmd.SilenceUsage = true
 			klog.Errorf("Failed to ensure GPU client libraries: error=%v", err)
 			return fmt.Errorf("failed to download GPU client libraries: %w", err)
@@ -307,16 +315,16 @@ func runCreate(cmd *cobra.Command, args []string) error {
 
 // ensureRemoteGPUClientLibs downloads remote-gpu-client libraries if not already present
 // vendorSlug filters by vendor (e.g., "nvidia", "amd") to avoid downloading unnecessary libraries
+// targetArch specifies the CPU architecture (e.g., "amd64", "arm64") for the target container platform
 // Note: Studio environments run in Linux containers, so we always download Linux libraries
-// using the current CPU architecture (arm64 or amd64)
-func ensureRemoteGPUClientLibs(ctx context.Context, out *tui.Output, vendorSlug string) error {
+func ensureRemoteGPUClientLibs(ctx context.Context, out *tui.Output, vendorSlug, targetArch string) error {
 	depsMgr := deps.NewManager()
 
 	// Target library types that are needed for GPU client functionality
 	targetTypes := []string{deps.LibraryTypeRemoteGPUClient, deps.LibraryTypeVGPULibrary}
 
 	if !out.IsJSON() {
-		out.Printf("Downloading GPU client libraries for %s...\n", vendorSlug)
+		out.Printf("Downloading GPU client libraries for %s (linux/%s)...\n", vendorSlug, targetArch)
 	}
 
 	progressFn := func(lib deps.Library, downloaded, total int64) {
@@ -326,9 +334,9 @@ func ensureRemoteGPUClientLibs(ctx context.Context, out *tui.Output, vendorSlug 
 		}
 	}
 
-	// Studio environments always run in Linux containers, so we need Linux libraries
-	// Use current CPU architecture (arm64/amd64) since container arch matches host
-	libs, err := depsMgr.EnsureLibrariesByTypesForPlatform(ctx, targetTypes, vendorSlug, "linux", "", progressFn)
+	// Studio environments always run in Linux containers
+	// Download libraries for the specified target architecture
+	libs, err := depsMgr.EnsureLibrariesByTypesForPlatform(ctx, targetTypes, vendorSlug, "linux", targetArch, progressFn)
 	if err != nil {
 		return fmt.Errorf("failed to ensure GPU client libraries: %w", err)
 	}
@@ -396,6 +404,12 @@ func buildCreateOptions(name string, shareInfo *api.SharePublicInfo) (*studio.Cr
 		}
 	}
 
+	// Default platform to linux/amd64 for studio containers
+	effectivePlatform := platform
+	if effectivePlatform == "" {
+		effectivePlatform = "linux/amd64"
+	}
+
 	return &studio.CreateOptions{
 		Name:           name,
 		Mode:           studioMode,
@@ -412,7 +426,7 @@ func buildCreateOptions(name string, shareInfo *api.SharePublicInfo) (*studio.Cr
 		},
 		Command:     command,
 		Endpoint:    endpointOverride,
-		Platform:    platform,
+		Platform:    effectivePlatform,
 		UseLocalGPU: gpuWorkerURL == "" && (studioMode == studio.ModeDocker || studioMode == studio.ModeWSL || studioMode == studio.ModeAuto),
 	}, nil
 }

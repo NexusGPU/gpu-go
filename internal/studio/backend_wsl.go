@@ -266,6 +266,7 @@ func (b *WSLBackend) Create(ctx context.Context, opts *CreateOptions) (*Environm
 		StudioName:     opts.Name,
 		GPUWorkerURL:   gpuWorkerURL,
 		HardwareVendor: opts.HardwareVendor,
+		Platform:       opts.Platform,
 		MountUserHome:  !opts.NoUserVolume,
 	}
 
