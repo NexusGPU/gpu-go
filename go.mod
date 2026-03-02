@@ -3,7 +3,7 @@ module github.com/NexusGPU/gpu-go
 go 1.25.5
 
 require (
-	github.com/NexusGPU/tensor-fusion v1.54.7-0.20260226063701-3c0ad9762c0c
+	github.com/NexusGPU/tensor-fusion v1.54.7-0.20260227024749-0a23e2509871
 	github.com/NexusGPU/tensor-fusion/api v0.1.2
 	github.com/blang/semver/v4 v4.0.0
 	github.com/charmbracelet/lipgloss v1.1.0
