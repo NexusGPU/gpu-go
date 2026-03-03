@@ -196,40 +196,62 @@ function Register-Agent {
 
 function Setup-WindowsService {
     param([string]$BinaryPath)
-    
+
     Write-Info ""
     Write-Info "Setting up Windows scheduled task for auto-start..."
-    
+
     # Remove existing task if exists
     $existingTask = Get-ScheduledTask -TaskName $TASK_NAME -ErrorAction SilentlyContinue
     if ($existingTask) {
         Write-Info "Removing existing scheduled task..."
         Unregister-ScheduledTask -TaskName $TASK_NAME -Confirm:$false
     }
-    
+
+    # Capture the registering user's home directory so the task can find config/cache
+    # even when running without an interactive session.
+    $userHome = $env:USERPROFILE
+    $configDir = Join-Path $userHome ".gpugo\config"
+    $stateDir  = Join-Path $userHome ".gpugo\state"
+    $cacheDir  = Join-Path $userHome ".gpugo\cache"
+
+    # Pass explicit paths so the agent resolves files under the registering user's
+    # profile regardless of which account the scheduled task runs as.
+    $agentArgs = "agent start --config-dir `"$configDir`" --state-dir `"$stateDir`""
+
     # Create scheduled task for auto-start at system startup
-    $action = New-ScheduledTaskAction -Execute $BinaryPath -Argument "agent start"
-    
+    $action = New-ScheduledTaskAction -Execute $BinaryPath -Argument $agentArgs
+
+    # Environment variable so DownloadOrFindAccelerator and deps manager
+    # locate cached libraries in the registering user's cache directory.
+    $envSetting = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+
     # Trigger at system startup
     $trigger = New-ScheduledTaskTrigger -AtStartup
-    
-    # Run as SYSTEM with highest privileges
-    $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-    
-    # Settings
-    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
-    
+
+    # Run as the current (registering) user via S4U logon so the task can access
+    # user-profile paths without requiring the user to be interactively logged in.
+    # S4U does not store a password and still uses the user's profile environment.
+    $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType S4U -RunLevel Highest
+
     # Register the task
-    Register-ScheduledTask -TaskName $TASK_NAME -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description "GPU Go Agent - GPU Sharing Service" | Out-Null
-    
+    Register-ScheduledTask -TaskName $TASK_NAME -Action $action -Trigger $trigger -Principal $principal -Settings $envSetting -Description "GPU Go Agent - GPU Sharing Service" | Out-Null
+
+    # Persist GGO_CACHE_DIR as a machine-level environment variable so the
+    # scheduled task can locate cached libraries when running without an
+    # interactive session. Machine-level env vars are inherited by all processes.
+    [Environment]::SetEnvironmentVariable("GGO_CACHE_DIR", $cacheDir, "Machine")
+    $env:GGO_CACHE_DIR = $cacheDir
+
     Write-Info "Scheduled task '$TASK_NAME' created successfully!"
-    
+
     # Start the task immediately
     Write-Info "Starting GPU Go agent..."
     Start-ScheduledTask -TaskName $TASK_NAME
-    
-    Start-Sleep -Seconds 2
-    
+
+    # Allow the agent a few seconds to initialise (library load + API handshake)
+    Start-Sleep -Seconds 5
+
     $taskInfo = Get-ScheduledTask -TaskName $TASK_NAME
     if ($taskInfo.State -eq "Running") {
         Write-Info "Agent started successfully!"
@@ -327,7 +349,7 @@ function Install-Ggo {
         # Add to PATH (system-wide if admin, user otherwise)
         if ($AddToPath) {
             if (Test-Administrator) {
-                Add-ToSystemPath -Directory $InstallDir
+                $null = Add-ToSystemPath -Directory $InstallDir
             } else {
                 $currentPath = [Environment]::GetEnvironmentVariable("PATH", "User")
                 if ($currentPath -notlike "*$InstallDir*") {
@@ -360,10 +382,10 @@ function Install-Ggo {
             Write-Host "==========================================" -ForegroundColor Yellow
             
             # Register agent
-            Register-Agent -BinaryPath $destPath -AgentToken $Token
-            
+            $null = Register-Agent -BinaryPath $destPath -AgentToken $Token
+
             # Setup Windows service
-            Setup-WindowsService -BinaryPath $destPath
+            $null = Setup-WindowsService -BinaryPath $destPath
             
             Write-Host ""
             Write-Host "==========================================" -ForegroundColor Green

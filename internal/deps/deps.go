@@ -786,6 +786,14 @@ func (m *Manager) downloadLibraryToDir(ctx context.Context, lib Library, libsDir
 		}
 	}
 
+	// On Windows, remove the Zone.Identifier alternate data stream that marks
+	// files as "downloaded from the internet". Without this, SmartScreen or
+	// other security prompts may appear when the binary is executed from a
+	// non-interactive session (e.g., scheduled task), silently blocking the process.
+	if platform.IsWindows() {
+		_ = os.Remove(destPath + ":Zone.Identifier")
+	}
+
 	// Create versioned symlinks for .so files (e.g., libcuda.so.1 -> libcuda.so)
 	if isSharedLibrary(lib.Name) && !platform.IsWindows() {
 		if err := createVersionedSymlinks(destPath, lib.Name); err != nil {

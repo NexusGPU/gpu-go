@@ -210,7 +210,7 @@ export class CLIDownloader {
 
         // 2. Check system PATH
         try {
-            await exec('ggo --version');
+            await exec('ggo version');
             Logger.log('CLI found in system PATH');
             return 'ggo';
         } catch {
