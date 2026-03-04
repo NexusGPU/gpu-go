@@ -100,6 +100,8 @@ type GPUStatus struct {
 // ConnectionInfo represents client connection information
 type ConnectionInfo struct {
 	ClientIP    string    `json:"client_ip"`
+	ClientPort  int       `json:"client_port,omitempty"`
+	ClientPID   int       `json:"client_pid,omitempty"`
 	ConnectedAt time.Time `json:"connected_at"`
 }
 

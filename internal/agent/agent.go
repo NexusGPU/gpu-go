@@ -915,15 +915,27 @@ func (a *Agent) detectConnectionChanges() (map[string]bool, error) {
 func parseConnectionsToAPI(connectionLines []string) []api.ConnectionInfo {
 	connections := make([]api.ConnectionInfo, 0, len(connectionLines))
 	for _, line := range connectionLines {
-		// Parse: clientIP,clientPort,clientPID
 		parts := strings.Split(line, ",")
 		if len(parts) < 1 || parts[0] == "" {
 			continue
 		}
 		clientIP := strings.TrimSpace(parts[0])
+		var clientPort, clientPID int
+		if len(parts) >= 2 {
+			if port, err := strconv.Atoi(strings.TrimSpace(parts[1])); err == nil {
+				clientPort = port
+			}
+		}
+		if len(parts) >= 3 {
+			if pid, err := strconv.Atoi(strings.TrimSpace(parts[2])); err == nil {
+				clientPID = pid
+			}
+		}
 		connections = append(connections, api.ConnectionInfo{
 			ClientIP:    clientIP,
-			ConnectedAt: time.Now(), // Worker doesn't track exact connect time
+			ClientPort:  clientPort,
+			ClientPID:   clientPID,
+			ConnectedAt: time.Now(),
 		})
 	}
 	return connections
