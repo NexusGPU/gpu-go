@@ -129,6 +129,7 @@ func stopHypervisorManager() {
 
 func newRegisterCmd() *cobra.Command {
 	var token string
+	var force bool
 
 	cmd := &cobra.Command{
 		Use:   "register",
@@ -156,11 +157,46 @@ func newRegisterCmd() *cobra.Command {
 				return err
 			}
 			if registered {
-				cmd.SilenceUsage = true
-				if !out.IsJSON() {
-					out.Error("Agent already registered on this machine. Please run the uninstall command and register again.")
+				cfg, _ := configMgr.LoadConfig()
+
+				if !force {
+					// Verify whether the agent still exists on the server.
+					// If it is gone (e.g. deleted via dashboard or a prior uninstall),
+					// the local config is stale and we can safely clean it up and
+					// proceed. If the agent is still live, block as before.
+					agentClient := api.NewClient(
+						api.WithBaseURL(serverURL),
+						api.WithAgentSecret(cfg.AgentSecret),
+					)
+					_, serverErr := agentClient.GetAgentConfig(context.Background(), cfg.AgentID)
+					if serverErr == nil {
+						// Agent is alive on the server – require explicit action.
+						cmd.SilenceUsage = true
+						if !out.IsJSON() {
+							out.Error("Agent already registered on this machine. Run 'ggo agent unregister' first, or use --force to replace the existing registration.")
+						}
+						return agent.ErrAlreadyRegistered
+					}
+					// Agent not found on server → stale local config.
+					if !out.IsJSON() {
+						out.Warning(fmt.Sprintf("Stale local registration found (agent %s no longer on server). Clearing config and re-registering...", cfg.AgentID))
+					}
+				} else {
+					// --force: attempt to delete the old agent from the server so it
+					// does not linger as an orphan record.
+					agentClient := api.NewClient(
+						api.WithBaseURL(serverURL),
+						api.WithAgentSecret(cfg.AgentSecret),
+					)
+					if deleteErr := agentClient.SelfDeleteAgent(context.Background(), cfg.AgentID); deleteErr != nil {
+						klog.Warningf("Failed to delete old agent from server (continuing): agent_id=%s error=%v", cfg.AgentID, deleteErr)
+					}
 				}
-				return agent.ErrAlreadyRegistered
+
+				// Remove the stale / replaced local config before re-registering.
+				if removeErr := configMgr.RemoveConfig(); removeErr != nil {
+					klog.Warningf("Failed to remove local config (continuing): %v", removeErr)
+				}
 			}
 
 			// Sync deps manifest before registration
@@ -203,6 +239,7 @@ func newRegisterCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&token, "token", "t", "", "Temporary installation token")
+	cmd.Flags().BoolVar(&force, "force", false, "Force re-registration, replacing any existing registration on this machine")
 
 	return cmd
 }
