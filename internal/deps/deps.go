@@ -677,6 +677,35 @@ func (m *Manager) DownloadLibraryToDir(ctx context.Context, lib Library, libsDir
 	return m.downloadLibraryToDir(ctx, lib, libsDir, progressFn)
 }
 
+// downloadToFile reads from reader into tmpFile in chunks, reporting progress
+// and returning the total bytes written. It closes tmpFile before returning.
+func downloadToFile(tmpFile *os.File, reader io.Reader, size int64, progressFn func(downloaded, total int64)) (int64, error) {
+	var downloadedBytes int64
+	buf := make([]byte, 32*1024)
+	for {
+		n, readErr := reader.Read(buf)
+		if n > 0 {
+			if _, writeErr := tmpFile.Write(buf[:n]); writeErr != nil {
+				_ = tmpFile.Close()
+				return 0, fmt.Errorf("failed to write file: %w", writeErr)
+			}
+			downloadedBytes += int64(n)
+			if progressFn != nil {
+				progressFn(downloadedBytes, size)
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			_ = tmpFile.Close()
+			return 0, fmt.Errorf("failed to read response: %w", readErr)
+		}
+	}
+	_ = tmpFile.Close()
+	return downloadedBytes, nil
+}
+
 // downloadLibraryToDir downloads a library to a specific libs directory.
 // Shared libraries (.so/.dll) go to libsDir; binaries go to cache root.
 //
@@ -742,31 +771,12 @@ func (m *Manager) downloadLibraryToDir(ctx context.Context, lib Library, libsDir
 
 	// Download with progress and hash verification
 	hash := sha256.New()
-	var downloadedBytes int64
 	reader := io.TeeReader(resp.Body, hash)
 
-	buf := make([]byte, 32*1024)
-	for {
-		n, readErr := reader.Read(buf)
-		if n > 0 {
-			if _, writeErr := tmpFile.Write(buf[:n]); writeErr != nil {
-				_ = tmpFile.Close()
-				return fmt.Errorf("failed to write file: %w", writeErr)
-			}
-			downloadedBytes += int64(n)
-			if progressFn != nil {
-				progressFn(downloadedBytes, lib.Size)
-			}
-		}
-		if readErr == io.EOF {
-			break
-		}
-		if readErr != nil {
-			_ = tmpFile.Close()
-			return fmt.Errorf("failed to read response: %w", readErr)
-		}
+	downloadedBytes, err := downloadToFile(tmpFile, reader, lib.Size, progressFn)
+	if err != nil {
+		return err
 	}
-	_ = tmpFile.Close()
 
 	// Verify hash (skip if SHA256 is empty)
 	if lib.SHA256 != "" {
