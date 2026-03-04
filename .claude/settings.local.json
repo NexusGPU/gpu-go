@@ -4,7 +4,12 @@
       "Bash(go build:*)",
       "Bash(go env:*)",
       "Bash(curl:*)",
-      "Bash(echo exit: $?:*)"
+      "Bash(echo exit: $?:*)",
+      "Bash(npm install:*)",
+      "Bash(where node:*)",
+      "Bash(winget install:*)",
+      "Bash(cmd:*)",
+      "Bash(powershell:*)"
     ]
   }
 }

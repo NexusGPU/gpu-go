@@ -177,7 +177,7 @@ func (r *Reconciler) reconcile() {
 				klog.Infof("Force restart requested for worker: worker_id=%s", workerID)
 			}
 			// Structural change (GPU allocation, executable, args) requires restart
-			if err := r.restartWorker(desiredInfo); err != nil {
+			if err := r.restartWorker(desiredInfo, actualWorker); err != nil {
 				klog.Errorf("Failed to restart worker: worker_id=%s error=%v", workerID, err)
 				if forceRestart {
 					retryRestarts[workerID] = struct{}{}
@@ -213,6 +213,12 @@ func (r *Reconciler) reconcile() {
 			r.forceRestarts[workerID] = struct{}{}
 		}
 		r.mu.Unlock()
+		// Schedule a reconcile soon so failed restarts are retried quickly
+		// rather than waiting for the 30-second ticker.
+		go func() {
+			time.Sleep(5 * time.Second)
+			r.TriggerReconcile()
+		}()
 	}
 
 	if added > 0 || removed > 0 || updated > 0 {
@@ -248,17 +254,38 @@ func (r *Reconciler) stopWorker(workerID string) error {
 	return nil
 }
 
-func (r *Reconciler) restartWorker(info *api.WorkerInfo) error {
+func (r *Reconciler) restartWorker(desired *api.WorkerInfo, actual *api.WorkerInfo) error {
 	// Stop first
-	if err := r.stopWorker(info.WorkerUID); err != nil {
-		klog.Warningf("Failed to stop worker during restart: worker_id=%s error=%v", info.WorkerUID, err)
+	if err := r.stopWorker(desired.WorkerUID); err != nil {
+		klog.Warningf("Failed to stop worker during restart: worker_id=%s error=%v", desired.WorkerUID, err)
 	}
 
-	// Small delay to ensure cleanup
-	time.Sleep(100 * time.Millisecond)
+	// StopWorker sends a signal but does not wait for the process to exit.
+	// Poll until the old process releases the port, then start the new one.
+	// Without this wait, StartWorker fails with "port already in use".
+	if actual != nil && actual.WorkerRunningInfo != nil && actual.WorkerRunningInfo.PID > 0 {
+		pid := int(actual.WorkerRunningInfo.PID)
+		if isProcessRunning(pid) {
+			deadline := time.Now().Add(10 * time.Second)
+			for time.Now().Before(deadline) {
+				if !isProcessRunning(pid) {
+					break
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+			if isProcessRunning(pid) {
+				klog.Warningf("Worker process did not exit within 10s, force killing: worker_id=%s pid=%d", desired.WorkerUID, pid)
+				forceKillWorkerProcess(pid)
+				time.Sleep(200 * time.Millisecond) // Allow OS to reclaim port after force kill
+			}
+		}
+	} else {
+		// PID unknown: short delay to let any in-flight socket closure finish
+		time.Sleep(500 * time.Millisecond)
+	}
 
 	// Start with new config
-	return r.startWorker(info)
+	return r.startWorker(desired)
 }
 
 // needsRestart checks if structural config changed (GPU allocation, executable, args)

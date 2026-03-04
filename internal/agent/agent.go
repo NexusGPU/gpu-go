@@ -255,9 +255,10 @@ func (a *Agent) Start() error {
 	}
 
 	// Start background tasks
-	a.wg.Add(2)
+	a.wg.Add(3)
 	go a.statusReportLoop()
 	go a.sseConfigListener()
+	go a.sseRestartListener()
 
 	klog.Infof("Agent started: agent_id=%s pid=%d", a.agentID, os.Getpid())
 
