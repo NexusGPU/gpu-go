@@ -85,11 +85,41 @@ function Test-Administrator {
 
 function Stop-GgoProcesses {
     Write-Info "Stopping any running ggo processes..."
-    
+
     Get-Process -Name $BINARY_NAME -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-    
+
+    Write-Info "Stopping any running tensor-fusion-worker processes..."
+    Get-Process -Name "tensor-fusion-worker" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
     # Give processes time to terminate
     Start-Sleep -Seconds 1
+}
+
+function Invoke-ServerUnregister {
+    Write-Info "Unregistering agent from server..."
+
+    # Find the ggo binary
+    $binaryPath = Join-Path $InstallDir "$BINARY_NAME.exe"
+    if (-not (Test-Path $binaryPath)) {
+        $binaryPath = Join-Path $env:ProgramFiles "ggo\$BINARY_NAME.exe"
+    }
+
+    if (-not (Test-Path $binaryPath)) {
+        Write-Warn "ggo binary not found, skipping server unregistration"
+        return
+    }
+
+    try {
+        $proc = Start-Process -FilePath $binaryPath -ArgumentList @("agent", "unregister", "--force") -Wait -NoNewWindow -PassThru -ErrorAction Stop
+        if ($proc.ExitCode -eq 0) {
+            Write-Info "Agent unregistered from server"
+        } else {
+            Write-Warn "Server unregistration returned non-zero exit code, local config will still be removed"
+        }
+    }
+    catch {
+        Write-Warn "Server unregistration failed: $_"
+    }
 }
 
 function Remove-ScheduledTask {
@@ -226,7 +256,10 @@ function Uninstall-Ggo {
     
     # Stop running processes
     Stop-GgoProcesses
-    
+
+    # Unregister from server (before removing binary and config)
+    Invoke-ServerUnregister
+
     # Remove scheduled task
     Remove-ScheduledTask
     

@@ -338,12 +338,12 @@ func GenerateEnvScript(config *GPUEnvConfig, paths *platform.Paths) (string, err
 
 	// Export environment variables
 	for k, v := range result.EnvVars {
-		script.WriteString(fmt.Sprintf("export %s=\"%s\"\n", k, v))
+		fmt.Fprintf(&script, "export %s=\"%s\"\n", k, v)
 	}
 
 	// Add LD_LIBRARY_PATH - use libs directory (only contains .so files)
 	script.WriteString("\n# Add GPU libraries to library path\n")
-	script.WriteString(fmt.Sprintf("export LD_LIBRARY_PATH=\"%s:$LD_LIBRARY_PATH\"\n", libsPath))
+	fmt.Fprintf(&script, "export LD_LIBRARY_PATH=\"%s:$LD_LIBRARY_PATH\"\n", libsPath)
 
 	// Add LD_PRELOAD based on vendor - use libs directory
 	libNames := GetLibraryNames(config.Vendor)
@@ -353,12 +353,12 @@ func GenerateEnvScript(config *GPUEnvConfig, paths *platform.Paths) (string, err
 			preloadPaths = append(preloadPaths, filepath.Join(libsPath, lib))
 		}
 		script.WriteString("\n# Preload GPU libraries\n")
-		script.WriteString(fmt.Sprintf("export LD_PRELOAD=\"%s${LD_PRELOAD:+:$LD_PRELOAD}\"\n", strings.Join(preloadPaths, ":")))
+		fmt.Fprintf(&script, "export LD_PRELOAD=\"%s${LD_PRELOAD:+:$LD_PRELOAD}\"\n", strings.Join(preloadPaths, ":"))
 	}
 
 	script.WriteString("\n# GPU Go environment activated\n")
-	script.WriteString(fmt.Sprintf("echo \"GPU Go environment activated for vendor: %s\"\n", config.Vendor))
-	script.WriteString(fmt.Sprintf("echo \"Connection URL: %s\"\n", config.ConnectionURL))
+	fmt.Fprintf(&script, "echo \"GPU Go environment activated for vendor: %s\"\n", config.Vendor)
+	fmt.Fprintf(&script, "echo \"Connection URL: %s\"\n", config.ConnectionURL)
 
 	return script.String(), nil
 }
@@ -388,34 +388,34 @@ func GeneratePowerShellScript(config *GPUEnvConfig, paths *platform.Paths) (stri
 
 	// Export environment variables
 	for k, v := range result.EnvVars {
-		script.WriteString(fmt.Sprintf("$env:%s = \"%s\"\n", k, v))
+		fmt.Fprintf(&script, "$env:%s = \"%s\"\n", k, v)
 	}
 
 	// Set GPU vendor for ggo launch to detect correct DLLs
-	script.WriteString(fmt.Sprintf("$env:TF_GPU_VENDOR = \"%s\"\n", config.Vendor))
+	fmt.Fprintf(&script, "$env:TF_GPU_VENDOR = \"%s\"\n", config.Vendor)
 
 	// Add libs path to PATH at the FRONT (best effort for DLL loading)
 	// libs directory contains only .dll files
 	script.WriteString("\n# Add GPU libraries to PATH (prepend for priority)\n")
-	script.WriteString(fmt.Sprintf("$env:PATH = \"%s;$env:PATH\"\n", libsPath))
+	fmt.Fprintf(&script, "$env:PATH = \"%s;$env:PATH\"\n", libsPath)
 
 	// Set CUDA_PATH for applications that check it - point to libs directory
 	script.WriteString("\n# Set CUDA_PATH for CUDA-aware applications\n")
-	script.WriteString(fmt.Sprintf("$env:CUDA_PATH = \"%s\"\n", libsPath))
-	script.WriteString(fmt.Sprintf("$env:CUDA_HOME = \"%s\"\n", libsPath))
+	fmt.Fprintf(&script, "$env:CUDA_PATH = \"%s\"\n", libsPath)
+	fmt.Fprintf(&script, "$env:CUDA_HOME = \"%s\"\n", libsPath)
 
 	// List required DLLs for this vendor
 	windowsDLLs := GetWindowsLibraryNames(config.Vendor)
 	if len(windowsDLLs) > 0 {
 		script.WriteString("\n# Required DLLs for this vendor (should be in libs directory)\n")
 		for _, dll := range windowsDLLs {
-			script.WriteString(fmt.Sprintf("# - %s\n", dll))
+			fmt.Fprintf(&script, "# - %s\n", dll)
 		}
 	}
 
 	script.WriteString("\n# GPU Go environment activated\n")
-	script.WriteString(fmt.Sprintf("Write-Host \"GPU Go environment activated for vendor: %s\" -ForegroundColor Green\n", config.Vendor))
-	script.WriteString(fmt.Sprintf("Write-Host \"Connection URL: %s\"\n", config.ConnectionURL))
+	fmt.Fprintf(&script, "Write-Host \"GPU Go environment activated for vendor: %s\" -ForegroundColor Green\n", config.Vendor)
+	fmt.Fprintf(&script, "Write-Host \"Connection URL: %s\"\n", config.ConnectionURL)
 	script.WriteString("Write-Host \"\"\n")
 	script.WriteString("Write-Host \"TIP: For reliable DLL loading, use 'ggo launch <program>'\" -ForegroundColor Yellow\n")
 	script.WriteString("Write-Host \"Example: ggo launch python train.py\"\n")
@@ -449,32 +449,32 @@ func GenerateBatchScript(config *GPUEnvConfig, paths *platform.Paths) (string, e
 
 	// Export environment variables
 	for k, v := range result.EnvVars {
-		script.WriteString(fmt.Sprintf("set %s=%s\n", k, v))
+		fmt.Fprintf(&script, "set %s=%s\n", k, v)
 	}
 
 	// Set GPU vendor for ggo launch to detect correct DLLs
-	script.WriteString(fmt.Sprintf("set TF_GPU_VENDOR=%s\n", config.Vendor))
+	fmt.Fprintf(&script, "set TF_GPU_VENDOR=%s\n", config.Vendor)
 
 	// Add libs path to PATH at the FRONT - libs directory contains only .dll files
 	script.WriteString("\nREM Add GPU libraries to PATH (prepend for priority)\n")
-	script.WriteString(fmt.Sprintf("set PATH=%s;%%PATH%%\n", libsPath))
+	fmt.Fprintf(&script, "set PATH=%s;%%PATH%%\n", libsPath)
 
 	// Set CUDA_PATH - point to libs directory
 	script.WriteString("\nREM Set CUDA_PATH for CUDA-aware applications\n")
-	script.WriteString(fmt.Sprintf("set CUDA_PATH=%s\n", libsPath))
-	script.WriteString(fmt.Sprintf("set CUDA_HOME=%s\n", libsPath))
+	fmt.Fprintf(&script, "set CUDA_PATH=%s\n", libsPath)
+	fmt.Fprintf(&script, "set CUDA_HOME=%s\n", libsPath)
 
 	// List required DLLs for this vendor
 	windowsDLLs := GetWindowsLibraryNames(config.Vendor)
 	if len(windowsDLLs) > 0 {
 		script.WriteString("\nREM Required DLLs for this vendor (should be in libs directory)\n")
 		for _, dll := range windowsDLLs {
-			script.WriteString(fmt.Sprintf("REM - %s\n", dll))
+			fmt.Fprintf(&script, "REM - %s\n", dll)
 		}
 	}
 
 	script.WriteString("\necho GPU Go environment activated!\n")
-	script.WriteString(fmt.Sprintf("echo Connection URL: %s\n", config.ConnectionURL))
+	fmt.Fprintf(&script, "echo Connection URL: %s\n", config.ConnectionURL)
 	script.WriteString("echo.\n")
 	script.WriteString("echo TIP: For reliable DLL loading, use 'ggo launch ^<program^>'\n")
 	script.WriteString("echo Example: ggo launch python train.py\n")

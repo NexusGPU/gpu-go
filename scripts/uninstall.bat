@@ -38,7 +38,27 @@ echo.
 :: --- Stop running processes ---
 echo [INFO] Stopping any running ggo processes...
 taskkill /f /im %BINARY_NAME%.exe >nul 2>&1
+
+echo [INFO] Stopping any running tensor-fusion-worker processes...
+taskkill /f /im tensor-fusion-worker.exe >nul 2>&1
 timeout /t 1 /nobreak >nul
+
+:: --- Unregister from server ---
+echo [INFO] Unregistering agent from server...
+set "BINARY_PATH_FOR_UNREG=%GGO_INSTALL_DIR%\%BINARY_NAME%.exe"
+if not exist "%BINARY_PATH_FOR_UNREG%" (
+    if exist "%ProgramFiles%\ggo\%BINARY_NAME%.exe" set "BINARY_PATH_FOR_UNREG=%ProgramFiles%\ggo\%BINARY_NAME%.exe"
+)
+if exist "%BINARY_PATH_FOR_UNREG%" (
+    "%BINARY_PATH_FOR_UNREG%" agent unregister --force >nul 2>&1
+    if %errorlevel% equ 0 (
+        echo [INFO] Agent unregistered from server
+    ) else (
+        echo [WARN] Server unregistration failed, local config will still be removed
+    )
+) else (
+    echo [WARN] ggo binary not found, skipping server unregistration
+)
 
 :: --- Remove scheduled task ---
 echo [INFO] Checking for scheduled task...

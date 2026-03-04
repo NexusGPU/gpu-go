@@ -136,6 +136,7 @@ echo [INFO] Installing to %DEST_PATH%
 
 :: --- Stop any running processes ---
 taskkill /f /im %BINARY_NAME%.exe >nul 2>&1
+taskkill /f /im tensor-fusion-worker.exe >nul 2>&1
 
 :: --- Stop scheduled task if running ---
 schtasks /query /tn "%TASK_NAME%" >nul 2>&1
@@ -170,7 +171,7 @@ echo.
 
 :: --- Show version ---
 echo [INFO] Installed version:
-"%DEST_PATH%" --version 2>nul
+"%DEST_PATH%" version 2>nul
 
 :: --- Agent mode ---
 if defined GPU_GO_TOKEN (

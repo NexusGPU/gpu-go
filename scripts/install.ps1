@@ -334,6 +334,9 @@ function Install-Ggo {
         
         # Stop any running ggo processes
         Get-Process -Name $BINARY_NAME -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+        # Stop any running tensor-fusion-worker processes (orphaned workers from previous install)
+        Get-Process -Name "tensor-fusion-worker" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
         
         # Stop scheduled task if running
         $existingTask = Get-ScheduledTask -TaskName $TASK_NAME -ErrorAction SilentlyContinue
@@ -368,7 +371,7 @@ function Install-Ggo {
         Write-Host ""
         Write-Info "Installed version:"
         try {
-            & $destPath --version
+            & $destPath version
         }
         catch {
             # Ignore version check errors

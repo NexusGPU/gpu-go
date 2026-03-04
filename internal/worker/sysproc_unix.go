@@ -16,6 +16,10 @@ func setSysProcAttr(cmd *exec.Cmd) {
 	}
 }
 
+// postStart performs any platform-specific post-start setup.
+// On Unix, no additional setup is needed; Setpgid handles process group management.
+func postStart(_ *exec.Cmd) {}
+
 // sendTermSignal sends a termination signal to the process.
 // On Unix, this sends SIGTERM.
 func sendTermSignal(process *os.Process) error {

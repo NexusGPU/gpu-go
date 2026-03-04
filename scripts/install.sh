@@ -431,7 +431,7 @@ main() {
     if command -v "${DEST_PATH}" >/dev/null 2>&1; then
         info ""
         info "Installed version:"
-        "${DEST_PATH}" --version 2>/dev/null || true
+        "${DEST_PATH}" version 2>/dev/null || true
     fi
     
     # Agent mode: register and setup systemd service (Linux only)

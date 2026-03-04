@@ -502,19 +502,19 @@ func outputEvalCommandsUnix(config *studio.GPUEnvConfig, envResult *studio.GPUEn
 	script.WriteString("export _GGO_ORIG_LD_LIBRARY_PATH=\"$LD_LIBRARY_PATH\"\n")
 	script.WriteString("export _GGO_ORIG_LD_PRELOAD=\"$LD_PRELOAD\"\n")
 	script.WriteString("export _GGO_ORIG_PATH=\"$PATH\"\n")
-	script.WriteString(fmt.Sprintf("export _GGO_CLEAN_FILE=\"%s\"\n", cleanFile))
+	fmt.Fprintf(&script, "export _GGO_CLEAN_FILE=\"%s\"\n", cleanFile)
 	script.WriteString("\n")
 
 	// Export TensorFusion environment variables
 	for k, v := range envResult.EnvVars {
-		script.WriteString(fmt.Sprintf("export %s=\"%s\"\n", k, v))
+		fmt.Fprintf(&script, "export %s=\"%s\"\n", k, v)
 	}
 
 	// Add LD_LIBRARY_PATH - use libs directory (contains only .so files)
-	script.WriteString(fmt.Sprintf("export LD_LIBRARY_PATH=\"%s${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\"\n", libsPath))
+	fmt.Fprintf(&script, "export LD_LIBRARY_PATH=\"%s${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\"\n", libsPath)
 
 	// Add GPU bin directory to PATH (for nvidia-smi, amdsmi, etc.)
-	script.WriteString(fmt.Sprintf("export PATH=\"%s${PATH:+:$PATH}\"\n", binDir))
+	fmt.Fprintf(&script, "export PATH=\"%s${PATH:+:$PATH}\"\n", binDir)
 
 	// Add LD_PRELOAD based on vendor - use libs directory
 	libNames := studio.GetLibraryNames(config.Vendor)
@@ -523,13 +523,13 @@ func outputEvalCommandsUnix(config *studio.GPUEnvConfig, envResult *studio.GPUEn
 		for _, lib := range libNames {
 			preloadPaths = append(preloadPaths, filepath.Join(libsPath, lib))
 		}
-		script.WriteString(fmt.Sprintf("export LD_PRELOAD=\"%s${LD_PRELOAD:+:$LD_PRELOAD}\"\n", strings.Join(preloadPaths, ":")))
+		fmt.Fprintf(&script, "export LD_PRELOAD=\"%s${LD_PRELOAD:+:$LD_PRELOAD}\"\n", strings.Join(preloadPaths, ":"))
 	}
 
 	// Mark as activated
 	script.WriteString("export _GGO_ACTIVE=1\n")
-	script.WriteString(fmt.Sprintf("export _GGO_LIBS_PATH=\"%s\"\n", libsPath))
-	script.WriteString(fmt.Sprintf("export _GGO_BIN_PATH=\"%s\"\n", binDir))
+	fmt.Fprintf(&script, "export _GGO_LIBS_PATH=\"%s\"\n", libsPath)
+	fmt.Fprintf(&script, "export _GGO_BIN_PATH=\"%s\"\n", binDir)
 	script.WriteString("\n")
 
 	// Define ggo wrapper function to handle clean command automatically
@@ -621,28 +621,28 @@ func outputEvalCommandsPowerShell(config *studio.GPUEnvConfig, envResult *studio
 	// Save original values for later restoration
 	script.WriteString("# Save original environment for cleanup\n")
 	script.WriteString("$env:_GGO_ORIG_PATH = $env:PATH\n")
-	script.WriteString(fmt.Sprintf("$env:_GGO_CLEAN_FILE = \"%s\"\n", escapeForPowerShell(cleanFile)))
+	fmt.Fprintf(&script, "$env:_GGO_CLEAN_FILE = \"%s\"\n", escapeForPowerShell(cleanFile))
 	script.WriteString("\n")
 
 	// Export TensorFusion environment variables
 	for k, v := range envResult.EnvVars {
-		script.WriteString(fmt.Sprintf("$env:%s = \"%s\"\n", k, escapeForPowerShell(v)))
+		fmt.Fprintf(&script, "$env:%s = \"%s\"\n", k, escapeForPowerShell(v))
 	}
 
 	// Set GPU vendor
-	script.WriteString(fmt.Sprintf("$env:TF_GPU_VENDOR = \"%s\"\n", config.Vendor))
+	fmt.Fprintf(&script, "$env:TF_GPU_VENDOR = \"%s\"\n", config.Vendor)
 
 	// Add libs path and bin path to PATH at the front
-	script.WriteString(fmt.Sprintf("$env:PATH = \"%s;%s;\" + $env:PATH\n", escapeForPowerShell(binDir), escapeForPowerShell(libsPath)))
+	fmt.Fprintf(&script, "$env:PATH = \"%s;%s;\" + $env:PATH\n", escapeForPowerShell(binDir), escapeForPowerShell(libsPath))
 
 	// Set CUDA_PATH - point to libs directory
-	script.WriteString(fmt.Sprintf("$env:CUDA_PATH = \"%s\"\n", escapeForPowerShell(libsPath)))
-	script.WriteString(fmt.Sprintf("$env:CUDA_HOME = \"%s\"\n", escapeForPowerShell(libsPath)))
+	fmt.Fprintf(&script, "$env:CUDA_PATH = \"%s\"\n", escapeForPowerShell(libsPath))
+	fmt.Fprintf(&script, "$env:CUDA_HOME = \"%s\"\n", escapeForPowerShell(libsPath))
 
 	// Mark as activated
 	script.WriteString("$env:_GGO_ACTIVE = \"1\"\n")
-	script.WriteString(fmt.Sprintf("$env:_GGO_LIBS_PATH = \"%s\"\n", escapeForPowerShell(libsPath)))
-	script.WriteString(fmt.Sprintf("$env:_GGO_BIN_PATH = \"%s\"\n", escapeForPowerShell(binDir)))
+	fmt.Fprintf(&script, "$env:_GGO_LIBS_PATH = \"%s\"\n", escapeForPowerShell(libsPath))
+	fmt.Fprintf(&script, "$env:_GGO_BIN_PATH = \"%s\"\n", escapeForPowerShell(binDir))
 	script.WriteString("\n")
 
 	// Define ggo wrapper function for automatic clean handling
@@ -1264,7 +1264,7 @@ func setupLongTermWindows(shareInfo *api.SharePublicInfo, config *studio.GPUEnvC
 		if k == "PATH" {
 			continue
 		}
-		batContent.WriteString(fmt.Sprintf("setx %s \"%s\"\n", k, v))
+		fmt.Fprintf(&batContent, "setx %s \"%s\"\n", k, v)
 	}
 	batContent.WriteString("\necho Environment variables set. Please restart your terminal.\n")
 

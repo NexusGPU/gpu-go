@@ -293,9 +293,15 @@ func (c *Client) GetAgent(ctx context.Context, agentID string) (*AgentInfo, erro
 	return doGet[AgentInfo](c, ctx, "/api/v1/agents/"+agentID, authUser, "")
 }
 
-// DeleteAgent deletes an agent
+// DeleteAgent deletes an agent (requires user/PAT authentication)
 func (c *Client) DeleteAgent(ctx context.Context, agentID string) error {
 	return doDelete(c, ctx, "/api/v1/agents/"+agentID, authUser)
+}
+
+// SelfDeleteAgent deletes the agent using its own agent secret.
+// Used by the agent to unregister itself from the server during uninstall.
+func (c *Client) SelfDeleteAgent(ctx context.Context, agentID string) error {
+	return doDelete(c, ctx, "/api/v1/agents/"+agentID, authAgent)
 }
 
 // GetAgentConfig gets the agent configuration

@@ -157,6 +157,9 @@ func (m *Manager) Start(config WorkerConfig) error {
 		return errors.Wrap(err, "failed to start worker process")
 	}
 
+	// Platform-specific post-start setup (e.g., Windows Job Object assignment)
+	postStart(cmd)
+
 	now := time.Now()
 	state := &WorkerState{
 		Config:    config,

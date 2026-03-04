@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -212,4 +213,24 @@ func (m *Manager) IsRegistered() (bool, error) {
 		return false, nil
 	}
 	return true, nil
+}
+
+// RemoveConfig removes local agent configuration files (config, gpus, workers).
+// After this call IsRegistered returns false. The config directory itself is
+// left in place so that the caller (e.g. an uninstall script) can remove it.
+func (m *Manager) RemoveConfig() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var errs []error
+	for _, path := range []string{m.ConfigPath(), m.GPUsPath(), m.WorkersPath()} {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			errs = append(errs, err)
+		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("failed to remove config files: %v", errs)
+	}
+	return nil
 }

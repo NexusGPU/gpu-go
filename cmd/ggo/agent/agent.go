@@ -60,6 +60,7 @@ func NewAgentCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVar(&isolationMode, "isolation-mode", "shared", "Worker isolation mode (shared, soft, partitioned)")
 
 	cmd.AddCommand(newRegisterCmd())
+	cmd.AddCommand(newUnregisterCmd())
 	cmd.AddCommand(newStartCmd())
 	cmd.AddCommand(newStatusCmd())
 	cmd.AddCommand(newListCmd())
@@ -202,6 +203,83 @@ func newRegisterCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&token, "token", "t", "", "Temporary installation token")
+
+	return cmd
+}
+
+func newUnregisterCmd() *cobra.Command {
+	var force bool
+
+	cmd := &cobra.Command{
+		Use:   "unregister",
+		Short: "Unregister this agent from the server",
+		Long: `Unregister this GPU server from the GPU Go platform.
+
+This command notifies the server that the agent is being removed and deletes
+the local configuration files (agent ID, secret, GPU and worker records).
+
+Use --force to clean up local config even when the server is unreachable.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			out := getOutput()
+			configMgr := config.NewManager(configDir, stateDir)
+
+			cfg, err := configMgr.LoadConfig()
+			if err != nil {
+				cmd.SilenceUsage = true
+				return err
+			}
+
+			if cfg == nil || cfg.AgentID == "" {
+				if !out.IsJSON() {
+					out.Info("Agent is not registered on this machine, nothing to do")
+				}
+				return out.Render(&cmdutil.ActionData{Success: true, Message: "Not registered"})
+			}
+
+			agentID := cfg.AgentID
+
+			// Use server URL from config (where the agent was originally registered),
+			// but allow --server flag to override.
+			resolvedServerURL := serverURL
+			if resolvedServerURL == api.GetDefaultBaseURL() && cfg.ServerURL != "" {
+				resolvedServerURL = cfg.ServerURL
+			}
+
+			client := api.NewClient(
+				api.WithBaseURL(resolvedServerURL),
+				api.WithAgentSecret(cfg.AgentSecret),
+			)
+
+			ctx := context.Background()
+			if err := client.SelfDeleteAgent(ctx, agentID); err != nil {
+				if force {
+					if !out.IsJSON() {
+						out.Warning(fmt.Sprintf("Server unregistration failed (continuing due to --force): %v", err))
+					}
+					klog.Warningf("Failed to unregister agent from server: agent_id=%s error=%v", agentID, err)
+				} else {
+					cmd.SilenceUsage = true
+					return fmt.Errorf("failed to unregister from server: %w\nUse --force to remove local config anyway", err)
+				}
+			} else {
+				klog.Infof("Agent unregistered from server: agent_id=%s", agentID)
+			}
+
+			if err := configMgr.RemoveConfig(); err != nil {
+				klog.Warningf("Failed to remove local config files: %v", err)
+				if !out.IsJSON() {
+					out.Warning(fmt.Sprintf("Failed to remove local config: %v", err))
+				}
+			}
+
+			return out.Render(&cmdutil.ActionData{
+				Success: true,
+				Message: fmt.Sprintf("Agent '%s' unregistered successfully", agentID),
+			})
+		},
+	}
+
+	cmd.Flags().BoolVar(&force, "force", false, "Remove local config even if server unregistration fails")
 
 	return cmd
 }

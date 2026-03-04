@@ -679,6 +679,8 @@ func (m *Manager) DownloadLibraryToDir(ctx context.Context, lib Library, libsDir
 
 // downloadLibraryToDir downloads a library to a specific libs directory.
 // Shared libraries (.so/.dll) go to libsDir; binaries go to cache root.
+//
+//nolint:gocyclo // pre-existing complexity, refactoring out of scope
 func (m *Manager) downloadLibraryToDir(ctx context.Context, lib Library, libsDir string, progressFn func(downloaded, total int64)) error {
 	// Ensure cache directory exists
 	cacheDir := m.paths.CacheDir()

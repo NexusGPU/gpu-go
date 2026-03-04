@@ -190,12 +190,37 @@ remove_config() {
 # --- Kill running processes ---
 kill_processes() {
     info "Stopping any running ggo processes..."
-    
-    # Try to find and kill ggo processes
     if command -v pkill >/dev/null 2>&1; then
         pkill -9 "${BINARY_NAME}" 2>/dev/null || true
     elif command -v killall >/dev/null 2>&1; then
         killall -9 "${BINARY_NAME}" 2>/dev/null || true
+    fi
+
+    info "Stopping any running tensor-fusion-worker processes..."
+    if command -v pkill >/dev/null 2>&1; then
+        pkill -9 "tensor-fusion-worker" 2>/dev/null || true
+    elif command -v killall >/dev/null 2>&1; then
+        killall -9 "tensor-fusion-worker" 2>/dev/null || true
+    fi
+}
+
+# --- Unregister from server ---
+unregister_from_server() {
+    local binary_path="${GGO_INSTALL_DIR:-/usr/local/bin}/${BINARY_NAME}"
+    if [ ! -f "${binary_path}" ]; then
+        binary_path="/usr/local/bin/${BINARY_NAME}"
+    fi
+
+    if [ ! -f "${binary_path}" ]; then
+        warn "ggo binary not found, skipping server unregistration"
+        return 0
+    fi
+
+    info "Unregistering agent from server..."
+    if "${binary_path}" agent unregister --force 2>/dev/null; then
+        info "Agent unregistered from server"
+    else
+        warn "Server unregistration failed, local config will still be removed"
     fi
 }
 
@@ -214,10 +239,13 @@ main() {
     echo ""
     
     info "Detected OS: ${OS}"
-    
+
     # Kill any running processes first
     kill_processes
-    
+
+    # Unregister from server (before removing binary and config)
+    unregister_from_server
+
     # Remove services based on OS
     if [ "${OS}" = "linux" ]; then
         remove_systemd_service
