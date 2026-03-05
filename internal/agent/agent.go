@@ -23,11 +23,11 @@ import (
 )
 
 const (
-	statusReportInterval = 1 * time.Minute
+	statusReportInterval = 30 * time.Second
 	forceRefreshInterval = 6 * time.Hour
 	// EnvConnectionInfoPath is the environment variable name for connection info directory path
-	// Workers should write their connections to: {TF_CLIENT_INFO_PATH}/{workerID}.txt
-	EnvConnectionInfoPath = "TF_CLIENT_INFO_PATH"
+	// Workers should write their connections to: {TF_CONNECTION_INFO_PATH}/{workerID}.txt
+	EnvConnectionInfoPath = "TF_CONNECTION_INFO_PATH"
 
 	// Worker status constants
 	workerStatusRunning  = "running"
@@ -230,8 +230,8 @@ func (a *Agent) Start() error {
 		klog.Warningf("Failed to create connections directory: path=%s error=%v", a.connectionsDir, err)
 	}
 
-	// Set TF_CLIENT_INFO_PATH environment variable for worker processes
-	// Workers will write connection info to: {TF_CLIENT_INFO_PATH}/{workerID}.txt
+	// Set TF_CONNECTION_INFO_PATH environment variable for worker processes
+	// Workers will write connection info to: {TF_CONNECTION_INFO_PATH}/{workerID}.txt
 	// Each worker has its own file with format: clientIP,clientPort,clientPID (one per line)
 	if err := os.Setenv(EnvConnectionInfoPath, a.connectionsDir); err != nil {
 		klog.Warningf("Failed to set %s env var: error=%v", EnvConnectionInfoPath, err)

@@ -200,6 +200,21 @@ func SetupGPUEnv(paths *platform.Paths, config *GPUEnvConfig) (*GPUEnvResult, er
 	result.EnvVars["TF_LOG_LEVEL"] = getEnvDefault("TF_LOG_LEVEL", "info")
 	result.EnvVars["TF_ENABLE_LOG"] = getEnvDefault("TF_ENABLE_LOG", "1")
 
+	// Get connections directory (for tensor-fusion-worker to write connection info)
+	connectionsDir := filepath.Join(paths.StateDir(), "connections")
+	if err := os.MkdirAll(connectionsDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create connections directory: %w", err)
+	}
+
+	// Set TF_CONNECTION_INFO_PATH for tensor-fusion-worker
+	if !config.IsContainer {
+		// On host, use actual connections directory
+		result.EnvVars["TF_CONNECTION_INFO_PATH"] = connectionsDir
+	} else {
+		// In container, use mounted path
+		result.EnvVars["TF_CONNECTION_INFO_PATH"] = "/var/run/tensor-fusion/connections"
+	}
+
 	// Add cache path to PATH (for tensor-fusion-worker binary)
 	if !config.IsContainer {
 		// On host, prepend cache path to existing PATH
@@ -236,6 +251,13 @@ func SetupGPUEnv(paths *platform.Paths, config *GPUEnvConfig) (*GPUEnvResult, er
 
 	// Set up volume mounts for container mode
 	if config.IsContainer {
+		// Mount connections directory (for tensor-fusion-worker to write connection info)
+		result.VolumeMounts = append(result.VolumeMounts, VolumeMount{
+			HostPath:      connectionsDir,
+			ContainerPath: "/var/run/tensor-fusion/connections",
+			ReadOnly:      false,
+		})
+
 		// Mount libs directory (contains only .so files for LD_LIBRARY_PATH/LD_PRELOAD)
 		result.VolumeMounts = append(result.VolumeMounts, VolumeMount{
 			HostPath:      libsPath,

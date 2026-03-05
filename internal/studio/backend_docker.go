@@ -264,7 +264,12 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 
 	// Add command args (supplements ENTRYPOINT or overrides CMD)
 	// FormatContainerCommand handles wrapping single shell commands with "sh -c"
-	if formattedCmd := FormatContainerCommand(opts.Command); len(formattedCmd) > 0 {
+	// If no command is provided, use "sleep infinity" to keep container running
+	cmdToUse := opts.Command
+	if len(cmdToUse) == 0 {
+		cmdToUse = []string{"sleep", "infinity"}
+	}
+	if formattedCmd := FormatContainerCommand(cmdToUse); len(formattedCmd) > 0 {
 		args = append(args, formattedCmd...)
 	}
 
