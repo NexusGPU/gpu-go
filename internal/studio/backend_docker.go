@@ -605,47 +605,66 @@ set -e
 # Install SSH if not present
 if ! command -v sshd &> /dev/null; then
     if command -v apt-get &> /dev/null; then
-        apt-get update && apt-get install -y openssh-server
+        apt-get update -qq && apt-get install -y -qq openssh-server
     elif command -v yum &> /dev/null; then
-        yum install -y openssh-server
+        yum install -y -q openssh-server
     elif command -v apk &> /dev/null; then
-        apk add --no-cache openssh-server
+        apk add --no-cache -q openssh-server
     fi
 fi
 
-# Configure SSH
+# Configure SSH directories
 mkdir -p /var/run/sshd /root/.ssh
 chmod 700 /root/.ssh
+chmod 755 /var/run/sshd
 
-# Configure sshd to allow root login and listen on all interfaces
-cat > /etc/ssh/sshd_config.d/ggo-studio.conf <<'EOF'
-Port 22
-ListenAddress 0.0.0.0
-PermitRootLogin yes
-PasswordAuthentication yes
-PubkeyAuthentication yes
-UsePAM no
-EOF
-
-# Set root password if not already set (fallback for password auth)
-echo "root:gpugo" | chpasswd 2>/dev/null || true
+# Set root password (required for password auth)
+echo "root:gpugo" | chpasswd
 
 # Generate SSH host keys if they don't exist
 if [ ! -f /etc/ssh/ssh_host_rsa_key ]; then
     ssh-keygen -A
 fi
 
-# Kill existing sshd processes (if any)
-pkill sshd || true
+# Configure sshd - modify main config file for compatibility
+# Remove or comment out conflicting settings
+sed -i 's/^PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+sed -i 's/^#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+sed -i 's/^PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+sed -i 's/^#PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+sed -i 's/^PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+sed -i 's/^#PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+sed -i 's/^UsePAM.*/UsePAM no/' /etc/ssh/sshd_config
+sed -i 's/^#UsePAM.*/UsePAM no/' /etc/ssh/sshd_config
 
-# Start SSH server in background
+# Append our settings if not already present
+grep -q "^Port 22" /etc/ssh/sshd_config || echo "Port 22" >> /etc/ssh/sshd_config
+grep -q "^ListenAddress 0.0.0.0" /etc/ssh/sshd_config || echo "ListenAddress 0.0.0.0" >> /etc/ssh/sshd_config
+
+# Kill existing sshd processes
+pkill sshd 2>/dev/null || true
+sleep 1
+
+# Start SSH server
 /usr/sbin/sshd
 
-echo "SSH server started"
+# Verify SSH is running
+sleep 2
+if pgrep sshd > /dev/null; then
+    echo "SSH server started successfully"
+else
+    echo "ERROR: SSH server failed to start"
+    exit 1
+fi
 `
 
-	_, err := b.Exec(ctx, envID, []string{"bash", "-c", setupScript})
-	return err
+	output, err := b.Exec(ctx, envID, []string{"bash", "-c", setupScript})
+	if err != nil {
+		klog.Warningf("SSH setup output: %s", string(output))
+		return err
+	}
+	klog.V(2).Infof("SSH server setup completed: %s", string(output))
+	return nil
 }
 
 var _ Backend = (*DockerBackend)(nil)

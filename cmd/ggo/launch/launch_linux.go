@@ -116,13 +116,14 @@ func runLaunch(args []string, shareLink, serverURL string, verbose bool) error {
 		return fmt.Errorf("failed to ensure GPU client libraries: %w", err)
 	}
 
-	// Get cache directory
-	cacheDir := paths.CacheDir()
+	// Get libs directory where shared libraries are stored
+	// Libraries are in ~/.gpugo/cache/libs, NOT ~/.gpugo/cache
+	libsDir := paths.LibsDir()
 
 	// Find actual library files that were downloaded
 	// Use FindActualLibraryFiles instead of GetLibraryNames to handle libraries
 	// with different names (e.g., libaccelerator_nvidia-linux-amd64.so)
-	actualLibs := studio.FindActualLibraryFiles(cacheDir, vendor)
+	actualLibs := studio.FindActualLibraryFiles(libsDir, vendor)
 
 	if len(actualLibs) == 0 {
 		// Get canonical library names for the warning message
@@ -138,7 +139,7 @@ func runLaunch(args []string, shareLink, serverURL string, verbose bool) error {
 		out.Println("  ggo deps sync")
 		out.Println("  ggo deps download")
 		out.Println()
-		klog.Warningf("No libraries found for vendor %s in %s (continuing anyway)", vendor, cacheDir)
+		klog.Warningf("No libraries found for vendor %s in %s (continuing anyway)", vendor, libsDir)
 	}
 
 	// Setup log path (consistent with ggo use)
@@ -151,14 +152,14 @@ func runLaunch(args []string, shareLink, serverURL string, verbose bool) error {
 	if verbose {
 		out.Println()
 		out.Printf("%s Launching with GPU libraries from: %s\n",
-			styles.Info.Render("◐"), cacheDir)
+			styles.Info.Render("◐"), libsDir)
 		out.Printf("   Connection: %s\n", connectionInfo)
 		out.Printf("   Vendor:     %s\n", vendor)
 		out.Printf("   Log Path:   %s\n", logPath)
 		out.Println()
 	}
 
-	klog.Infof("LD_PRELOAD/LD_LIBRARY_PATH set to: %s", cacheDir)
+	klog.Infof("LD_PRELOAD/LD_LIBRARY_PATH set to: %s", libsDir)
 	klog.Infof("Launching: %v", args)
 
 	// Find the executable
@@ -190,7 +191,8 @@ func runLaunch(args []string, shareLink, serverURL string, verbose bool) error {
 	env = setEnvVar(env, "TF_ENABLE_LOG", getEnvDefault("TF_ENABLE_LOG", "1"))
 
 	// Add GPU bin directory to PATH (for nvidia-smi, amdsmi, etc.)
-	binDir := filepath.Join(cacheDir, "bin")
+	// Binaries are in cache/bin, not cache/libs
+	binDir := filepath.Join(paths.CacheDir(), "bin")
 	existingPath := os.Getenv("PATH")
 	if existingPath != "" {
 		env = setEnvVar(env, "PATH", binDir+":"+existingPath)
@@ -198,19 +200,19 @@ func runLaunch(args []string, shareLink, serverURL string, verbose bool) error {
 		env = setEnvVar(env, "PATH", binDir)
 	}
 
-	// Build LD_LIBRARY_PATH
+	// Build LD_LIBRARY_PATH with libs directory
 	existingLDPath := os.Getenv("LD_LIBRARY_PATH")
 	if existingLDPath != "" {
-		env = setEnvVar(env, "LD_LIBRARY_PATH", cacheDir+":"+existingLDPath)
+		env = setEnvVar(env, "LD_LIBRARY_PATH", libsDir+":"+existingLDPath)
 	} else {
-		env = setEnvVar(env, "LD_LIBRARY_PATH", cacheDir)
+		env = setEnvVar(env, "LD_LIBRARY_PATH", libsDir)
 	}
 
 	// Build LD_PRELOAD with library paths
 	if len(actualLibs) > 0 {
 		var preloadPaths []string
 		for _, lib := range actualLibs {
-			preloadPaths = append(preloadPaths, filepath.Join(cacheDir, lib))
+			preloadPaths = append(preloadPaths, filepath.Join(libsDir, lib))
 		}
 		existingPreload := os.Getenv("LD_PRELOAD")
 		if existingPreload != "" {
