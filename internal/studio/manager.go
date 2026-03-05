@@ -17,6 +17,7 @@ import (
 
 	"github.com/NexusGPU/gpu-go/internal/errors"
 	"github.com/NexusGPU/gpu-go/internal/platform"
+	"k8s.io/klog/v2"
 )
 
 var (
@@ -220,6 +221,13 @@ func (m *Manager) Create(ctx context.Context, opts *CreateOptions) (*Environment
 
 	if err := m.waitForStableRunning(ctx, backend, env); err != nil {
 		return nil, err
+	}
+
+	// Setup SSH server if backend supports it
+	if sshBackend, ok := backend.(SSHServerBackend); ok {
+		if err := sshBackend.EnsureSSHServer(ctx, env.ID); err != nil {
+			klog.Warningf("Failed to setup SSH server: %v (continuing anyway)", err)
+		}
 	}
 
 	m.clearUnreachableSSH(ctx, env)

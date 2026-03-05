@@ -540,11 +540,31 @@ if ! command -v sshd &> /dev/null; then
 fi
 
 # Configure SSH
-mkdir -p /var/run/sshd
-sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
-sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
+mkdir -p /var/run/sshd /root/.ssh
+chmod 700 /root/.ssh
 
-# Start SSH
+# Configure sshd to allow root login and listen on all interfaces
+cat > /etc/ssh/sshd_config.d/ggo-studio.conf <<'EOF'
+Port 22
+ListenAddress 0.0.0.0
+PermitRootLogin yes
+PasswordAuthentication yes
+PubkeyAuthentication yes
+UsePAM no
+EOF
+
+# Set root password if not already set (fallback for password auth)
+echo "root:gpugo" | chpasswd 2>/dev/null || true
+
+# Generate SSH host keys if they don't exist
+if [ ! -f /etc/ssh/ssh_host_rsa_key ]; then
+    ssh-keygen -A
+fi
+
+# Kill existing sshd processes (if any)
+pkill sshd || true
+
+# Start SSH server in background
 /usr/sbin/sshd
 
 echo "SSH server started"

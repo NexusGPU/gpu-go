@@ -119,31 +119,26 @@ func runLaunch(args []string, shareLink, serverURL string, verbose bool) error {
 	// Get cache directory
 	cacheDir := paths.CacheDir()
 
-	// Get required libraries based on vendor
-	requiredLibs := studio.GetLibraryNames(vendor)
+	// Find actual library files that were downloaded
+	// Use FindActualLibraryFiles instead of GetLibraryNames to handle libraries
+	// with different names (e.g., libaccelerator_nvidia-linux-amd64.so)
+	actualLibs := studio.FindActualLibraryFiles(cacheDir, vendor)
 
-	// Verify libraries exist after ensuring they're downloaded
-	missingLibs := []string{}
-	for _, lib := range requiredLibs {
-		libPath := filepath.Join(cacheDir, lib)
-		if _, err := os.Stat(libPath); os.IsNotExist(err) {
-			missingLibs = append(missingLibs, lib)
-		}
-	}
+	if len(actualLibs) == 0 {
+		// Get canonical library names for the warning message
+		requiredLibs := studio.GetLibraryNames(vendor)
 
-	if len(missingLibs) > 0 {
 		out.Println()
 		out.Warning("Missing required libraries in cache!")
 		out.Println()
 		out.Printf("Vendor:  %s\n", vendor)
-		out.Printf("Missing: %s\n", strings.Join(missingLibs, ", "))
+		out.Printf("Missing: %s\n", strings.Join(requiredLibs, ", "))
 		out.Println()
 		out.Println("Please run:")
 		out.Println("  ggo deps sync")
 		out.Println("  ggo deps download")
 		out.Println()
-		// Continue anyway - the libraries might be named differently or not yet available
-		klog.Warningf("Missing libraries for vendor %s (continuing anyway): %v", vendor, missingLibs)
+		klog.Warningf("No libraries found for vendor %s in %s (continuing anyway)", vendor, cacheDir)
 	}
 
 	// Setup log path (consistent with ggo use)
@@ -212,9 +207,9 @@ func runLaunch(args []string, shareLink, serverURL string, verbose bool) error {
 	}
 
 	// Build LD_PRELOAD with library paths
-	if len(requiredLibs) > 0 {
+	if len(actualLibs) > 0 {
 		var preloadPaths []string
-		for _, lib := range requiredLibs {
+		for _, lib := range actualLibs {
 			preloadPaths = append(preloadPaths, filepath.Join(cacheDir, lib))
 		}
 		existingPreload := os.Getenv("LD_PRELOAD")

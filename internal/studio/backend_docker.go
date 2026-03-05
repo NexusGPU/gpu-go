@@ -596,6 +596,58 @@ func findAvailablePort(_ int) int {
 	return SSHPortRangeMin + rand.Intn(SSHPortRangeMax-SSHPortRangeMin+1)
 }
 
+// EnsureSSHServer ensures SSH server is running in the container
+func (b *DockerBackend) EnsureSSHServer(ctx context.Context, envID string) error {
+	setupScript := `
+#!/bin/bash
+set -e
+
+# Install SSH if not present
+if ! command -v sshd &> /dev/null; then
+    if command -v apt-get &> /dev/null; then
+        apt-get update && apt-get install -y openssh-server
+    elif command -v yum &> /dev/null; then
+        yum install -y openssh-server
+    elif command -v apk &> /dev/null; then
+        apk add --no-cache openssh-server
+    fi
+fi
+
+# Configure SSH
+mkdir -p /var/run/sshd /root/.ssh
+chmod 700 /root/.ssh
+
+# Configure sshd to allow root login and listen on all interfaces
+cat > /etc/ssh/sshd_config.d/ggo-studio.conf <<'EOF'
+Port 22
+ListenAddress 0.0.0.0
+PermitRootLogin yes
+PasswordAuthentication yes
+PubkeyAuthentication yes
+UsePAM no
+EOF
+
+# Set root password if not already set (fallback for password auth)
+echo "root:gpugo" | chpasswd 2>/dev/null || true
+
+# Generate SSH host keys if they don't exist
+if [ ! -f /etc/ssh/ssh_host_rsa_key ]; then
+    ssh-keygen -A
+fi
+
+# Kill existing sshd processes (if any)
+pkill sshd || true
+
+# Start SSH server in background
+/usr/sbin/sshd
+
+echo "SSH server started"
+`
+
+	_, err := b.Exec(ctx, envID, []string{"bash", "-c", setupScript})
+	return err
+}
+
 var _ Backend = (*DockerBackend)(nil)
 
 func init() {

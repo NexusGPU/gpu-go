@@ -239,6 +239,13 @@ type BackendSocketPath interface {
 	SocketPath(ctx context.Context) string
 }
 
+// SSHServerBackend is an optional interface for backends that support SSH server setup.
+type SSHServerBackend interface {
+	Backend
+	// EnsureSSHServer ensures SSH server is running in the environment
+	EnsureSSHServer(ctx context.Context, envID string) error
+}
+
 // SSHConfig represents an SSH configuration entry
 type SSHConfig struct {
 	Host         string
