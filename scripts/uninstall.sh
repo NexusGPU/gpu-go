@@ -175,16 +175,52 @@ remove_config() {
     done
     
     # Root config (if running as root or with sudo)
+    local root_cleanup_failed=false
     if [ "$(id -u)" -eq 0 ] || [ -n "$(get_sudo)" ]; then
         if [ -d "/root/.config/ggo" ]; then
-            ${SUDO} rm -rf "/root/.config/ggo"
+            if ${SUDO} rm -rf "/root/.config/ggo" 2>/dev/null; then
+                info "Removed /root/.config/ggo"
+            else
+                warn "Failed to remove /root/.config/ggo (permission denied)"
+                root_cleanup_failed=true
+            fi
         fi
         if [ -d "/root/.gpugo" ]; then
-            ${SUDO} rm -rf "/root/.gpugo"
+            if ${SUDO} rm -rf "/root/.gpugo" 2>/dev/null; then
+                info "Removed /root/.gpugo"
+            else
+                warn "Failed to remove /root/.gpugo (permission denied)"
+                root_cleanup_failed=true
+            fi
+        fi
+    else
+        # Check if root directories exist but we can't remove them
+        if [ -d "/root/.config/ggo" ] || [ -d "/root/.gpugo" ]; then
+            warn "Root configuration directories exist but sudo is not available"
+            root_cleanup_failed=true
         fi
     fi
-    
+
     info "Configuration directories removed!"
+
+    # Warn about manual cleanup if root cleanup failed
+    if [ "${root_cleanup_failed}" = "true" ]; then
+        echo ""
+        warn "==============================================="
+        warn "  MANUAL CLEANUP REQUIRED"
+        warn "==============================================="
+        warn "Some configuration directories could not be removed automatically."
+        warn "Please run the following commands with appropriate permissions:"
+        warn ""
+        if [ -d "/root/.config/ggo" ]; then
+            warn "  sudo rm -rf /root/.config/ggo"
+        fi
+        if [ -d "/root/.gpugo" ]; then
+            warn "  sudo rm -rf /root/.gpugo"
+        fi
+        warn "==============================================="
+        echo ""
+    fi
 }
 
 # --- Kill running processes ---
@@ -206,17 +242,24 @@ kill_processes() {
 
 # --- Unregister from server ---
 unregister_from_server() {
-    local binary_path="${GGO_INSTALL_DIR:-/usr/local/bin}/${BINARY_NAME}"
-    if [ ! -f "${binary_path}" ]; then
-        binary_path="/usr/local/bin/${BINARY_NAME}"
-    fi
+    # Search for ggo binary in multiple locations
+    local binary_path=""
+    local search_paths="${GGO_INSTALL_DIR:-/usr/local/bin}/${BINARY_NAME} /usr/local/bin/${BINARY_NAME} /usr/bin/${BINARY_NAME} /opt/bin/${BINARY_NAME} ${HOME}/.local/bin/${BINARY_NAME} ${HOME}/bin/${BINARY_NAME}"
 
-    if [ ! -f "${binary_path}" ]; then
-        warn "ggo binary not found, skipping server unregistration"
+    for path in ${search_paths}; do
+        if [ -f "${path}" ] && [ -x "${path}" ]; then
+            binary_path="${path}"
+            break
+        fi
+    done
+
+    if [ -z "${binary_path}" ]; then
+        warn "ggo binary not found in common locations, skipping server unregistration"
+        warn "Searched: ${search_paths}"
         return 0
     fi
 
-    info "Unregistering agent from server..."
+    info "Unregistering agent from server (using binary at ${binary_path})..."
     if "${binary_path}" agent unregister --force 2>/dev/null; then
         info "Agent unregistered from server"
     else
