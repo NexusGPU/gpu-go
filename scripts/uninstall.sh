@@ -260,10 +260,35 @@ unregister_from_server() {
     fi
 
     info "Unregistering agent from server (using binary at ${binary_path})..."
-    if "${binary_path}" agent unregister --force 2>/dev/null; then
+
+    # Check if agent config exists in root directory (agent mode)
+    # If so, we need to run unregister with sudo
+    local needs_sudo=false
+    if [ -f "/root/.gpugo/config/agent.yaml" ] || [ -f "/root/.config/ggo/agent.yaml" ]; then
+        needs_sudo=true
+        info "Agent config found in root directory, using sudo for unregistration"
+    fi
+
+    # Run unregister command
+    local unregister_result=0
+    if [ "${needs_sudo}" = "true" ]; then
+        SUDO=$(get_sudo)
+        if [ -n "${SUDO}" ]; then
+            ${SUDO} "${binary_path}" agent unregister --force 2>/dev/null || unregister_result=$?
+        else
+            warn "Sudo not available, attempting unregister without sudo (may fail)"
+            "${binary_path}" agent unregister --force 2>/dev/null || unregister_result=$?
+        fi
+    else
+        "${binary_path}" agent unregister --force 2>/dev/null || unregister_result=$?
+    fi
+
+    if [ ${unregister_result} -eq 0 ]; then
         info "Agent unregistered from server"
     else
-        warn "Server unregistration failed, local config will still be removed"
+        warn "Server unregistration failed (exit code: ${unregister_result})"
+        warn "Local config will still be removed"
+        warn "You may need to manually remove the agent from the server dashboard"
     fi
 }
 
