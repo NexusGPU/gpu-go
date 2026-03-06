@@ -206,14 +206,17 @@ func SetupGPUEnv(paths *platform.Paths, config *GPUEnvConfig) (*GPUEnvResult, er
 		return nil, fmt.Errorf("failed to create connections directory: %w", err)
 	}
 
-	// Set TF_CONNECTION_INFO_PATH for tensor-fusion-worker
+	// Set TF_CONNECTION_INFO_PATH to studio-specific file path (not directory)
+	// tensor-fusion-worker will write connection info to this file, one line per connection
+	var connectionInfoPath string
 	if !config.IsContainer {
-		// On host, use actual connections directory
-		result.EnvVars["TF_CONNECTION_INFO_PATH"] = connectionsDir
+		// On host, use actual connections file with studio name
+		connectionInfoPath = filepath.Join(connectionsDir, config.StudioName+".txt")
 	} else {
-		// In container, use mounted path
-		result.EnvVars["TF_CONNECTION_INFO_PATH"] = "/var/run/tensor-fusion/connections"
+		// In container, use mounted path with studio name
+		connectionInfoPath = filepath.Join("/var/run/tensor-fusion/connections", config.StudioName+".txt")
 	}
+	result.EnvVars["TF_CONNECTION_INFO_PATH"] = connectionInfoPath
 
 	// Add cache path to PATH (for tensor-fusion-worker binary)
 	if !config.IsContainer {

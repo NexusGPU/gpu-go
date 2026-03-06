@@ -25,8 +25,9 @@ import (
 const (
 	statusReportInterval = 30 * time.Second
 	forceRefreshInterval = 6 * time.Hour
-	// EnvConnectionInfoPath is the environment variable name for connection info directory path
-	// Workers should write their connections to: {TF_CONNECTION_INFO_PATH}/{workerID}.txt
+	// EnvConnectionInfoPath is the environment variable name for connection info file path
+	// Set to worker-specific file: {connectionsDir}/{workerID}.txt
+	// Worker writes connection info to this file, one line per connection
 	EnvConnectionInfoPath = "TF_CONNECTION_INFO_PATH"
 
 	// Worker status constants
@@ -231,12 +232,12 @@ func (a *Agent) Start() error {
 	}
 
 	// Set TF_CONNECTION_INFO_PATH environment variable for worker processes
-	// Workers will write connection info to: {TF_CONNECTION_INFO_PATH}/{workerID}.txt
-	// Each worker has its own file with format: clientIP,clientPort,clientPID (one per line)
+	// Each worker gets its own file: {connectionsDir}/{workerID}.txt
+	// Workers write connection info to their file, one line per connection (format: clientIP,clientPort,clientPID)
 	if err := os.Setenv(EnvConnectionInfoPath, a.connectionsDir); err != nil {
 		klog.Warningf("Failed to set %s env var: error=%v", EnvConnectionInfoPath, err)
 	} else {
-		klog.V(4).Infof("Set %s=%s for worker processes", EnvConnectionInfoPath, a.connectionsDir)
+		klog.V(4).Infof("Set %s=%s (base dir, workers get {workerID}.txt)", EnvConnectionInfoPath, a.connectionsDir)
 	}
 
 	// Write PID file
@@ -447,7 +448,9 @@ func (a *Agent) convertToWorkerInfos(apiWorkers []api.WorkerConfig) ([]*hvApi.Wo
 		envVars["TF_ENABLE_LOG"] = "1"
 		envVars[EnvURLAuth] = "1"
 		envVars[EnvAuthorizedKeyPath] = filepath.Join(a.paths.ConfigDir(), w.WorkerID+"_share_codes")
-		envVars[EnvConnectionInfoPath] = a.connectionsDir
+		// Set TF_CONNECTION_INFO_PATH to the worker's specific connection file (not directory)
+		// Worker will write connection info to this file, one line per connection
+		envVars[EnvConnectionInfoPath] = filepath.Join(a.connectionsDir, w.WorkerID+".txt")
 
 		// Set hard limiter environment variables for Fractional GPU support
 		// TODO: use MIG for partitioned
