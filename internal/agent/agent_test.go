@@ -592,7 +592,9 @@ func TestAgent_ConvertToWorkerInfos_IncludesConnectionInfoPath(t *testing.T) {
 	require.Len(t, infos, 1)
 	require.NotNil(t, infos[0].WorkerRunningInfo)
 
-	assert.Equal(t, agent.connectionsDir, infos[0].WorkerRunningInfo.Env[EnvConnectionInfoPath])
+	// TF_CONNECTION_INFO_PATH should point to worker-specific file, not directory
+	expectedPath := filepath.Join(agent.connectionsDir, "worker_1.txt")
+	assert.Equal(t, expectedPath, infos[0].WorkerRunningInfo.Env[EnvConnectionInfoPath])
 }
 
 func TestAgent_LicenseParsing(t *testing.T) {
