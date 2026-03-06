@@ -157,6 +157,12 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	// Build docker run command
 	args := []string{"run", "-d", "--name", containerName}
 
+	// Add security options for SSH to work in containers
+	// SSH's privilege separation requires certain capabilities that Docker's
+	// default seccomp profile blocks, causing "mm_request_receive: bad msg_len" errors
+	// See: https://github.com/moby/moby/issues/42866
+	args = append(args, "--cap-add", "AUDIT_WRITE")
+
 	// Add platform flag if specified
 	if platform != "" {
 		args = append(args, "--platform", platform)
