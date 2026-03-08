@@ -455,7 +455,9 @@ func (a *Agent) convertToWorkerInfos(apiWorkers []api.WorkerConfig) ([]*hvApi.Wo
 
 		// Set TF_CONNECTION_INFO_PATH to the worker's specific connection file (not directory)
 		// Worker will write connection info to this file, one line per connection
-		envVars[EnvConnectionInfoPath] = filepath.Join(a.connectionsDir, w.WorkerID+".txt")
+		connectionInfoPath := filepath.Join(a.connectionsDir, w.WorkerID+".txt")
+		envVars[EnvConnectionInfoPath] = connectionInfoPath
+		klog.V(4).Infof("Worker %s: Set %s=%s", w.WorkerID, EnvConnectionInfoPath, connectionInfoPath)
 
 		// Set hard limiter environment variables for Fractional GPU support
 		// TODO: use MIG for partitioned
@@ -805,13 +807,18 @@ func (a *Agent) detectWorkerChanges(currentWorkers []*hvApi.WorkerInfo) map[stri
 func (a *Agent) readConnectionsFromDir() (map[string][]string, error) {
 	connections := make(map[string][]string)
 
+	klog.V(5).Infof("Reading connections from directory: %s", a.connectionsDir)
+
 	entries, err := os.ReadDir(a.connectionsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
+			klog.V(5).Infof("Connections directory does not exist yet: %s", a.connectionsDir)
 			return connections, nil // No connections directory yet
 		}
 		return nil, fmt.Errorf("failed to read connections directory: %w", err)
 	}
+
+	klog.V(5).Infof("Found %d entries in connections directory", len(entries))
 
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".txt") {
@@ -833,7 +840,18 @@ func (a *Agent) readConnectionsFromDir() (map[string][]string, error) {
 
 		if len(connLines) > 0 {
 			connections[workerID] = connLines
+			klog.V(4).Infof("Worker %s has %d active connection(s): %v", workerID, len(connLines), connLines)
 		}
+	}
+
+	if len(connections) > 0 {
+		totalConns := 0
+		for _, conns := range connections {
+			totalConns += len(conns)
+		}
+		klog.V(4).Infof("Total connections across all workers: %d", totalConns)
+	} else {
+		klog.V(5).Infof("No active connections found in any worker connection files")
 	}
 
 	return connections, nil
@@ -1156,6 +1174,9 @@ func (a *Agent) collectWorkerStatusFromHypervisor(
 		var connections []api.ConnectionInfo
 		if connLines, ok := currentConnections[w.WorkerUID]; ok {
 			connections = parseConnectionsToAPI(connLines)
+			if len(connections) > 0 {
+				klog.V(4).Infof("Worker %s: Reporting %d connection(s) to server", w.WorkerUID, len(connections))
+			}
 		}
 
 		gpuIndices := resolveWorkerGPUIndices(w.WorkerUID, nil, w.AllocatedDevices, gpuIndexByID)
@@ -1171,8 +1192,8 @@ func (a *Agent) collectWorkerStatusFromHypervisor(
 			ConnectionChanged: &connectionChanged,
 			GPUChanged:        &gpuChanged,
 		})
-		summaryParts = append(summaryParts, fmt.Sprintf("%s(status=%s,pid=%d,restarts=%d,wc=%v,cc=%v,gc=%v)",
-			w.WorkerUID, status, pid, restarts, workerChanged, connectionChanged, gpuChanged))
+		summaryParts = append(summaryParts, fmt.Sprintf("%s(status=%s,pid=%d,conns=%d,wc=%v,cc=%v,gc=%v)",
+			w.WorkerUID, status, pid, len(connections), workerChanged, connectionChanged, gpuChanged))
 	}
 
 	if len(hvWorkers) > 0 {
@@ -1208,6 +1229,9 @@ func (a *Agent) collectWorkerStatusFromConfig(
 		connections := w.Connections
 		if connLines, ok := currentConnections[w.WorkerID]; ok {
 			connections = parseConnectionsToAPI(connLines)
+			if len(connections) > 0 {
+				klog.V(4).Infof("Worker %s: Reporting %d connection(s) to server (config fallback)", w.WorkerID, len(connections))
+			}
 		}
 
 		gpuIndices := resolveWorkerGPUIndices(w.WorkerID, w.GPUIndices, w.GPUIDs, gpuIndexByID)
