@@ -294,7 +294,7 @@ unregister_from_server() {
     # Check if agent config exists in root directory (agent mode)
     # If so, we need to run unregister with sudo
     local needs_sudo=false
-    if [ -f "/root/.gpugo/config/agent.yaml" ] || [ -f "/root/.config/ggo/agent.yaml" ]; then
+    if [ -f "/root/.gpugo/config/config.json" ] || [ -f "/root/.gpugo/config/agent.yaml" ] || [ -f "/root/.config/ggo/agent.yaml" ]; then
         needs_sudo=true
         info "Agent config found in root directory, using sudo for unregistration"
     fi
