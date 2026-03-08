@@ -299,22 +299,24 @@ unregister_from_server() {
         info "Agent config found in root directory, using sudo for unregistration"
     fi
 
-    # Run unregister command
+    # Run unregister command (don't suppress output so user can see what happened)
     local unregister_result=0
     if [ "${needs_sudo}" = "true" ]; then
         SUDO=$(get_sudo)
         if [ -n "${SUDO}" ]; then
-            ${SUDO} "${binary_path}" agent unregister --force 2>/dev/null || unregister_result=$?
+            ${SUDO} "${binary_path}" agent unregister --force || unregister_result=$?
         else
             warn "Sudo not available, attempting unregister without sudo (may fail)"
-            "${binary_path}" agent unregister --force 2>/dev/null || unregister_result=$?
+            "${binary_path}" agent unregister --force || unregister_result=$?
         fi
     else
-        "${binary_path}" agent unregister --force 2>/dev/null || unregister_result=$?
+        "${binary_path}" agent unregister --force || unregister_result=$?
     fi
 
+    # Check result - exit code 0 means command succeeded (either unregistered or was not registered)
     if [ ${unregister_result} -eq 0 ]; then
-        info "Agent unregistered from server"
+        # Success - either unregistered or wasn't registered, both are fine
+        :
     else
         warn "Server unregistration failed (exit code: ${unregister_result})"
         warn "Local config will still be removed"
