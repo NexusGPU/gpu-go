@@ -231,14 +231,9 @@ func (a *Agent) Start() error {
 		klog.Warningf("Failed to create connections directory: path=%s error=%v", a.connectionsDir, err)
 	}
 
-	// Set TF_CONNECTION_INFO_PATH environment variable for worker processes
+	// Note: TF_CONNECTION_INFO_PATH is set per-worker in convertToWorkerInfos() as worker-specific file path
 	// Each worker gets its own file: {connectionsDir}/{workerID}.txt
 	// Workers write connection info to their file, one line per connection (format: clientIP,clientPort,clientPID)
-	if err := os.Setenv(EnvConnectionInfoPath, a.connectionsDir); err != nil {
-		klog.Warningf("Failed to set %s env var: error=%v", EnvConnectionInfoPath, err)
-	} else {
-		klog.V(4).Infof("Set %s=%s (base dir, workers get {workerID}.txt)", EnvConnectionInfoPath, a.connectionsDir)
-	}
 
 	// Write PID file
 	if err := a.writePIDFile(); err != nil {
@@ -448,6 +443,16 @@ func (a *Agent) convertToWorkerInfos(apiWorkers []api.WorkerConfig) ([]*hvApi.Wo
 		envVars["TF_ENABLE_LOG"] = "1"
 		envVars[EnvURLAuth] = "1"
 		envVars[EnvAuthorizedKeyPath] = filepath.Join(a.paths.ConfigDir(), w.WorkerID+"_share_codes")
+
+		// Set TF_LOG_PATH for tensor-fusion-worker to save logs to a specific file
+		logsDir := filepath.Join(a.config.StateDir(), "logs")
+		if err := os.MkdirAll(logsDir, 0755); err != nil {
+			klog.Warningf("Failed to create logs directory: path=%s error=%v", logsDir, err)
+		}
+		workerLogPath := filepath.Join(logsDir, "worker-"+w.WorkerID+".log")
+		envVars["TF_LOG_PATH"] = workerLogPath
+		envVars["TF_LOG_LEVEL"] = getEnvWithDefault("TF_LOG_LEVEL", "info")
+
 		// Set TF_CONNECTION_INFO_PATH to the worker's specific connection file (not directory)
 		// Worker will write connection info to this file, one line per connection
 		envVars[EnvConnectionInfoPath] = filepath.Join(a.connectionsDir, w.WorkerID+".txt")
@@ -1424,4 +1429,12 @@ func GetLocalStatus(paths *platform.Paths) LocalStatus {
 	}
 
 	return LocalStatus{Running: true, PID: pid}
+}
+
+// getEnvWithDefault gets an environment variable or returns a default value
+func getEnvWithDefault(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
 }

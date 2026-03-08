@@ -71,6 +71,16 @@ remove_systemd_service() {
     
     info "Stopping systemd service..."
     SUDO=$(get_sudo)
+
+    # Refresh sudo timestamp to prevent password prompts during removal
+    if [ -n "${SUDO}" ]; then
+        ${SUDO} -v 2>/dev/null || true
+    fi
+
+    # Refresh sudo timestamp to prevent password prompts during removal
+    if [ -n "${SUDO}" ]; then
+        ${SUDO} -v 2>/dev/null || true
+    fi
     
     # Stop service
     ${SUDO} systemctl stop "${SYSTEMD_SERVICE_NAME}" 2>/dev/null || true
@@ -107,6 +117,11 @@ remove_launchd_service() {
     if [ -f "${PLIST_FILE_SYSTEM}" ]; then
         info "Stopping launchd system daemon..."
         SUDO=$(get_sudo)
+
+    # Refresh sudo timestamp to prevent password prompts during removal
+    if [ -n "${SUDO}" ]; then
+        ${SUDO} -v 2>/dev/null || true
+    fi
         ${SUDO} launchctl unload "${PLIST_FILE_SYSTEM}" 2>/dev/null || true
         ${SUDO} rm -f "${PLIST_FILE_SYSTEM}"
         info "System launch daemon removed!"
@@ -138,6 +153,11 @@ remove_binary() {
     info "Removing binary at ${BINARY_PATH}..."
     
     SUDO=$(get_sudo)
+
+    # Refresh sudo timestamp to prevent password prompts during removal
+    if [ -n "${SUDO}" ]; then
+        ${SUDO} -v 2>/dev/null || true
+    fi
     
     # Check if we need sudo
     if [ -w "$(dirname "${BINARY_PATH}")" ]; then
@@ -165,6 +185,11 @@ remove_config() {
     
     # System config (Linux)
     SUDO=$(get_sudo)
+
+    # Refresh sudo timestamp to prevent password prompts during removal
+    if [ -n "${SUDO}" ]; then
+        ${SUDO} -v 2>/dev/null || true
+    fi
     SYSTEM_DIRS="/var/lib/ggo /etc/ggo"
     
     for dir in ${SYSTEM_DIRS}; do
@@ -273,6 +298,11 @@ unregister_from_server() {
     local unregister_result=0
     if [ "${needs_sudo}" = "true" ]; then
         SUDO=$(get_sudo)
+
+    # Refresh sudo timestamp to prevent password prompts during removal
+    if [ -n "${SUDO}" ]; then
+        ${SUDO} -v 2>/dev/null || true
+    fi
         if [ -n "${SUDO}" ]; then
             ${SUDO} "${binary_path}" agent unregister --force 2>/dev/null || unregister_result=$?
         else

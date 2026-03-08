@@ -200,8 +200,13 @@ setup_systemd_service() {
     
     # Require sudo for systemd operations
     require_sudo_for_systemd
-    
+
     SUDO=$(get_sudo)
+
+    # Refresh sudo timestamp to prevent password prompts during installation
+    if [ -n "${SUDO}" ]; then
+        ${SUDO} -v || fatal "Failed to refresh sudo credentials"
+    fi
     
     # Build environment variables section
     ENV_VARS=""
@@ -301,6 +306,11 @@ register_agent() {
     
     # Get sudo command (empty if already root)
     SUDO=$(get_sudo)
+
+    # Refresh sudo timestamp to prevent password prompts during registration
+    if [ -n "${SUDO}" ]; then
+        ${SUDO} -v || fatal "Failed to refresh sudo credentials"
+    fi
     
     # Build register command
     # Use sudo to ensure config is saved to root's home directory (~/.gpugo/config)
@@ -393,6 +403,11 @@ main() {
     
     # Check if we need sudo
     SUDO=$(get_sudo)
+
+    # Refresh sudo timestamp to prevent password prompts during installation
+    if [ -n "${SUDO}" ]; then
+        ${SUDO} -v || fatal "Failed to refresh sudo credentials"
+    fi
     
     # Create install directory if needed
     if [ ! -d "${INSTALL_DIR}" ]; then
