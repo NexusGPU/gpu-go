@@ -1171,7 +1171,8 @@ func (a *Agent) collectWorkerStatusFromHypervisor(
 		gpuChanged := forceRefresh || a.anyGPUChanged(w.AllocatedDevices, gpuChanges)
 
 		// Get connections for this worker
-		var connections []api.ConnectionInfo
+		// Initialize as empty slice (not nil) so it marshals to [] instead of null in JSON
+		connections := make([]api.ConnectionInfo, 0)
 		if connLines, ok := currentConnections[w.WorkerUID]; ok {
 			connections = parseConnectionsToAPI(connLines)
 			if len(connections) > 0 {
@@ -1226,7 +1227,12 @@ func (a *Agent) collectWorkerStatusFromConfig(
 		workerChanged := true
 		connectionChanged := true
 		gpuChanged := forceRefresh || len(gpuChanges) > 0
-		connections := w.Connections
+
+		// Initialize as empty slice (not nil) so it marshals to [] instead of null in JSON
+		connections := make([]api.ConnectionInfo, 0)
+		if w.Connections != nil {
+			connections = w.Connections
+		}
 		if connLines, ok := currentConnections[w.WorkerID]; ok {
 			connections = parseConnectionsToAPI(connLines)
 			if len(connections) > 0 {
