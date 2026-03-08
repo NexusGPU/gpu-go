@@ -138,12 +138,21 @@ remove_binary() {
 
     # Check if we need sudo
     if [ -w "$(dirname "${BINARY_PATH}")" ]; then
-        rm -f "${BINARY_PATH}"
+        if rm -f "${BINARY_PATH}" 2>/dev/null; then
+            info "Binary removed!"
+        else
+            warn "Failed to remove binary at ${BINARY_PATH}"
+            return 1
+        fi
     else
-        ${SUDO} rm -f "${BINARY_PATH}"
+        if ${SUDO} rm -f "${BINARY_PATH}" 2>/dev/null; then
+            info "Binary removed!"
+        else
+            warn "Failed to remove binary at ${BINARY_PATH} (permission denied or sudo not available)"
+            warn "Please run: sudo rm -f ${BINARY_PATH}"
+            return 1
+        fi
     fi
-    
-    info "Binary removed!"
 }
 
 # --- Remove config directories ---
@@ -163,11 +172,17 @@ remove_config() {
     # System config (Linux)
     SUDO=$(get_sudo)
     SYSTEM_DIRS="/var/lib/ggo /etc/ggo"
-    
+    local system_cleanup_failed=false
+
     for dir in ${SYSTEM_DIRS}; do
         if [ -d "${dir}" ]; then
             info "Removing ${dir}..."
-            ${SUDO} rm -rf "${dir}"
+            if ${SUDO} rm -rf "${dir}" 2>/dev/null; then
+                info "Successfully removed ${dir}"
+            else
+                warn "Failed to remove ${dir} (permission denied or sudo not available)"
+                system_cleanup_failed=true
+            fi
         fi
     done
     
@@ -209,7 +224,7 @@ remove_config() {
     info "Configuration directories removed!"
 
     # Warn about manual cleanup if root cleanup failed
-    if [ "${root_cleanup_failed}" = "true" ]; then
+    if [ "${root_cleanup_failed}" = "true" ] || [ "${system_cleanup_failed}" = "true" ]; then
         echo ""
         warn "==============================================="
         warn "  MANUAL CLEANUP REQUIRED"
@@ -217,6 +232,13 @@ remove_config() {
         warn "Some configuration directories could not be removed automatically."
         warn "Please run the following commands with appropriate permissions:"
         warn ""
+        if [ "${system_cleanup_failed}" = "true" ]; then
+            for dir in ${SYSTEM_DIRS}; do
+                if [ -d "${dir}" ]; then
+                    warn "  sudo rm -rf ${dir}"
+                fi
+            done
+        fi
         if [ -d "/root/.config/ggo" ]; then
             warn "  sudo rm -rf /root/.config/ggo"
         fi
