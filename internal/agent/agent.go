@@ -808,19 +808,24 @@ func (a *Agent) readConnectionsFromDir() (map[string][]string, error) {
 	connections := make(map[string][]string)
 
 	klog.V(5).Infof("Reading connections from directory: %s", a.connectionsDir)
+	klog.Infof("[DEBUG] Scanning connections directory: %s", a.connectionsDir)
 
 	entries, err := os.ReadDir(a.connectionsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			klog.V(5).Infof("Connections directory does not exist yet: %s", a.connectionsDir)
+			klog.Infof("[DEBUG] Connections directory does not exist: %s", a.connectionsDir)
 			return connections, nil // No connections directory yet
 		}
+		klog.Infof("[DEBUG] Failed to read connections directory %s: %v", a.connectionsDir, err)
 		return nil, fmt.Errorf("failed to read connections directory: %w", err)
 	}
 
 	klog.V(5).Infof("Found %d entries in connections directory", len(entries))
+	klog.Infof("[DEBUG] Found %d file entries in directory: %s", len(entries), a.connectionsDir)
 
 	for _, entry := range entries {
+		klog.Infof("[DEBUG] Processing entry: name=%s, isDir=%v", entry.Name(), entry.IsDir())
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".txt") {
 			continue
 		}
@@ -832,15 +837,20 @@ func (a *Agent) readConnectionsFromDir() (map[string][]string, error) {
 		}
 
 		// Read connection lines from worker's file
-		connLines, err := a.readWorkerConnectionFile(filepath.Join(a.connectionsDir, entry.Name()))
+		filePath := filepath.Join(a.connectionsDir, entry.Name())
+		klog.Infof("[DEBUG] Reading connection file for worker %s: %s", workerID, filePath)
+		connLines, err := a.readWorkerConnectionFile(filePath)
 		if err != nil {
 			klog.V(4).Infof("Failed to read connection file for worker %s: %v", workerID, err)
+			klog.Infof("[DEBUG] Failed to read connection file for worker %s: %v", workerID, err)
 			continue
 		}
 
+		klog.Infof("[DEBUG] Worker %s: Read %d connection line(s) from file", workerID, len(connLines))
 		if len(connLines) > 0 {
 			connections[workerID] = connLines
 			klog.V(4).Infof("Worker %s has %d active connection(s): %v", workerID, len(connLines), connLines)
+			klog.Infof("[DEBUG] Worker %s has %d active connection(s): %v", workerID, len(connLines), connLines)
 		}
 	}
 
@@ -948,15 +958,23 @@ func parseConnectionsToAPI(connectionLines []string) []api.ConnectionInfo {
 		if len(parts) < 1 || parts[0] == "" {
 			continue
 		}
-		clientIP := strings.TrimSpace(parts[0])
+		// Trim whitespace and null bytes from IP address
+		clientIP := strings.Trim(strings.TrimSpace(parts[0]), "\x00")
+		if clientIP == "" {
+			continue
+		}
 		var clientPort, clientPID int
 		if len(parts) >= 2 {
-			if port, err := strconv.Atoi(strings.TrimSpace(parts[1])); err == nil {
+			// Trim whitespace and null bytes from port
+			portStr := strings.Trim(strings.TrimSpace(parts[1]), "\x00")
+			if port, err := strconv.Atoi(portStr); err == nil {
 				clientPort = port
 			}
 		}
 		if len(parts) >= 3 {
-			if pid, err := strconv.Atoi(strings.TrimSpace(parts[2])); err == nil {
+			// Trim whitespace and null bytes from PID
+			pidStr := strings.Trim(strings.TrimSpace(parts[2]), "\x00")
+			if pid, err := strconv.Atoi(pidStr); err == nil {
 				clientPID = pid
 			}
 		}
