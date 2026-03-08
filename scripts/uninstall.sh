@@ -210,6 +210,14 @@ remove_config() {
                 root_cleanup_failed=true
             fi
         fi
+        if [ -d "/root/.ggo" ]; then
+            if ${SUDO} rm -rf "/root/.ggo" 2>/dev/null; then
+                info "Removed /root/.ggo"
+            else
+                warn "Failed to remove /root/.ggo (permission denied)"
+                root_cleanup_failed=true
+            fi
+        fi
         if [ -d "/root/.gpugo" ]; then
             if ${SUDO} rm -rf "/root/.gpugo" 2>/dev/null; then
                 info "Removed /root/.gpugo"
@@ -220,7 +228,7 @@ remove_config() {
         fi
     else
         # Check if root directories exist but we can't remove them
-        if [ -d "/root/.config/ggo" ] || [ -d "/root/.gpugo" ]; then
+        if [ -d "/root/.config/ggo" ] || [ -d "/root/.ggo" ] || [ -d "/root/.gpugo" ]; then
             warn "Root configuration directories exist but sudo is not available"
             root_cleanup_failed=true
         fi
@@ -239,6 +247,9 @@ remove_config() {
         warn ""
         if [ -d "/root/.config/ggo" ]; then
             warn "  sudo rm -rf /root/.config/ggo"
+        fi
+        if [ -d "/root/.ggo" ]; then
+            warn "  sudo rm -rf /root/.ggo"
         fi
         if [ -d "/root/.gpugo" ]; then
             warn "  sudo rm -rf /root/.gpugo"
