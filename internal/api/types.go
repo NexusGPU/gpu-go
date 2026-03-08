@@ -113,7 +113,7 @@ type WorkerStatus struct {
 	Restarts    int              `json:"restarts,omitempty"`
 	GPUIDs      []string         `json:"gpu_ids"`
 	GPUIndices  []int            `json:"gpu_indices,omitempty"`
-	Connections []ConnectionInfo `json:"connections,omitempty"`
+	Connections []ConnectionInfo `json:"connections"` // Removed omitempty - always send connections field (empty array or with data)
 	// Optimization flags - only update DB when these are true
 	WorkerChanged     *bool `json:"worker_changed,omitempty"`     // true if status/pid/restarts/gpu_ids changed
 	ConnectionChanged *bool `json:"connection_changed,omitempty"` // true if connections changed
