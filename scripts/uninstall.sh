@@ -300,11 +300,13 @@ unregister_from_server() {
     fi
 
     # Run unregister command (don't suppress output so user can see what happened)
+    # When using sudo, explicitly specify root's config dir since the command
+    # defaults to the calling user's home directory, not root's
     local unregister_result=0
     if [ "${needs_sudo}" = "true" ]; then
         SUDO=$(get_sudo)
         if [ -n "${SUDO}" ]; then
-            ${SUDO} "${binary_path}" agent unregister --force || unregister_result=$?
+            ${SUDO} "${binary_path}" agent unregister --config-dir /root/.gpugo/config --force || unregister_result=$?
         else
             warn "Sudo not available, attempting unregister without sudo (may fail)"
             "${binary_path}" agent unregister --force || unregister_result=$?
