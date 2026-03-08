@@ -850,8 +850,11 @@ func (a *Agent) readConnectionsFromDir() (map[string][]string, error) {
 			totalConns += len(conns)
 		}
 		klog.V(4).Infof("Total connections across all workers: %d", totalConns)
+		// Always log connection detection for debugging
+		klog.Infof("[DEBUG] Found %d worker(s) with active connections (total %d connections)", len(connections), totalConns)
 	} else {
 		klog.V(5).Infof("No active connections found in any worker connection files")
+		klog.Infof("[DEBUG] No active connections found in connections directory: %s", a.connectionsDir)
 	}
 
 	return connections, nil
@@ -1177,6 +1180,7 @@ func (a *Agent) collectWorkerStatusFromHypervisor(
 			connections = parseConnectionsToAPI(connLines)
 			if len(connections) > 0 {
 				klog.V(4).Infof("Worker %s: Reporting %d connection(s) to server", w.WorkerUID, len(connections))
+				klog.Infof("[DEBUG] Worker %s: Sending %d connection(s) to server: %+v", w.WorkerUID, len(connections), connections)
 			}
 		}
 
