@@ -1267,6 +1267,7 @@ func (a *Agent) collectWorkerStatusFromConfig(
 			WorkerID:          w.WorkerID,
 			Status:            normalizeWorkerStatus(w.Status),
 			PID:               w.PID,
+			Restarts:          0, // Config fallback has no restart info
 			GPUIDs:            w.GPUIDs,
 			GPUIndices:        gpuIndices,
 			Connections:       connections,
