@@ -299,9 +299,29 @@ export function getWebviewContent(
             font-family: var(--vscode-editor-font-family);
         }
 
-        .share-link-item .copy-share-btn,
-        .share-link-item vscode-button[appearance="icon"] {
-            color: var(--vscode-foreground);
+        .share-link-item .copy-share-btn {
+            background: transparent;
+            border: 1px solid var(--vscode-button-border, transparent);
+            color: var(--vscode-button-foreground);
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 2px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background-color 0.1s ease;
+        }
+
+        .share-link-item .copy-share-btn:hover {
+            background: var(--vscode-button-hoverBackground);
+        }
+
+        .share-link-item .copy-share-btn:active {
+            background: var(--vscode-button-secondaryHoverBackground);
+        }
+
+        .share-link-item .copy-share-btn .codicon {
+            font-size: 14px;
         }
 
         /* Responsive adjustments */

@@ -177,9 +177,9 @@ export class WorkerDetailPanel {
                     <div class="share-link-item">
                         <code>${s.shortLink}</code>
                         <span class="description">Used ${s.usedCount}x</span>
-                        <vscode-button appearance="icon" class="copy-share-btn" data-link="${s.shortLink}" title="Copy link">
-                            <vscode-icon name="copy"></vscode-icon>
-                        </vscode-button>
+                        <button class="copy-share-btn" data-link="${s.shortLink}" title="Copy link">
+                            <i class="codicon codicon-copy"></i>
+                        </button>
                     </div>
                 `).join('')}
             </div>
