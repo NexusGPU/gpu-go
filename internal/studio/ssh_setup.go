@@ -117,10 +117,11 @@ echo "SSH setup completed successfully"
 		}
 	}
 
-	// Start SSH daemon in background with TensorFusion logging disabled
-	// TF_ENABLE_LOG=0 prevents GPU library logs from interfering with SSH protocol
+	// Start SSH daemon in background
+	// Note: With CAP_SYS_ADMIN capability (added in backend_docker.go), SSH works correctly
+	// even with TensorFusion GPU libraries loaded via /etc/ld.so.preload
 	klog.V(2).Infof("Starting SSH daemon in container")
-	startSSHCmd := execCmd("exec", "-d", containerID, "sh", "-c", "TF_ENABLE_LOG=0 /usr/sbin/sshd -D")
+	startSSHCmd := execCmd("exec", "-d", containerID, "/usr/sbin/sshd", "-D")
 	if output, err := startSSHCmd.CombinedOutput(); err != nil {
 		klog.Errorf("Failed to start SSH daemon: %v, output: %s", err, string(output))
 		return fmt.Errorf("failed to start SSH daemon: %w\nOutput: %s", err, string(output))

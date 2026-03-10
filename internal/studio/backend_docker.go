@@ -167,6 +167,9 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	// default seccomp profile blocks, causing "mm_request_receive: bad msg_len" errors
 	// See: https://github.com/moby/moby/issues/42866
 	args = append(args, "--cap-add", "AUDIT_WRITE")
+	// Also add SYS_ADMIN to allow unshare for isolating /etc/ld.so.preload in SSH processes
+	// This prevents TensorFusion GPU libraries from interfering with SSH privilege separation
+	args = append(args, "--cap-add", "SYS_ADMIN")
 
 	// Add platform flag if specified
 	if platform != "" {
