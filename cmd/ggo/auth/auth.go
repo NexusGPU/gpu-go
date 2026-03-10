@@ -21,7 +21,7 @@ import (
 
 const (
 	tokenFileName   = "token.json"
-	dashboardURL    = "https://tensor-fusion.ai/settings/security#ide-extension"
+	dashboardURL    = "https://go.gpu.tf/settings/security#ide-extension"
 	defaultTokenTTL = 365 * 24 * time.Hour // 1 year
 )
 
