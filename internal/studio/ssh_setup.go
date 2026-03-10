@@ -38,11 +38,31 @@ else
     # Detect package manager and install openssh-server
     if command -v apt-get >/dev/null 2>&1; then
         export DEBIAN_FRONTEND=noninteractive
-        printf "   Installing SSH (30-60s): updating packages"
-        apt-get update -qq 2>&1 || true
-        printf "."
-        apt-get install -y -qq openssh-server sudo 2>&1 || true
-        printf ". done\n"
+        printf "   Installing SSH (30-60s): "
+
+        # Update packages with progress dots
+        (
+            apt-get update -qq >/dev/null 2>&1 &
+            pid=$!
+            while kill -0 $pid 2>/dev/null; do
+                printf "."
+                sleep 2
+            done
+            wait $pid
+        )
+
+        # Install packages with progress dots
+        (
+            apt-get install -y -qq openssh-server sudo >/dev/null 2>&1 &
+            pid=$!
+            while kill -0 $pid 2>/dev/null; do
+                printf "."
+                sleep 2
+            done
+            wait $pid
+        )
+
+        printf " done\n"
         mkdir -p /run/sshd
     elif command -v apk >/dev/null 2>&1; then
         printf "   Installing SSH: "
