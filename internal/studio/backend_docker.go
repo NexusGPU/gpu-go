@@ -22,6 +22,12 @@ const (
 	SSHPortRangeMax = 18000
 )
 
+// Environment variable names
+const (
+	EnvLDPreload     = "LD_PRELOAD"
+	EnvLDLibraryPath = "LD_LIBRARY_PATH"
+)
+
 // DockerBackend implements the Backend interface using Docker
 type DockerBackend struct {
 	dockerCmd  string // docker or podman
@@ -231,7 +237,7 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	for k, v := range mergedEnvs {
 		// Don't pass LD_PRELOAD/LD_LIBRARY_PATH as container env vars - they'll be written to /etc/environment
 		// This prevents them from being inherited by system daemons like sshd
-		if k == "LD_PRELOAD" || k == "LD_LIBRARY_PATH" {
+		if k == EnvLDPreload || k == EnvLDLibraryPath {
 			continue
 		}
 		args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))

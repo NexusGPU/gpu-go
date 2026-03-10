@@ -146,7 +146,7 @@ echo "SSH setup completed successfully"
 			}
 			// Write all TensorFusion and LD_PRELOAD environment variables
 			// LD_PRELOAD is written here to only affect user shells, not system daemons
-			if strings.HasPrefix(k, "TENSOR_FUSION_") || strings.HasPrefix(k, "TF_") || k == "LD_PRELOAD" || k == "LD_LIBRARY_PATH" {
+			if strings.HasPrefix(k, "TENSOR_FUSION_") || strings.HasPrefix(k, "TF_") || k == EnvLDPreload || k == EnvLDLibraryPath {
 				// Escape quotes in value
 				escapedValue := strings.ReplaceAll(v, `"`, `\"`)
 				envLines = append(envLines, fmt.Sprintf(`%s="%s"`, k, escapedValue))
