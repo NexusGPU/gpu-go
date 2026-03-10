@@ -40,9 +40,9 @@ else
         echo "   Installing SSH server (this may take 30-60 seconds)..."
         export DEBIAN_FRONTEND=noninteractive
         echo "   → Updating package lists..."
-        apt-get update -qq
+        apt-get update -q
         echo "   → Installing openssh-server..."
-        apt-get install -y -qq openssh-server sudo
+        apt-get install -y -q openssh-server sudo
         mkdir -p /run/sshd
     elif command -v apk >/dev/null 2>&1; then
         echo "   Installing SSH server..."
