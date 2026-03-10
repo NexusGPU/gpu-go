@@ -122,12 +122,13 @@ export class CreateStudioPanel {
 
             const volumes = data.volumes ? data.volumes.split(',').map(v => v.trim()).filter(Boolean) : [];
 
+            let createdStudio: any = null;
             await vscode.window.withProgress({
                 location: vscode.ProgressLocation.Notification,
                 title: `Creating studio '${data.name}'...`,
                 cancellable: false
             }, async () => {
-                await this._cli.studioCreate(data.name, {
+                createdStudio = await this._cli.studioCreate(data.name, {
                     mode: data.mode || undefined,
                     image: image || undefined,
                     gpuUrl: data.gpuUrl || undefined,
@@ -140,13 +141,16 @@ export class CreateStudioPanel {
             vscode.commands.executeCommand('gpugo.refreshStudio');
             this._panel.dispose();
 
+            // Use the actual studio name from CLI (includes suffix like "andy-work-1234")
+            const actualStudioName = createdStudio?.name || data.name;
+
             // Show toast with Connect via SSH action
             const action = await vscode.window.showInformationMessage(
-                `Studio '${data.name}' created!`,
+                `Studio '${actualStudioName}' created!`,
                 'Connect via SSH'
             );
             if (action === 'Connect via SSH') {
-                vscode.commands.executeCommand('opensshremotes.openEmptyWindow', { host: `ggo-${data.name}` });
+                vscode.commands.executeCommand('opensshremotes.openEmptyWindow', { host: `ggo-${actualStudioName}` });
             }
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to create studio: ${error}`);
