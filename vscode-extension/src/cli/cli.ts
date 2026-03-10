@@ -34,6 +34,7 @@ interface StudioEnvJSON {
     ssh_port?: number;
     ssh_user?: string;
     gpu_worker_url?: string;
+    ports?: string[];
 }
 
 interface WorkerJSON {
@@ -444,11 +445,9 @@ export class CLI {
             sshHost: json.ssh_host,
             sshPort: json.ssh_port,
             sshUser: json.ssh_user,
-            gpuWorkerUrl: json.gpu_worker_url
+            gpuWorkerUrl: json.gpu_worker_url,
+            ports: json.ports || []
         };
-        if (env.status === 'running') {
-            env.ports = this.getDefaultPorts(env.image);
-        }
         return env;
     }
 

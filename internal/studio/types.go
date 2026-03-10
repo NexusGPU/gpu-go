@@ -80,6 +80,7 @@ type Environment struct {
 	SSHUser       string            `json:"ssh_user,omitempty"`
 	WorkDir       string            `json:"work_dir,omitempty"`
 	GPUWorkerURL  string            `json:"gpu_worker_url,omitempty"`
+	Ports         []string          `json:"ports,omitempty"` // Port mappings in "hostPort:containerPort" format
 	CreatedAt     time.Time         `json:"created_at"`
 	Labels        map[string]string `json:"labels,omitempty"`
 }

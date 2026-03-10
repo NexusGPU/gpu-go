@@ -362,11 +362,22 @@ export class CreateStudioPanel {
                     }
                 });
 
+                // Track whether user has modified the ports field
+                let portsModifiedByUser = false;
+                document.getElementById('ports').addEventListener('input', () => {
+                    portsModifiedByUser = true;
+                });
+
                 // Update UI when template changes
                 document.getElementById('template').addEventListener('change', (e) => {
                     const templateId = e.target.value;
                     const template = templates.find(t => t.id === templateId);
                     const imageOptionsGroup = document.getElementById('image-options-group');
+
+                    // Reset ports modification flag and clear ports field when template changes
+                    portsModifiedByUser = false;
+                    const portsField = document.getElementById('ports');
+                    portsField.value = '';
 
                     if (template) {
                         // Show/hide custom image field
@@ -435,16 +446,16 @@ export class CreateStudioPanel {
                                 urlsLabel.style.display = 'none';
                                 urlsEl.style.display = 'none';
                             }
+
+                            // Auto-fill default ports when template is selected
+                            if (template.defaultPorts && template.defaultPorts.length > 0) {
+                                portsField.value = template.defaultPorts.join(', ');
+                                // Don't mark as modified by user since this is auto-fill
+                            }
                         } else {
                             infoBox.style.display = 'none';
                         }
                     }
-                });
-
-                // Track whether user has modified the ports field
-                let portsModifiedByUser = false;
-                document.getElementById('ports').addEventListener('input', () => {
-                    portsModifiedByUser = true;
                 });
 
                 // Trigger initial template info display

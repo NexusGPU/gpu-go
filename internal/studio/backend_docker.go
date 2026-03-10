@@ -421,6 +421,9 @@ func (b *DockerBackend) List(ctx context.Context) ([]*Environment, error) {
 		// Parse name
 		name := strings.TrimPrefix(container.Names, "ggo-")
 
+		// Parse ports
+		ports := parsePortMappings(container.Ports)
+
 		// Parse SSH port from ports
 		sshPort := parseSSHPort(container.Ports)
 
@@ -444,6 +447,7 @@ func (b *DockerBackend) List(ctx context.Context) ([]*Environment, error) {
 			SSHHost: "localhost",
 			SSHPort: sshPort,
 			SSHUser: "root",
+			Ports:   ports,
 		}
 
 		envs = append(envs, env)
@@ -615,6 +619,45 @@ func parseSSHPort(ports string) int {
 		}
 	}
 	return 0
+}
+
+// parsePortMappings parses Docker port mappings into "hostPort:containerPort" format
+// Input format: "0.0.0.0:8888->8888/tcp, 0.0.0.0:6006->6006/tcp"
+// Output format: ["8888:8888", "6006:6006"]
+func parsePortMappings(ports string) []string {
+	var result []string
+	for part := range strings.SplitSeq(ports, ",") {
+		part = strings.TrimSpace(part)
+		if !strings.Contains(part, "->") {
+			continue
+		}
+
+		// Split by "->" to get host and container parts
+		// e.g., "0.0.0.0:8888" -> "8888/tcp"
+		parts := strings.Split(part, "->")
+		if len(parts) != 2 {
+			continue
+		}
+
+		// Extract host port from "0.0.0.0:8888" or ":::8888"
+		hostPart := parts[0]
+		colonIdx := strings.LastIndex(hostPart, ":")
+		if colonIdx < 0 {
+			continue
+		}
+		hostPort := hostPart[colonIdx+1:]
+
+		// Extract container port from "8888/tcp" or "8888/udp"
+		containerPart := parts[1]
+		slashIdx := strings.Index(containerPart, "/")
+		if slashIdx < 0 {
+			continue
+		}
+		containerPort := containerPart[:slashIdx]
+
+		result = append(result, hostPort+":"+containerPort)
+	}
+	return result
 }
 
 // findAvailablePort finds an available port in the SSH port range (12000-18000)
