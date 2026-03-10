@@ -333,6 +333,14 @@ Original error: %w`, err)
 		return err
 	}
 
+	// Add SSH config regardless of output format (JSON or TUI)
+	// This ensures VSCode extension and other JSON consumers get SSH config
+	if env.SSHPort > 0 && !noSSH {
+		if err := mgr.AddSSHConfig(env); err != nil {
+			klog.Warningf("Failed to add SSH config: error=%v", err)
+		}
+	}
+
 	backendName, socketPath := "", ""
 	if backend, err := mgr.GetBackend(env.Mode); err == nil {
 		backendName = backend.Name()
@@ -582,35 +590,31 @@ func (r *createResult) RenderTUI(out *tui.Output) {
 	out.Println(status.String())
 
 	if env.SSHPort > 0 && !r.noSSH {
-		if err := r.mgr.AddSSHConfig(env); err != nil {
-			klog.Warningf("Failed to add SSH config: error=%v", err)
-		} else {
-			out.Println()
-			out.Println(styles.Subtitle.Render("SSH Configuration"))
-			out.Println()
+		out.Println()
+		out.Println(styles.Subtitle.Render("SSH Configuration"))
+		out.Println()
 
-			sshStatus := tui.NewStatusTable().
-				Add("Host", fmt.Sprintf("ggo-%s", env.Name)).
-				Add("Port", fmt.Sprintf("%d", env.SSHPort)).
-				Add("User", env.SSHUser)
+		sshStatus := tui.NewStatusTable().
+			Add("Host", fmt.Sprintf("ggo-%s", env.Name)).
+			Add("Port", fmt.Sprintf("%d", env.SSHPort)).
+			Add("User", env.SSHUser)
 
-			if r.privateKeyPath != "" {
-				sshStatus = sshStatus.Add("Private Key", r.privateKeyPath)
-			}
-
-			out.Println(sshStatus.String())
-
-			out.Println()
-			out.Println(styles.Subtitle.Render("Connect with:"))
-			out.Println()
-			out.Println("  " + tui.Code(fmt.Sprintf("ssh ggo-%s", env.Name)))
-			out.Println()
-			out.Println(styles.Subtitle.Render("Or in VS Code:"))
-			out.Println()
-			out.Println("  1. Install 'Remote - SSH' extension")
-			out.Println("  2. Press F1 → 'Remote-SSH: Connect to Host...'")
-			out.Printf("  3. Select '%s'\n", styles.Bold.Render(fmt.Sprintf("ggo-%s", env.Name)))
+		if r.privateKeyPath != "" {
+			sshStatus = sshStatus.Add("Private Key", r.privateKeyPath)
 		}
+
+		out.Println(sshStatus.String())
+
+		out.Println()
+		out.Println(styles.Subtitle.Render("Connect with:"))
+		out.Println()
+		out.Println("  " + tui.Code(fmt.Sprintf("ssh ggo-%s", env.Name)))
+		out.Println()
+		out.Println(styles.Subtitle.Render("Or in VS Code:"))
+		out.Println()
+		out.Println("  1. Install 'Remote - SSH' extension")
+		out.Println("  2. Press F1 → 'Remote-SSH: Connect to Host...'")
+		out.Printf("  3. Select '%s'\n", styles.Bold.Render(fmt.Sprintf("ggo-%s", env.Name)))
 	}
 	out.Println()
 }
