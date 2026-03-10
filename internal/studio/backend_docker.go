@@ -622,10 +622,12 @@ func parseSSHPort(ports string) int {
 }
 
 // parsePortMappings parses Docker port mappings into "hostPort:containerPort" format
-// Input format: "0.0.0.0:8888->8888/tcp, 0.0.0.0:6006->6006/tcp"
-// Output format: ["8888:8888", "6006:6006"]
+// Input format: "0.0.0.0:8888->8888/tcp, [::]:8888->8888/tcp, 0.0.0.0:6006->6006/tcp"
+// Output format: ["8888:8888", "6006:6006"] (deduplicated)
 func parsePortMappings(ports string) []string {
+	seen := make(map[string]bool)
 	var result []string
+
 	for part := range strings.SplitSeq(ports, ",") {
 		part = strings.TrimSpace(part)
 		if !strings.Contains(part, "->") {
@@ -639,7 +641,7 @@ func parsePortMappings(ports string) []string {
 			continue
 		}
 
-		// Extract host port from "0.0.0.0:8888" or ":::8888"
+		// Extract host port from "0.0.0.0:8888" or "[::]:8888"
 		hostPart := parts[0]
 		colonIdx := strings.LastIndex(hostPart, ":")
 		if colonIdx < 0 {
@@ -655,7 +657,11 @@ func parsePortMappings(ports string) []string {
 		}
 		containerPort := containerPart[:slashIdx]
 
-		result = append(result, hostPort+":"+containerPort)
+		mapping := hostPort + ":" + containerPort
+		if !seen[mapping] {
+			seen[mapping] = true
+			result = append(result, mapping)
+		}
 	}
 	return result
 }
