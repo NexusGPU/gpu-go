@@ -130,7 +130,7 @@ export class CreateStudioPanel {
                 title: `Creating studio '${data.name}'...`,
                 cancellable: false
             }, async () => {
-                createdStudio = await this._cli.studioCreate(data.name, {
+                const result = await this._cli.studioCreate(data.name, {
                     mode: data.mode || undefined,
                     image: image || undefined,
                     gpuUrl: data.gpuUrl || undefined,
@@ -138,13 +138,14 @@ export class CreateStudioPanel {
                     volumes: volumes.length > 0 ? volumes : undefined,
                     envs: envs.length > 0 ? envs : undefined
                 });
+                createdStudio = result;
             });
 
             vscode.commands.executeCommand('gpugo.refreshStudio');
             this._panel.dispose();
 
             // Use the actual studio name from CLI (includes suffix like "andy-work-1234")
-            const actualStudioName = createdStudio?.name || data.name;
+            const actualStudioName = (createdStudio as StudioEnv | null)?.name ?? data.name;
 
             // Show toast with Connect via SSH action
             const action = await vscode.window.showInformationMessage(
