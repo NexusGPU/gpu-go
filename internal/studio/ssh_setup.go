@@ -37,25 +37,28 @@ if command -v sshd >/dev/null 2>&1 && [ -f /usr/sbin/sshd ]; then
 else
     # Detect package manager and install openssh-server
     if command -v apt-get >/dev/null 2>&1; then
-        echo "   Installing SSH server (this may take 30-60 seconds)..."
         export DEBIAN_FRONTEND=noninteractive
-        echo "   → Updating package lists (downloading metadata)..."
-        apt-get update
-        echo "   → Installing openssh-server (downloading and installing packages)..."
-        apt-get install -y openssh-server sudo
+        printf "   Installing SSH (30-60s): updating packages"
+        apt-get update -qq 2>&1 || true
+        printf "."
+        apt-get install -y -qq openssh-server sudo 2>&1 || true
+        printf ". done\n"
         mkdir -p /run/sshd
     elif command -v apk >/dev/null 2>&1; then
-        echo "   Installing SSH server..."
-        apk add --no-cache openssh sudo
-        ssh-keygen -A  # Generate host keys
+        printf "   Installing SSH: "
+        apk add --no-cache openssh sudo >/dev/null 2>&1
+        ssh-keygen -A >/dev/null 2>&1
+        printf "done\n"
     elif command -v yum >/dev/null 2>&1; then
-        echo "   Installing SSH server..."
-        yum install -y -q openssh-server sudo
-        ssh-keygen -A  # Generate host keys
+        printf "   Installing SSH: "
+        yum install -y -q openssh-server sudo >/dev/null 2>&1
+        ssh-keygen -A >/dev/null 2>&1
+        printf "done\n"
     elif command -v dnf >/dev/null 2>&1; then
-        echo "   Installing SSH server..."
-        dnf install -y -q openssh-server sudo
-        ssh-keygen -A  # Generate host keys
+        printf "   Installing SSH: "
+        dnf install -y -q openssh-server sudo >/dev/null 2>&1
+        ssh-keygen -A >/dev/null 2>&1
+        printf "done\n"
     else
         echo "Error: Unsupported package manager. Please use an image based on Debian, Ubuntu, Alpine, RHEL, or CentOS."
         exit 1
@@ -63,15 +66,13 @@ else
 fi
 
 # Configure SSH server
-echo "   → Configuring SSH server..."
 mkdir -p /root/.ssh
 chmod 700 /root/.ssh
 mkdir -p /run/sshd
 
 # Generate host keys if missing
 if [ ! -f /etc/ssh/ssh_host_rsa_key ]; then
-    echo "   → Generating SSH host keys..."
-    ssh-keygen -A
+    ssh-keygen -A >/dev/null 2>&1
 fi
 
 # Configure sshd_config for secure access
@@ -111,12 +112,12 @@ UsePAM yes
 Subsystem sftp /usr/lib/openssh/sftp-server
 SSHD_EOF
 
-echo "   ✓ SSH configuration completed"
+printf "   ✓ SSH configured\n"
 `
 
-	// Execute install script in container with streaming output for better UX
+	// Execute install script in container
 	cmd := execCmd("exec", containerID, "sh", "-c", installScript)
-	cmd.Stdout = os.Stderr // Stream output to user's terminal
+	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	err := cmd.Run()
 	if err != nil {
