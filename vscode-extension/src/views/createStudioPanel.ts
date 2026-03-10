@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { CLI } from '../cli/cli';
+import { CLI, StudioEnv } from '../cli/cli';
 import { getWebviewContent } from './webviewUtils';
 import { STUDIO_TEMPLATES, getTemplateById, getCategories } from '../config/studioTemplates';
 
@@ -124,7 +124,7 @@ export class CreateStudioPanel {
 
             const volumes = data.volumes ? data.volumes.split(',').map(v => v.trim()).filter(Boolean) : [];
 
-            let createdStudio: any = null;
+            let createdStudio: StudioEnv | null = null;
             await vscode.window.withProgress({
                 location: vscode.ProgressLocation.Notification,
                 title: `Creating studio '${data.name}'...`,
