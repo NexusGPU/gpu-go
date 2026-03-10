@@ -117,25 +117,10 @@ echo "SSH setup completed successfully"
 		}
 	}
 
-	// Start SSH daemon in background
-	// Temporarily disable ld.so.preload to prevent GPU library logs from breaking SSH protocol
+	// Start SSH daemon in background with TensorFusion logging disabled
+	// TF_ENABLE_LOG=0 prevents GPU library logs from interfering with SSH protocol
 	klog.V(2).Infof("Starting SSH daemon in container")
-	startSSHScript := `
-# Temporarily disable ld.so.preload to prevent library logs from breaking SSH
-if [ -f /etc/ld.so.preload ]; then
-    mv /etc/ld.so.preload /etc/ld.so.preload.disabled
-fi
-
-# Start SSH daemon
-/usr/sbin/sshd -D &
-
-# Re-enable ld.so.preload after sshd has forked
-sleep 1
-if [ -f /etc/ld.so.preload.disabled ]; then
-    mv /etc/ld.so.preload.disabled /etc/ld.so.preload
-fi
-`
-	startSSHCmd := execCmd("exec", "-d", containerID, "sh", "-c", startSSHScript)
+	startSSHCmd := execCmd("exec", "-d", containerID, "sh", "-c", "TF_ENABLE_LOG=0 /usr/sbin/sshd -D")
 	if output, err := startSSHCmd.CombinedOutput(); err != nil {
 		klog.Errorf("Failed to start SSH daemon: %v, output: %s", err, string(output))
 		return fmt.Errorf("failed to start SSH daemon: %w\nOutput: %s", err, string(output))
