@@ -157,6 +157,11 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	// Build docker run command
 	args := []string{"run", "-d", "--name", containerName}
 
+	// Add --init flag to use tini init process
+	// This prevents zombie processes and allows proper signal handling
+	// Required for SSH daemon to properly fork child processes
+	args = append(args, "--init")
+
 	// Add security options for SSH to work in containers
 	// SSH's privilege separation requires certain capabilities that Docker's
 	// default seccomp profile blocks, causing "mm_request_receive: bad msg_len" errors

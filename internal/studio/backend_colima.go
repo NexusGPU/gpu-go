@@ -386,6 +386,10 @@ func (b *ColimaBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	// Build docker run command
 	args := []string{"run", "-d", "--name", containerName}
 
+	// Add --init flag to use tini init process
+	// This prevents zombie processes and allows proper signal handling
+	args = append(args, "--init")
+
 	// Add platform flag if specified
 	if platform != "" {
 		args = append(args, "--platform", platform)

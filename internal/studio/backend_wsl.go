@@ -227,6 +227,10 @@ func (b *WSLBackend) Create(ctx context.Context, opts *CreateOptions) (*Environm
 	// Build docker run command
 	args := []string{"docker", "run", "-d", "--name", containerName}
 
+	// Add --init flag to use tini init process
+	// This prevents zombie processes and allows proper signal handling
+	args = append(args, "--init")
+
 	// Add local GPU passthrough if requested
 	if opts.UseLocalGPU {
 		args = append(args, "--gpus", "all")
@@ -642,21 +646,26 @@ chmod 700 /root/.ssh
 
 cat > /etc/ssh/sshd_config << 'SSHD_EOF'
 Port 22
-Protocol 2
+AddressFamily any
+ListenAddress 0.0.0.0
 HostKey /etc/ssh/ssh_host_rsa_key
 HostKey /etc/ssh/ssh_host_ecdsa_key
 HostKey /etc/ssh/ssh_host_ed25519_key
 PermitRootLogin yes
 PubkeyAuthentication yes
+AuthorizedKeysFile .ssh/authorized_keys
 PasswordAuthentication yes
 PermitEmptyPasswords no
 ChallengeResponseAuthentication no
-UsePrivilegeSeparation no
 SyslogFacility AUTH
 LogLevel INFO
 X11Forwarding yes
 PrintMotd no
 AcceptEnv LANG LC_*
+TCPKeepAlive yes
+ClientAliveInterval 60
+ClientAliveCountMax 3
+UsePAM yes
 Subsystem sftp /usr/lib/openssh/sftp-server
 SSHD_EOF
 

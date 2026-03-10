@@ -61,7 +61,10 @@ chmod 700 /root/.ssh
 cat > /etc/ssh/sshd_config << 'SSHD_EOF'
 # Basic configuration
 Port 22
-Protocol 2
+AddressFamily any
+ListenAddress 0.0.0.0
+
+# Host keys
 HostKey /etc/ssh/ssh_host_rsa_key
 HostKey /etc/ssh/ssh_host_ecdsa_key
 HostKey /etc/ssh/ssh_host_ed25519_key
@@ -69,12 +72,10 @@ HostKey /etc/ssh/ssh_host_ed25519_key
 # Authentication
 PermitRootLogin yes
 PubkeyAuthentication yes
+AuthorizedKeysFile .ssh/authorized_keys
 PasswordAuthentication yes
 PermitEmptyPasswords no
 ChallengeResponseAuthentication no
-
-# Privilege Separation
-UsePrivilegeSeparation no
 
 # Logging
 SyslogFacility AUTH
@@ -84,6 +85,10 @@ LogLevel INFO
 X11Forwarding yes
 PrintMotd no
 AcceptEnv LANG LC_*
+TCPKeepAlive yes
+ClientAliveInterval 60
+ClientAliveCountMax 3
+UsePAM yes
 
 # Subsystems
 Subsystem sftp /usr/lib/openssh/sftp-server
