@@ -13,5 +13,4 @@ pnpm-lock.yaml
 package-lock.json
 yarn.lock
 *.vsix
-images/*.svg
 STUDIO_TEMPLATES.md
