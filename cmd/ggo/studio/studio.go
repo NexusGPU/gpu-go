@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/NexusGPU/gpu-go/cmd/ggo/cmdutil"
 	"github.com/NexusGPU/gpu-go/internal/api"
@@ -230,7 +231,9 @@ Examples:
 
 func runCreate(cmd *cobra.Command, args []string) error {
 	name := args[0]
-	ctx := context.Background()
+	// Use a longer timeout for docker pull operations (10 minutes)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
 	mgr := getManager()
 	out := getOutput()
 
@@ -294,6 +297,36 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	env, err := mgr.Create(ctx, opts)
 	if err != nil {
 		cmd.SilenceUsage = true
+		// Check if error is related to Docker registry timeout
+		if strings.Contains(err.Error(), "context deadline exceeded") ||
+			strings.Contains(err.Error(), "timeout") ||
+			strings.Contains(err.Error(), "registry-1.docker.io") {
+			klog.Errorf("Docker pull timeout. This is likely due to slow network or Docker Hub being blocked.")
+			return fmt.Errorf(`failed to pull Docker image (network timeout).
+
+This is commonly caused by:
+  - Slow network connection to Docker Hub
+  - Docker Hub being blocked in your region (e.g., China mainland)
+
+Solutions:
+  1. Configure Docker registry mirrors (recommended for China mainland users):
+
+     sudo mkdir -p /etc/docker
+     sudo tee /etc/docker/daemon.json <<-'EEOF'
+     {
+       "registry-mirrors": [
+         "https://docker.m.daocloud.io",
+         "https://dockerproxy.com",
+         "https://hub-mirror.c.163.com"
+       ]
+     }
+     EEOF
+     sudo systemctl restart docker
+
+  2. Or use a proxy if you have one configured
+
+Original error: %w`, err)
+		}
 		return err
 	}
 
