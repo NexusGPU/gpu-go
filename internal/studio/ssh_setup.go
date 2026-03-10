@@ -27,38 +27,52 @@ func setupSSHInContainer(ctx context.Context, dockerCmd, containerID, sshPublicK
 	}
 
 	// Install script that works across different base images (Debian/Ubuntu, Alpine, RHEL/CentOS)
+	// Smart detection: skip installation if SSH is already present
 	installScript := `#!/bin/sh
 set -e
 
-# Detect package manager and install openssh-server
-if command -v apt-get >/dev/null 2>&1; then
-    echo "   Installing SSH server (this may take 30-60 seconds)..."
-    export DEBIAN_FRONTEND=noninteractive
-    echo "   → Updating package lists..."
-    apt-get update -qq
-    echo "   → Installing openssh-server..."
-    apt-get install -y -qq openssh-server sudo
-    mkdir -p /run/sshd
-elif command -v apk >/dev/null 2>&1; then
-    echo "   Installing SSH server..."
-    apk add --no-cache openssh sudo
-    ssh-keygen -A  # Generate host keys
-elif command -v yum >/dev/null 2>&1; then
-    echo "   Installing SSH server..."
-    yum install -y -q openssh-server sudo
-    ssh-keygen -A  # Generate host keys
-elif command -v dnf >/dev/null 2>&1; then
-    echo "   Installing SSH server..."
-    dnf install -y -q openssh-server sudo
-    ssh-keygen -A  # Generate host keys
+# Check if SSH is already installed
+if command -v sshd >/dev/null 2>&1 && [ -f /usr/sbin/sshd ]; then
+    echo "   ✓ SSH server already installed, skipping installation"
 else
-    echo "Error: Unsupported package manager. Please use an image based on Debian, Ubuntu, Alpine, RHEL, or CentOS."
-    exit 1
+    # Detect package manager and install openssh-server
+    if command -v apt-get >/dev/null 2>&1; then
+        echo "   Installing SSH server (this may take 30-60 seconds)..."
+        export DEBIAN_FRONTEND=noninteractive
+        echo "   → Updating package lists..."
+        apt-get update -qq
+        echo "   → Installing openssh-server..."
+        apt-get install -y -qq openssh-server sudo
+        mkdir -p /run/sshd
+    elif command -v apk >/dev/null 2>&1; then
+        echo "   Installing SSH server..."
+        apk add --no-cache openssh sudo
+        ssh-keygen -A  # Generate host keys
+    elif command -v yum >/dev/null 2>&1; then
+        echo "   Installing SSH server..."
+        yum install -y -q openssh-server sudo
+        ssh-keygen -A  # Generate host keys
+    elif command -v dnf >/dev/null 2>&1; then
+        echo "   Installing SSH server..."
+        dnf install -y -q openssh-server sudo
+        ssh-keygen -A  # Generate host keys
+    else
+        echo "Error: Unsupported package manager. Please use an image based on Debian, Ubuntu, Alpine, RHEL, or CentOS."
+        exit 1
+    fi
 fi
 
 # Configure SSH server
+echo "   → Configuring SSH server..."
 mkdir -p /root/.ssh
 chmod 700 /root/.ssh
+mkdir -p /run/sshd
+
+# Generate host keys if missing
+if [ ! -f /etc/ssh/ssh_host_rsa_key ]; then
+    echo "   → Generating SSH host keys..."
+    ssh-keygen -A
+fi
 
 # Configure sshd_config for secure access
 cat > /etc/ssh/sshd_config << 'SSHD_EOF'
