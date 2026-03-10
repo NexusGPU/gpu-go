@@ -70,10 +70,10 @@ HostKey /etc/ssh/ssh_host_ecdsa_key
 HostKey /etc/ssh/ssh_host_ed25519_key
 
 # Authentication
-PermitRootLogin yes
+PermitRootLogin prohibit-password
 PubkeyAuthentication yes
 AuthorizedKeysFile .ssh/authorized_keys
-PasswordAuthentication yes
+PasswordAuthentication no
 PermitEmptyPasswords no
 ChallengeResponseAuthentication no
 
@@ -93,9 +93,6 @@ UsePAM yes
 # Subsystems
 Subsystem sftp /usr/lib/openssh/sftp-server
 SSHD_EOF
-
-# Set a default password for root (can be overridden with SSH key)
-echo "root:ggo-studio" | chpasswd
 
 echo "SSH setup completed successfully"
 `

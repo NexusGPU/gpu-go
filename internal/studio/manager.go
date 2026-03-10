@@ -453,6 +453,13 @@ func (m *Manager) AddSSHConfig(env *Environment) error {
 		existingConfig = string(data)
 	}
 
+	// Get home directory for private key path
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return errors.Wrap(err, "failed to get user home directory")
+	}
+	privateKeyPath := filepath.Join(homeDir, ".ggo", "ssh", "id_ed25519")
+
 	// Generate new entry
 	hostName := fmt.Sprintf("ggo-%s", env.Name)
 	entry := fmt.Sprintf(`
@@ -461,9 +468,10 @@ Host %s
     HostName %s
     Port %d
     User %s
+    IdentityFile %s
     StrictHostKeyChecking no
     UserKnownHostsFile /dev/null
-`, env.Name, hostName, env.SSHHost, env.SSHPort, env.SSHUser)
+`, env.Name, hostName, env.SSHHost, env.SSHPort, env.SSHUser, privateKeyPath)
 
 	// Keep a single entry per studio host by removing any existing one first.
 	existingConfig = m.removeSSHConfigEntry(existingConfig, hostName)

@@ -36,6 +36,9 @@ var (
 	command       []string
 	endpoint      string
 	platform      string // container platform (e.g., linux/amd64, linux/arm64)
+
+	// lastPrivateKeyPath stores the private key path from the most recent buildCreateOptions call
+	lastPrivateKeyPath string
 )
 
 // NewStudioCmd creates the studio command
@@ -212,7 +215,7 @@ Examples:
 	cmd.Flags().StringVarP(&image, "image", "i", "tensorfusion/studio-torch:latest", "Container image")
 	cmd.Flags().StringVarP(&shareLink, "share-link", "s", "", "Share link or share code to remote vGPU worker (recommended for GPU access)")
 	cmd.Flags().StringVar(&serverURL, "server", api.GetDefaultBaseURL(), "Server URL for resolving share links")
-	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "SSH public key to authorize (auto-detects from ~/.ssh/ if not provided)")
+	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "SSH public key to authorize (auto-generates dedicated key pair if not provided)")
 	cmd.Flags().StringArrayVarP(&ports, "port", "p", nil, "Port mappings (host:container)")
 	cmd.Flags().StringArrayVarP(&volumes, "volume", "v", nil, "Volume mounts (host:container[:ro])")
 	cmd.Flags().StringArrayVarP(&envVars, "env", "e", nil, "Environment variables (KEY=VALUE)")
@@ -284,13 +287,6 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Inform user about SSH authentication method
-	if !out.IsJSON() && opts.SSHPublicKey != "" {
-		styles := tui.DefaultStyles()
-		out.Printf("%s Using SSH key authentication (password: ggo-studio as fallback)\n",
-			styles.Info.Render("ℹ"))
-	}
-
 	if !out.IsJSON() {
 		styles := tui.DefaultStyles()
 		out.Printf("%s Creating studio environment '%s'...\n",
@@ -345,11 +341,12 @@ Original error: %w`, err)
 		}
 	}
 	return out.Render(&createResult{
-		env:         env,
-		mgr:         mgr,
-		noSSH:       noSSH,
-		backendName: backendName,
-		socketPath:  socketPath,
+		env:            env,
+		mgr:            mgr,
+		noSSH:          noSSH,
+		backendName:    backendName,
+		socketPath:     socketPath,
+		privateKeyPath: lastPrivateKeyPath,
 	})
 }
 
@@ -426,13 +423,26 @@ func buildCreateOptions(name string, shareInfo *api.SharePublicInfo) (*studio.Cr
 		return nil, err
 	}
 
-	// Auto-detect SSH public key if not provided via --ssh-key flag
+	// Get or create dedicated SSH key pair for TF studio containers
 	effectiveSSHKey := sshKey
+	privateKeyPath := ""
 	if effectiveSSHKey == "" {
-		if autoKey := studio.GetUserSSHPublicKey(); autoKey != "" {
-			effectiveSSHKey = autoKey
-			klog.V(2).Info("Using user's SSH public key for authentication")
+		pubKey, privPath, err := studio.GetOrCreateStudioSSHKey()
+		if err != nil {
+			klog.Warningf("Failed to get/create studio SSH key: %v", err)
+		} else {
+			effectiveSSHKey = pubKey
+			privateKeyPath = privPath
+			klog.V(2).Infof("Using TF studio SSH key: %s", privPath)
 		}
+	}
+
+	// Store for use in createResult
+	lastPrivateKeyPath = privateKeyPath
+
+	// Ensure SSH key is available (required for container access)
+	if effectiveSSHKey == "" {
+		return nil, fmt.Errorf("SSH public key is required for container access")
 	}
 
 	// Set GPU connection info from share link
@@ -535,11 +545,12 @@ func parseEnvVars(envVars []string) (map[string]string, error) {
 
 // createResult implements Renderable for create command output
 type createResult struct {
-	env         *studio.Environment
-	mgr         *studio.Manager
-	noSSH       bool
-	backendName string
-	socketPath  string
+	env            *studio.Environment
+	mgr            *studio.Manager
+	noSSH          bool
+	backendName    string
+	socketPath     string
+	privateKeyPath string
 }
 
 func (r *createResult) RenderJSON() any {
@@ -582,6 +593,10 @@ func (r *createResult) RenderTUI(out *tui.Output) {
 				Add("Host", fmt.Sprintf("ggo-%s", env.Name)).
 				Add("Port", fmt.Sprintf("%d", env.SSHPort)).
 				Add("User", env.SSHUser)
+
+			if r.privateKeyPath != "" {
+				sshStatus = sshStatus.Add("Private Key", r.privateKeyPath)
+			}
 
 			out.Println(sshStatus.String())
 

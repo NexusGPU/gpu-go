@@ -1,43 +1,79 @@
 package studio
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/pem"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"golang.org/x/crypto/ssh"
 	"k8s.io/klog/v2"
 )
 
-// GetUserSSHPublicKey attempts to read user's SSH public key from standard locations
-// Returns the public key content or empty string if not found
-func GetUserSSHPublicKey() string {
+// GetOrCreateStudioSSHKey gets or creates a dedicated SSH key pair for TF studio containers
+// Returns the public key content, private key path, and error if any
+func GetOrCreateStudioSSHKey() (publicKey string, privateKeyPath string, err error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		klog.V(2).Infof("Failed to get user home directory: %v", err)
-		return ""
+		return "", "", fmt.Errorf("failed to get user home directory: %w", err)
 	}
 
-	// Try common SSH public key files in order of preference
-	keyPaths := []string{
-		filepath.Join(homeDir, ".ssh", "id_ed25519.pub"),
-		filepath.Join(homeDir, ".ssh", "id_ecdsa.pub"),
-		filepath.Join(homeDir, ".ssh", "id_rsa.pub"),
-		filepath.Join(homeDir, ".ssh", "id_dsa.pub"),
-	}
+	// Store dedicated SSH keys in ~/.ggo/ssh/
+	sshDir := filepath.Join(homeDir, ".ggo", "ssh")
+	privateKeyPath = filepath.Join(sshDir, "id_ed25519")
+	publicKeyPath := filepath.Join(sshDir, "id_ed25519.pub")
 
-	for _, keyPath := range keyPaths {
-		if content, err := os.ReadFile(keyPath); err == nil {
-			publicKey := strings.TrimSpace(string(content))
-			if publicKey != "" {
-				klog.V(2).Infof("Found SSH public key: %s", keyPath)
-				return publicKey
-			}
+	// Check if key pair already exists
+	if pubContent, err := os.ReadFile(publicKeyPath); err == nil {
+		publicKey = strings.TrimSpace(string(pubContent))
+		if publicKey != "" {
+			klog.V(2).Infof("Using existing TF studio SSH key: %s", publicKeyPath)
+			return publicKey, privateKeyPath, nil
 		}
 	}
 
-	klog.V(2).Info("No SSH public key found in standard locations")
-	return ""
+	// Generate new Ed25519 key pair
+	klog.Infof("Generating new SSH key pair for TF studio containers...")
+	if err := os.MkdirAll(sshDir, 0700); err != nil {
+		return "", "", fmt.Errorf("failed to create SSH directory: %w", err)
+	}
+
+	pubKey, privKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to generate SSH key: %w", err)
+	}
+
+	// Convert to SSH format
+	sshPubKey, err := ssh.NewPublicKey(pubKey)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create SSH public key: %w", err)
+	}
+
+	// Write public key
+	publicKeyData := ssh.MarshalAuthorizedKey(sshPubKey)
+	if err := os.WriteFile(publicKeyPath, publicKeyData, 0644); err != nil {
+		return "", "", fmt.Errorf("failed to write public key: %w", err)
+	}
+
+	// Write private key in PEM format
+	privKeyBytes, err := ssh.MarshalPrivateKey(privKey, "")
+	if err != nil {
+		return "", "", fmt.Errorf("failed to marshal private key: %w", err)
+	}
+
+	privKeyPEM := pem.EncodeToMemory(privKeyBytes)
+	if err := os.WriteFile(privateKeyPath, privKeyPEM, 0600); err != nil {
+		return "", "", fmt.Errorf("failed to write private key: %w", err)
+	}
+
+	publicKey = strings.TrimSpace(string(publicKeyData))
+	klog.Infof("Generated new SSH key pair: %s", publicKeyPath)
+	klog.Infof("Private key saved to: %s", privateKeyPath)
+
+	return publicKey, privateKeyPath, nil
 }
 
 // FormatSSHPublicKey formats and validates an SSH public key
