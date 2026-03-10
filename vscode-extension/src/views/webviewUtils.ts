@@ -6,9 +6,8 @@ export function getWebviewContent(
     nonce: string,
     content: string
 ): string {
-    // Using CDN for all resources with updated versions
+    // Using CDN for vscode-elements
     const elementsScript = 'https://cdn.jsdelivr.net/npm/@vscode-elements/elements@1/dist/bundled.js';
-    const codiconsCSS = 'https://cdn.jsdelivr.net/npm/@vscode/codicons@0.0.36/dist/codicon.css';
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -16,7 +15,14 @@ export function getWebviewContent(
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline' https://cdn.jsdelivr.net; font-src ${webview.cspSource} https://cdn.jsdelivr.net data:; script-src 'nonce-${nonce}' https://cdn.jsdelivr.net; img-src ${webview.cspSource} https: data:;">
-    <link rel="stylesheet" href="${codiconsCSS}">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@vscode/codicons@0.0.36/dist/codicon.css">
+    <style nonce="${nonce}">
+        @font-face {
+            font-family: "codicon";
+            font-display: block;
+            src: url("https://cdn.jsdelivr.net/npm/@vscode/codicons@0.0.36/dist/codicon.ttf") format("truetype");
+        }
+    </style>
     <script type="module" src="${elementsScript}" nonce="${nonce}"></script>
     <title>GPUGo</title>
     <style>
