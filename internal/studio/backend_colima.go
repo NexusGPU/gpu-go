@@ -519,7 +519,7 @@ func (b *ColimaBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	// Automatically install and configure SSH in the container
 	// This allows any Docker image to be used, not just images with SSH pre-installed
 	klog.Infof("Configuring SSH in container %s...", containerID[:12])
-	fmt.Fprintf(os.Stderr, "\n   Configuring SSH server in container...\n")
+	fmt.Fprintf(os.Stderr, "\n   Configuring SSH server (may take 30-60s for package installation)...\n")
 
 	if err := setupSSHInContainer(ctx, "docker", containerID, opts.SSHPublicKey, b.dockerHost, mergedEnvs); err != nil {
 		// SSH setup failed, clean up container
