@@ -214,7 +214,7 @@ func (b *AppleContainerBackend) Create(ctx context.Context, opts *CreateOptions)
 
 	env := &Environment{
 		ID:           containerID,
-		Name:         opts.Name,
+		Name:         strings.TrimPrefix(containerName, "ggo-"), // e.g., "andy-studio-0086"
 		Mode:         ModeAppleContainer,
 		Image:        image,
 		Status:       StatusRunning,

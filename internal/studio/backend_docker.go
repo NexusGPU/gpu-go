@@ -330,9 +330,11 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	fmt.Fprintf(os.Stderr, "   SSH server configured successfully!\n\n")
 
 	// Get container info
+	// Use container name without ggo- prefix to match List() behavior
+	// This ensures SSH config uses the full name with suffix
 	env := &Environment{
 		ID:           containerID[:12],
-		Name:         opts.Name,
+		Name:         strings.TrimPrefix(containerName, "ggo-"), // e.g., "andy-studio-0086"
 		Mode:         ModeDocker,
 		Image:        image,
 		Status:       StatusRunning,

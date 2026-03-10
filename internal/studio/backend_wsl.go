@@ -336,7 +336,7 @@ func (b *WSLBackend) Create(ctx context.Context, opts *CreateOptions) (*Environm
 
 	env := &Environment{
 		ID:           containerID[:12],
-		Name:         opts.Name,
+		Name:         strings.TrimPrefix(containerName, "ggo-"), // e.g., "andy-studio-0086"
 		Mode:         ModeWSL,
 		Image:        image,
 		Status:       StatusRunning,
