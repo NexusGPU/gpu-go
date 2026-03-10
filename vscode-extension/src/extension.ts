@@ -185,7 +185,14 @@ function registerCommands(context: vscode.ExtensionContext, cli: CLI) {
     context.subscriptions.push(
         vscode.commands.registerCommand('gpugo.openJupyter', async (item) => {
             if (item?.env) {
-                const port = findMappedPort(item.env.ports, 8888) || 8888;
+                const port = findMappedPort(item.env.ports, 8888);
+                if (!port) {
+                    vscode.window.showWarningMessage(
+                        'Jupyter Lab port (8888) is not mapped in this studio. ' +
+                        'Recreate the studio with port mapping: -p 8888:8888'
+                    );
+                    return;
+                }
                 const url = `http://localhost:${port}/lab`;
                 vscode.env.openExternal(vscode.Uri.parse(url));
                 vscode.window.showInformationMessage(`Opening Jupyter Lab at ${url}`);
@@ -197,7 +204,14 @@ function registerCommands(context: vscode.ExtensionContext, cli: CLI) {
     context.subscriptions.push(
         vscode.commands.registerCommand('gpugo.openTensorBoard', async (item) => {
             if (item?.env) {
-                const port = findMappedPort(item.env.ports, 6006) || 6006;
+                const port = findMappedPort(item.env.ports, 6006);
+                if (!port) {
+                    vscode.window.showWarningMessage(
+                        'TensorBoard port (6006) is not mapped in this studio. ' +
+                        'Recreate the studio with port mapping: -p 6006:6006'
+                    );
+                    return;
+                }
                 const url = `http://localhost:${port}`;
                 vscode.env.openExternal(vscode.Uri.parse(url));
                 vscode.window.showInformationMessage(`Opening TensorBoard at ${url}`);
