@@ -443,6 +443,11 @@ func (b *ColimaBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	// Merge setup env vars with user env vars (user takes precedence)
 	mergedEnvs := MergeEnvVars(setupResult.EnvVars, opts.Envs)
 	for k, v := range mergedEnvs {
+		// Don't pass LD_PRELOAD/LD_LIBRARY_PATH as container env vars - they'll be written to /etc/environment
+		// This prevents them from being inherited by system daemons like sshd
+		if k == "LD_PRELOAD" || k == "LD_LIBRARY_PATH" {
+			continue
+		}
 		args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
 	}
 
@@ -516,7 +521,7 @@ func (b *ColimaBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	klog.Infof("Configuring SSH in container %s...", containerID[:12])
 	fmt.Fprintf(os.Stderr, "\n   Configuring SSH server in container...\n")
 
-	if err := setupSSHInContainer(ctx, "docker", containerID, opts.SSHPublicKey, b.dockerHost); err != nil {
+	if err := setupSSHInContainer(ctx, "docker", containerID, opts.SSHPublicKey, b.dockerHost, mergedEnvs); err != nil {
 		// SSH setup failed, clean up container
 		klog.Errorf("Failed to configure SSH, removing container: %v", err)
 		_ = b.Remove(ctx, containerID)

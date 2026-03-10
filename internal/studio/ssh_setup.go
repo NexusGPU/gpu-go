@@ -13,7 +13,8 @@ import (
 // setupSSHInContainer installs and configures SSH server in a running container
 // This allows any Docker image to be used, not just images with SSH pre-installed
 // dockerHost can be empty for default Docker socket, or custom (e.g., for Colima)
-func setupSSHInContainer(ctx context.Context, dockerCmd, containerID, sshPublicKey, dockerHost string) error {
+// envVars are the TensorFusion environment variables that need to be available in SSH sessions
+func setupSSHInContainer(ctx context.Context, dockerCmd, containerID, sshPublicKey, dockerHost string, envVars map[string]string) error {
 	klog.V(2).Infof("Setting up SSH in container %s", containerID)
 
 	// Helper to create docker exec command with proper environment
@@ -107,6 +108,63 @@ echo "SSH setup completed successfully"
 
 	klog.V(2).Infof("SSH packages installed: %s", strings.TrimSpace(string(output)))
 
+	// Get the container's original PATH from docker inspect
+	// This preserves conda/venv paths that are set in the container image
+	inspectCmd := execCmd("inspect", "--format", "{{range .Config.Env}}{{println .}}{{end}}", containerID)
+	inspectOutput, err := inspectCmd.CombinedOutput()
+	originalPath := ""
+	if err == nil {
+		// Parse environment variables to find PATH
+		for _, line := range strings.Split(string(inspectOutput), "\n") {
+			if strings.HasPrefix(line, "PATH=") {
+				originalPath = strings.TrimPrefix(line, "PATH=")
+				break
+			}
+		}
+	}
+	if originalPath == "" {
+		klog.Warningf("Failed to get container PATH from inspect, using default")
+		originalPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+	}
+	klog.V(2).Infof("Container original PATH: %s", originalPath)
+
+	// Write TensorFusion environment variables to /etc/environment
+	// This makes them available to SSH login sessions
+	// LD_PRELOAD is included here (not as docker -e) to prevent loading into sshd
+	if len(envVars) > 0 {
+		klog.V(2).Infof("Writing TensorFusion environment variables to /etc/environment")
+		var envLines []string
+
+		// First, write PATH using the container's original PATH (preserves conda/venv)
+		envLines = append(envLines, fmt.Sprintf(`PATH="%s"`, originalPath))
+
+		// Then write TensorFusion environment variables
+		for k, v := range envVars {
+			// Skip PATH since we already added it above
+			if k == "PATH" {
+				continue
+			}
+			// Write all TensorFusion and LD_PRELOAD environment variables
+			// LD_PRELOAD is written here to only affect user shells, not system daemons
+			if strings.HasPrefix(k, "TENSOR_FUSION_") || strings.HasPrefix(k, "TF_") || k == "LD_PRELOAD" || k == "LD_LIBRARY_PATH" {
+				// Escape quotes in value
+				escapedValue := strings.ReplaceAll(v, `"`, `\"`)
+				envLines = append(envLines, fmt.Sprintf(`%s="%s"`, k, escapedValue))
+			}
+		}
+		if len(envLines) > 0 {
+			envContent := strings.Join(envLines, "\n")
+			// First backup and remove existing PATH line, then append all variables
+			writeEnvCmd := execCmd("exec", containerID, "sh", "-c",
+				fmt.Sprintf("grep -v '^PATH=' /etc/environment > /etc/environment.tmp 2>/dev/null || touch /etc/environment.tmp; echo '%s' >> /etc/environment.tmp && mv /etc/environment.tmp /etc/environment", envContent))
+			if output, err := writeEnvCmd.CombinedOutput(); err != nil {
+				klog.Warningf("Failed to write environment variables (non-fatal): %v, output: %s", err, string(output))
+			} else {
+				klog.V(2).Infof("Successfully wrote TensorFusion environment variables to /etc/environment")
+			}
+		}
+	}
+
 	// Add SSH public key if provided
 	if sshPublicKey != "" {
 		klog.V(2).Infof("Adding SSH public key to container")
@@ -118,8 +176,8 @@ echo "SSH setup completed successfully"
 	}
 
 	// Start SSH daemon in background
-	// Note: With CAP_SYS_ADMIN capability (added in backend_docker.go), SSH works correctly
-	// even with TensorFusion GPU libraries loaded via /etc/ld.so.preload
+	// LD_PRELOAD is now set in /etc/environment (not /etc/ld.so.preload)
+	// so it only affects user shells, not the sshd daemon itself
 	klog.V(2).Infof("Starting SSH daemon in container")
 	startSSHCmd := execCmd("exec", "-d", containerID, "/usr/sbin/sshd", "-D")
 	if output, err := startSSHCmd.CombinedOutput(); err != nil {

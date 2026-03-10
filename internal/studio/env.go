@@ -306,12 +306,23 @@ func SetupGPUEnv(paths *platform.Paths, config *GPUEnvConfig) (*GPUEnvResult, er
 			ReadOnly:      true,
 		})
 
-		// Mount ld.so.preload file
-		result.VolumeMounts = append(result.VolumeMounts, VolumeMount{
-			HostPath:      ldPreloadPath,
-			ContainerPath: "/etc/ld.so.preload",
-			ReadOnly:      true,
-		})
+		// DON'T mount ld.so.preload file for containers - it causes SSH protocol issues
+		// Instead, LD_PRELOAD will be set in /etc/environment by ssh_setup.go
+		// This ensures only user shells get the preload, not system daemons like sshd
+
+		// Add LD_PRELOAD as environment variable that will be written to /etc/environment
+		ldPreloadContent := generateLDPreloadContent(config.Vendor, libsPath, config.IsContainer)
+		// Extract library paths from preload content (skip comment lines)
+		var preloadPaths []string
+		for _, line := range strings.Split(ldPreloadContent, "\n") {
+			line = strings.TrimSpace(line)
+			if line != "" && !strings.HasPrefix(line, "#") {
+				preloadPaths = append(preloadPaths, line)
+			}
+		}
+		if len(preloadPaths) > 0 {
+			result.EnvVars["LD_PRELOAD"] = strings.Join(preloadPaths, ":")
+		}
 
 		// Update env vars for container paths
 		result.EnvVars["TF_LOG_PATH"] = "/var/log/tensor-fusion/logs-" + time.Now().Format("2006-01-02") + ".txt"
