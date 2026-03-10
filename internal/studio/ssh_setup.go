@@ -167,40 +167,40 @@ printf "   ✓ SSH configured\n"
 	}
 	klog.V(2).Infof("Container original PATH: %s", originalPath)
 
-	// Write TensorFusion environment variables to /etc/environment
+	// Write environment variables to /etc/environment
 	// This makes them available to SSH login sessions
+	// Always write PATH to preserve conda/venv paths from container image
 	// LD_PRELOAD is included here (not as docker -e) to prevent loading into sshd
-	if len(envVars) > 0 {
-		klog.V(2).Infof("Writing TensorFusion environment variables to /etc/environment")
-		var envLines []string
+	klog.V(2).Infof("Writing environment variables to /etc/environment")
+	var envLines []string
 
-		// First, write PATH using the container's original PATH (preserves conda/venv)
-		envLines = append(envLines, fmt.Sprintf(`PATH="%s"`, originalPath))
+	// First, write PATH using the container's original PATH (preserves conda/venv)
+	envLines = append(envLines, fmt.Sprintf(`PATH="%s"`, originalPath))
 
-		// Then write TensorFusion environment variables
-		for k, v := range envVars {
-			// Skip PATH since we already added it above
-			if k == "PATH" {
-				continue
-			}
-			// Write all TensorFusion and LD_PRELOAD environment variables
-			// LD_PRELOAD is written here to only affect user shells, not system daemons
-			if strings.HasPrefix(k, "TENSOR_FUSION_") || strings.HasPrefix(k, "TF_") || k == EnvLDPreload || k == EnvLDLibraryPath {
-				// Escape quotes in value
-				escapedValue := strings.ReplaceAll(v, `"`, `\"`)
-				envLines = append(envLines, fmt.Sprintf(`%s="%s"`, k, escapedValue))
-			}
+	// Then write TensorFusion environment variables if present
+	for k, v := range envVars {
+		// Skip PATH since we already added it above
+		if k == "PATH" {
+			continue
 		}
-		if len(envLines) > 0 {
-			envContent := strings.Join(envLines, "\n")
-			// First backup and remove existing PATH line, then append all variables
-			writeEnvCmd := execCmd("exec", containerID, "sh", "-c",
-				fmt.Sprintf("grep -v '^PATH=' /etc/environment > /etc/environment.tmp 2>/dev/null || touch /etc/environment.tmp; echo '%s' >> /etc/environment.tmp && mv /etc/environment.tmp /etc/environment", envContent))
-			if output, err := writeEnvCmd.CombinedOutput(); err != nil {
-				klog.Warningf("Failed to write environment variables (non-fatal): %v, output: %s", err, string(output))
-			} else {
-				klog.V(2).Infof("Successfully wrote TensorFusion environment variables to /etc/environment")
-			}
+		// Write all TensorFusion and LD_PRELOAD environment variables
+		// LD_PRELOAD is written here to only affect user shells, not system daemons
+		if strings.HasPrefix(k, "TENSOR_FUSION_") || strings.HasPrefix(k, "TF_") || k == EnvLDPreload || k == EnvLDLibraryPath {
+			// Escape quotes in value
+			escapedValue := strings.ReplaceAll(v, `"`, `\"`)
+			envLines = append(envLines, fmt.Sprintf(`%s="%s"`, k, escapedValue))
+		}
+	}
+
+	if len(envLines) > 0 {
+		envContent := strings.Join(envLines, "\n")
+		// First backup and remove existing PATH line, then append all variables
+		writeEnvCmd := execCmd("exec", containerID, "sh", "-c",
+			fmt.Sprintf("grep -v '^PATH=' /etc/environment > /etc/environment.tmp 2>/dev/null || touch /etc/environment.tmp; echo '%s' >> /etc/environment.tmp && mv /etc/environment.tmp /etc/environment", envContent))
+		if output, err := writeEnvCmd.CombinedOutput(); err != nil {
+			klog.Warningf("Failed to write environment variables (non-fatal): %v, output: %s", err, string(output))
+		} else {
+			klog.V(2).Infof("Successfully wrote environment variables to /etc/environment")
 		}
 	}
 
