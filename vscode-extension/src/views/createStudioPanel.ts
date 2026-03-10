@@ -79,6 +79,7 @@ export class CreateStudioPanel {
         customImage: string;
         gpuUrl: string;
         ports: string;
+        portsModified: boolean;
         volumes: string;
         envs: string;
         registry: string;
@@ -103,8 +104,9 @@ export class CreateStudioPanel {
                         ? `${registry}/${imageWithoutTag}:${tag}`
                         : `${imageWithoutTag}:${tag}`;
 
-                    // Use default ports if not specified
-                    if (ports.length === 0 && template.defaultPorts) {
+                    // Apply default ports only if user didn't modify the ports field
+                    // If user modified it (even to clear it), respect their choice
+                    if (!data.portsModified && ports.length === 0 && template.defaultPorts) {
                         ports = template.defaultPorts;
                     }
                     // Add default environment variables
@@ -433,16 +435,16 @@ export class CreateStudioPanel {
                                 urlsLabel.style.display = 'none';
                                 urlsEl.style.display = 'none';
                             }
-
-                            // Auto-fill ports if not specified
-                            const portsField = document.getElementById('ports');
-                            if (!portsField.value && template.defaultPorts) {
-                                portsField.value = template.defaultPorts.join(', ');
-                            }
                         } else {
                             infoBox.style.display = 'none';
                         }
                     }
+                });
+
+                // Track whether user has modified the ports field
+                let portsModifiedByUser = false;
+                document.getElementById('ports').addEventListener('input', () => {
+                    portsModifiedByUser = true;
                 });
 
                 // Trigger initial template info display
@@ -473,6 +475,7 @@ export class CreateStudioPanel {
                         customImage: customImage,
                         gpuUrl: document.getElementById('gpuUrl').value,
                         ports: document.getElementById('ports').value,
+                        portsModified: portsModifiedByUser,
                         volumes: document.getElementById('volumes').value,
                         envs: document.getElementById('envs').value,
                         registry: document.getElementById('registry').value,
