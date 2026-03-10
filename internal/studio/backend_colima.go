@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"k8s.io/klog/v2"
 )
 
 // ColimaBackend implements the Backend interface using Colima (macOS/Linux)
@@ -504,6 +506,20 @@ func (b *ColimaBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	}
 
 	containerID := strings.TrimSpace(string(output))
+
+	// Automatically install and configure SSH in the container
+	// This allows any Docker image to be used, not just images with SSH pre-installed
+	klog.Infof("Configuring SSH in container %s...", containerID[:12])
+	fmt.Fprintf(os.Stderr, "\n   Configuring SSH server in container...\n")
+
+	if err := setupSSHInContainer(ctx, "docker", containerID, opts.SSHPublicKey, b.dockerHost); err != nil {
+		// SSH setup failed, clean up container
+		klog.Errorf("Failed to configure SSH, removing container: %v", err)
+		_ = b.Remove(ctx, containerID)
+		return nil, fmt.Errorf("failed to configure SSH in container: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "   SSH server configured successfully!\n\n")
 
 	env := &Environment{
 		ID:           containerID[:12],

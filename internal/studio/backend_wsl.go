@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"k8s.io/klog/v2"
 )
 
 // WSLBackend implements the Backend interface using Windows Subsystem for Linux
@@ -314,6 +316,20 @@ func (b *WSLBackend) Create(ctx context.Context, opts *CreateOptions) (*Environm
 
 	containerID := strings.TrimSpace(string(output))
 
+	// Automatically install and configure SSH in the container
+	// This allows any Docker image to be used, not just images with SSH pre-installed
+	klog.Infof("Configuring SSH in container %s...", containerID[:12])
+	fmt.Fprintf(os.Stderr, "\n   Configuring SSH server in container...\n")
+
+	if err := b.setupSSHInWSLContainer(ctx, distro, containerID, opts.SSHPublicKey); err != nil {
+		// SSH setup failed, clean up container
+		klog.Errorf("Failed to configure SSH, removing container: %v", err)
+		_ = b.Remove(ctx, containerID)
+		return nil, fmt.Errorf("failed to configure SSH in container: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "   SSH server configured successfully!\n\n")
+
 	env := &Environment{
 		ID:           containerID[:12],
 		Name:         opts.Name,
@@ -586,6 +602,98 @@ fi
 
 	_, err := b.Exec(ctx, envID, []string{"bash", "-c", setupScript})
 	return err
+}
+
+// setupSSHInWSLContainer installs and configures SSH in a WSL container
+func (b *WSLBackend) setupSSHInWSLContainer(ctx context.Context, distro, containerID, sshPublicKey string) error {
+	klog.V(2).Infof("Setting up SSH in WSL container %s", containerID)
+
+	// Install script that works across different base images
+	installScript := `#!/bin/sh
+set -e
+
+# Detect package manager and install openssh-server
+if command -v apt-get >/dev/null 2>&1; then
+    echo "Detected Debian/Ubuntu, installing openssh-server..."
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq
+    apt-get install -y -qq openssh-server sudo > /dev/null 2>&1
+    mkdir -p /run/sshd
+elif command -v apk >/dev/null 2>&1; then
+    echo "Detected Alpine, installing openssh..."
+    apk add --no-cache openssh sudo > /dev/null 2>&1
+    ssh-keygen -A > /dev/null 2>&1
+elif command -v yum >/dev/null 2>&1; then
+    echo "Detected RHEL/CentOS, installing openssh-server..."
+    yum install -y -q openssh-server sudo > /dev/null 2>&1
+    ssh-keygen -A > /dev/null 2>&1
+elif command -v dnf >/dev/null 2>&1; then
+    echo "Detected Fedora, installing openssh-server..."
+    dnf install -y -q openssh-server sudo > /dev/null 2>&1
+    ssh-keygen -A > /dev/null 2>&1
+else
+    echo "Error: Unsupported package manager"
+    exit 1
+fi
+
+# Configure SSH
+mkdir -p /root/.ssh
+chmod 700 /root/.ssh
+
+cat > /etc/ssh/sshd_config << 'SSHD_EOF'
+Port 22
+Protocol 2
+HostKey /etc/ssh/ssh_host_rsa_key
+HostKey /etc/ssh/ssh_host_ecdsa_key
+HostKey /etc/ssh/ssh_host_ed25519_key
+PermitRootLogin yes
+PubkeyAuthentication yes
+PasswordAuthentication yes
+PermitEmptyPasswords no
+ChallengeResponseAuthentication no
+UsePrivilegeSeparation no
+SyslogFacility AUTH
+LogLevel INFO
+X11Forwarding yes
+PrintMotd no
+AcceptEnv LANG LC_*
+Subsystem sftp /usr/lib/openssh/sftp-server
+SSHD_EOF
+
+echo "root:ggo-studio" | chpasswd
+echo "SSH setup completed successfully"
+`
+
+	// Run install script
+	args := []string{"docker", "exec", containerID, "sh", "-c", installScript}
+	output, err := b.runInWSL(ctx, distro, args...)
+	if err != nil {
+		klog.Errorf("Failed to install SSH: %v, output: %s", err, string(output))
+		return fmt.Errorf("failed to install SSH: %w\nOutput: %s", err, string(output))
+	}
+
+	klog.V(2).Infof("SSH packages installed: %s", strings.TrimSpace(string(output)))
+
+	// Add SSH public key if provided
+	if sshPublicKey != "" {
+		klog.V(2).Infof("Adding SSH public key")
+		addKeyArgs := []string{"docker", "exec", containerID, "sh", "-c",
+			fmt.Sprintf("echo '%s' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys", sshPublicKey)}
+		if _, err := b.runInWSL(ctx, distro, addKeyArgs...); err != nil {
+			klog.Warningf("Failed to add SSH key (non-fatal): %v", err)
+		}
+	}
+
+	// Start SSH daemon
+	klog.V(2).Infof("Starting SSH daemon")
+	startArgs := []string{"docker", "exec", "-d", containerID, "/usr/sbin/sshd", "-D"}
+	if _, err := b.runInWSL(ctx, distro, startArgs...); err != nil {
+		klog.Errorf("Failed to start SSH daemon: %v", err)
+		return fmt.Errorf("failed to start SSH daemon: %w", err)
+	}
+
+	klog.Infof("SSH server successfully configured in WSL container %s", containerID)
+	return nil
 }
 
 var _ Backend = (*WSLBackend)(nil)
