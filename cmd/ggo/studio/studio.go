@@ -212,7 +212,7 @@ Examples:
 	cmd.Flags().StringVarP(&image, "image", "i", "tensorfusion/studio-torch:latest", "Container image")
 	cmd.Flags().StringVarP(&shareLink, "share-link", "s", "", "Share link or share code to remote vGPU worker (recommended for GPU access)")
 	cmd.Flags().StringVar(&serverURL, "server", api.GetDefaultBaseURL(), "Server URL for resolving share links")
-	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "SSH public key to authorize")
+	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "SSH public key to authorize (auto-detects from ~/.ssh/ if not provided)")
 	cmd.Flags().StringArrayVarP(&ports, "port", "p", nil, "Port mappings (host:container)")
 	cmd.Flags().StringArrayVarP(&volumes, "volume", "v", nil, "Volume mounts (host:container[:ro])")
 	cmd.Flags().StringArrayVarP(&envVars, "env", "e", nil, "Environment variables (KEY=VALUE)")
@@ -282,6 +282,13 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	opts, err := buildCreateOptions(name, shareInfo)
 	if err != nil {
 		return err
+	}
+
+	// Inform user about SSH authentication method
+	if !out.IsJSON() && opts.SSHPublicKey != "" {
+		styles := tui.DefaultStyles()
+		out.Printf("%s Using SSH key authentication (password: ggo-studio as fallback)\n",
+			styles.Info.Render("ℹ"))
 	}
 
 	if !out.IsJSON() {
@@ -419,6 +426,15 @@ func buildCreateOptions(name string, shareInfo *api.SharePublicInfo) (*studio.Cr
 		return nil, err
 	}
 
+	// Auto-detect SSH public key if not provided via --ssh-key flag
+	effectiveSSHKey := sshKey
+	if effectiveSSHKey == "" {
+		if autoKey := studio.GetUserSSHPublicKey(); autoKey != "" {
+			effectiveSSHKey = autoKey
+			klog.V(2).Info("Using user's SSH public key for authentication")
+		}
+	}
+
 	// Set GPU connection info from share link
 	gpuWorkerURL := ""
 	hardwareVendor := ""
@@ -449,7 +465,7 @@ func buildCreateOptions(name string, shareInfo *api.SharePublicInfo) (*studio.Cr
 		Image:          image,
 		GPUWorkerURL:   gpuWorkerURL,
 		HardwareVendor: hardwareVendor,
-		SSHPublicKey:   sshKey,
+		SSHPublicKey:   effectiveSSHKey,
 		Ports:          portMappings,
 		Volumes:        volumeMounts,
 		Envs:           envMap,
