@@ -17,7 +17,6 @@ import (
 
 	"github.com/NexusGPU/gpu-go/internal/errors"
 	"github.com/NexusGPU/gpu-go/internal/platform"
-	"k8s.io/klog/v2"
 )
 
 var (
@@ -223,12 +222,15 @@ func (m *Manager) Create(ctx context.Context, opts *CreateOptions) (*Environment
 		return nil, err
 	}
 
-	// Setup SSH server if backend supports it
-	if sshBackend, ok := backend.(SSHServerBackend); ok {
-		if err := sshBackend.EnsureSSHServer(ctx, env.ID); err != nil {
-			klog.Warningf("Failed to setup SSH server: %v (continuing anyway)", err)
-		}
-	}
+	// SSH server is now set up by setupSSHInContainer() during container creation
+	// No need to call EnsureSSHServer which would override the secure configuration
+	//
+	// // Setup SSH server if backend supports it
+	// if sshBackend, ok := backend.(SSHServerBackend); ok {
+	// 	if err := sshBackend.EnsureSSHServer(ctx, env.ID); err != nil {
+	// 		klog.Warningf("Failed to setup SSH server: %v (continuing anyway)", err)
+	// 	}
+	// }
 
 	m.clearUnreachableSSH(ctx, env)
 

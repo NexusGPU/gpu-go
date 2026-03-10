@@ -111,15 +111,31 @@ echo "SSH setup completed successfully"
 	if sshPublicKey != "" {
 		klog.V(2).Infof("Adding SSH public key to container")
 		addKeyCmd := execCmd("exec", containerID, "sh", "-c",
-			fmt.Sprintf("echo '%s' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys", sshPublicKey))
+			fmt.Sprintf("echo '%s' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && chown root:root /root/.ssh/authorized_keys", sshPublicKey))
 		if output, err := addKeyCmd.CombinedOutput(); err != nil {
 			klog.Warningf("Failed to add SSH key (non-fatal): %v, output: %s", err, string(output))
 		}
 	}
 
 	// Start SSH daemon in background
+	// Temporarily disable ld.so.preload to prevent GPU library logs from breaking SSH protocol
 	klog.V(2).Infof("Starting SSH daemon in container")
-	startSSHCmd := execCmd("exec", "-d", containerID, "/usr/sbin/sshd", "-D")
+	startSSHScript := `
+# Temporarily disable ld.so.preload to prevent library logs from breaking SSH
+if [ -f /etc/ld.so.preload ]; then
+    mv /etc/ld.so.preload /etc/ld.so.preload.disabled
+fi
+
+# Start SSH daemon
+/usr/sbin/sshd -D &
+
+# Re-enable ld.so.preload after sshd has forked
+sleep 1
+if [ -f /etc/ld.so.preload.disabled ]; then
+    mv /etc/ld.so.preload.disabled /etc/ld.so.preload
+fi
+`
+	startSSHCmd := execCmd("exec", "-d", containerID, "sh", "-c", startSSHScript)
 	if output, err := startSSHCmd.CombinedOutput(); err != nil {
 		klog.Errorf("Failed to start SSH daemon: %v, output: %s", err, string(output))
 		return fmt.Errorf("failed to start SSH daemon: %w\nOutput: %s", err, string(output))
