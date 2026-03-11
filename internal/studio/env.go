@@ -60,9 +60,9 @@ type GPUEnvResult struct {
 func GetLibraryNames(vendor GPUVendor) []string {
 	switch vendor {
 	case VendorNvidia:
-		return []string{"libcuda.so", "libnvidia-ml.so"}
+		return []string{"libcuda.so", "libnvidia-ml.so", "libteleport.so", "libaccelerator_nvidia-linux-amd64.so"}
 	case VendorAMD, VendorHygon:
-		return []string{"libamdhip64.so"}
+		return []string{"libamdhip64.so", "libteleport.so", "libaccelerator_amd-linux-amd64.so"}
 	default:
 		return []string{}
 	}
@@ -98,9 +98,9 @@ func FindActualLibraryFiles(cachePath string, vendor GPUVendor) []string {
 	var patterns []string
 	switch vendor {
 	case VendorNvidia:
-		patterns = []string{"libcuda", "libnvidia", "nvcuda", "nvml"}
+		patterns = []string{"libcuda", "libnvidia", "nvcuda", "nvml", "libteleport", "libaccelerator"}
 	case VendorAMD, VendorHygon:
-		patterns = []string{"libamdhip", "librocm", "amdhip"}
+		patterns = []string{"libamdhip", "librocm", "amdhip", "libteleport", "libaccelerator"}
 	}
 
 	for _, entry := range entries {
