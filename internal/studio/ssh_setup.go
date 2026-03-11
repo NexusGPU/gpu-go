@@ -40,44 +40,54 @@ else
         export DEBIAN_FRONTEND=noninteractive
         printf "   Installing SSH (30-60s): "
 
-        # Create temp file for error messages
+        # Create temp files for error messages
         ERR_FILE=$(mktemp)
 
-        # Update packages with progress dots
-        (
-            apt-get update -qq >/dev/null 2>"$ERR_FILE" &
-            pid=$!
-            while kill -0 $pid 2>/dev/null; do
-                printf "."
-                sleep 2
-            done
-            wait $pid
-            exit_code=$?
-            if [ $exit_code -ne 0 ]; then
-                printf "\n   ✗ apt-get update failed:\n"
-                cat "$ERR_FILE"
-                rm -f "$ERR_FILE"
-                exit $exit_code
-            fi
-        )
+        # Update packages in background with progress indicator
+        apt-get update -qq >/dev/null 2>"$ERR_FILE" &
+        update_pid=$!
 
-        # Install packages with progress dots
-        (
-            apt-get install -y -qq openssh-server sudo >/dev/null 2>"$ERR_FILE" &
-            pid=$!
-            while kill -0 $pid 2>/dev/null; do
-                printf "."
-                sleep 2
-            done
-            wait $pid
-            exit_code=$?
-            if [ $exit_code -ne 0 ]; then
-                printf "\n   ✗ apt-get install failed:\n"
-                cat "$ERR_FILE"
-                rm -f "$ERR_FILE"
-                exit $exit_code
-            fi
-        )
+        # Show progress dots while apt-get update runs
+        while kill -0 $update_pid 2>/dev/null; do
+            printf "."
+            sleep 2
+        done
+
+        # Wait for apt-get update and check exit code
+        wait $update_pid
+        update_exit=$?
+
+        if [ $update_exit -ne 0 ]; then
+            printf "\n   ✗ apt-get update failed (exit code: $update_exit)\n"
+            echo "==================== Error Output ===================="
+            cat "$ERR_FILE" 2>/dev/null || echo "No error output captured"
+            echo "======================================================"
+            rm -f "$ERR_FILE"
+            exit $update_exit
+        fi
+
+        # Install packages in background with progress indicator
+        apt-get install -y -qq openssh-server sudo >/dev/null 2>"$ERR_FILE" &
+        install_pid=$!
+
+        # Show progress dots while apt-get install runs
+        while kill -0 $install_pid 2>/dev/null; do
+            printf "."
+            sleep 2
+        done
+
+        # Wait for apt-get install and check exit code
+        wait $install_pid
+        install_exit=$?
+
+        if [ $install_exit -ne 0 ]; then
+            printf "\n   ✗ apt-get install failed (exit code: $install_exit)\n"
+            echo "==================== Error Output ===================="
+            cat "$ERR_FILE" 2>/dev/null || echo "No error output captured"
+            echo "======================================================"
+            rm -f "$ERR_FILE"
+            exit $install_exit
+        fi
 
         rm -f "$ERR_FILE"
         printf " done\n"
