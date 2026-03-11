@@ -445,11 +445,13 @@ func (a *Agent) convertToWorkerInfos(apiWorkers []api.WorkerConfig) ([]*hvApi.Wo
 		envVars[EnvAuthorizedKeyPath] = filepath.Join(a.paths.ConfigDir(), w.WorkerID+"_share_codes")
 
 		// Set TF_LOG_PATH for tensor-fusion-worker to save logs to a specific file
+		// Use timestamp in filename to create a new log file for each worker restart
 		logsDir := filepath.Join(a.config.StateDir(), "logs")
 		if err := os.MkdirAll(logsDir, 0755); err != nil {
 			klog.Warningf("Failed to create logs directory: path=%s error=%v", logsDir, err)
 		}
-		workerLogPath := filepath.Join(logsDir, "worker-"+w.WorkerID+".log")
+		timestamp := time.Now().Format("2006-01-02_15-04-05")
+		workerLogPath := filepath.Join(logsDir, fmt.Sprintf("worker-%s-%s.log", w.WorkerID, timestamp))
 		envVars["TF_LOG_PATH"] = workerLogPath
 		envVars["TF_LOG_LEVEL"] = getEnvWithDefault("TF_LOG_LEVEL", "info")
 
