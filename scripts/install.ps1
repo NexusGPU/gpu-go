@@ -414,8 +414,8 @@ function Install-Ggo {
         Write-Host "  # Register as agent (on GPU server)" -ForegroundColor Gray
         Write-Host "  ggo agent register --token <your-token>" -ForegroundColor White
         Write-Host ""
-        Write-Host "  # Use a shared GPU" -ForegroundColor Gray
-        Write-Host "  ggo use <short-link>" -ForegroundColor White
+        Write-Host "  # Use a shared GPU (PowerShell)" -ForegroundColor Gray
+        Write-Host "  ggo use <short-link> -y | Out-String | Invoke-Expression" -ForegroundColor White
         Write-Host ""
     }
     finally {

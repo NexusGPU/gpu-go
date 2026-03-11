@@ -210,18 +210,24 @@ func newRegisterCmd() *cobra.Command {
 
 			gpus, err := discoverGPUs()
 			if err != nil {
-				cmd.SilenceUsage = true
+				// GPU discovery failed (e.g., unsupported GPU vendor like AMD, or no GPU drivers)
+				// Log a warning but allow registration to continue with empty GPU list.
+				// This enables users to install the agent on machines without supported GPUs
+				// and add GPU configuration later via the dashboard.
 				if !out.IsJSON() {
-					out.Error(fmt.Sprintf("Failed to discover GPUs: %v", err))
+					out.Warning(fmt.Sprintf("Failed to discover GPUs: %v", err))
+					out.Warning("Registering agent without GPU configuration. You can configure GPUs later via the dashboard.")
 				}
-				return err
+				klog.Warningf("Failed to discover GPUs, continuing registration: error=%v", err)
+				gpus = []api.GPUInfo{} // Empty GPU list
 			}
-			if len(gpus) == 0 {
-				cmd.SilenceUsage = true
+			if len(gpus) == 0 && err == nil {
+				// No error but no GPUs found - warn but allow registration
 				if !out.IsJSON() {
-					out.Error("No GPUs found. Please check your GPU configuration or use GPU_GO_MOCK_GPUS for testing")
+					out.Warning("No GPUs found. Registering agent without GPU configuration.")
+					out.Info("Tip: Use GPU_GO_MOCK_GPUS=1 for testing, or configure GPUs via the dashboard.")
 				}
-				return fmt.Errorf("no GPUs found")
+				klog.Warningf("No GPUs discovered, continuing registration with empty GPU list")
 			}
 
 			agentInstance := agent.NewAgent(client, configMgr)

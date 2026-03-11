@@ -332,11 +332,23 @@ export class CLI {
             let stderr = '';
 
             child.stdout.on('data', (data: Buffer) => {
-                stdout += data.toString();
+                // On Windows, try to decode using the correct encoding
+                // Node.js Buffer.toString() defaults to UTF-8, but Windows CMD outputs in the system codepage (e.g., GBK for Chinese Windows)
+                if (process.platform === 'win32') {
+                    // For Windows, we use UTF-8 as modern Windows shells should support it
+                    // If there are encoding issues, the user should ensure their terminal uses UTF-8
+                    stdout += data.toString('utf8');
+                } else {
+                    stdout += data.toString();
+                }
             });
 
             child.stderr.on('data', (data: Buffer) => {
-                stderr += data.toString();
+                if (process.platform === 'win32') {
+                    stderr += data.toString('utf8');
+                } else {
+                    stderr += data.toString();
+                }
             });
 
             child.on('close', (code) => {
@@ -344,17 +356,30 @@ export class CLI {
                     Logger.log(`Command success: ${args[0]}`);
                     resolve(stdout);
                 } else {
-                    const msg = stderr || `Command failed with code ${code}`;
+                    let msg = stderr || `Command failed with code ${code}`;
                     Logger.error(`Command failed (code ${code}):`, msg);
 
                     // Special handling for CLI not found
-                    if (code === 127) {
+                    // On Unix: code 127, On Windows: code 1 or 9009 with specific error patterns
+                    const isCliNotFound = code === 127 ||
+                                         code === 9009 ||
+                                         (process.platform === 'win32' && code === 1 && (
+                                             stderr.includes('is not recognized') ||
+                                             stderr.includes('不是内部或外部命令') ||
+                                             stderr.includes('not found')
+                                         ));
+
+                    if (isCliNotFound) {
+                        msg = `GPUGo CLI not found at '${cliPath}'. Please ensure ggo.exe is installed and in your PATH, or configure the path in settings.`;
                         vscode.window.showErrorMessage(
-                            `GPUGo CLI not found at '${cliPath}'. Please check your settings.`,
+                            msg,
+                            'Install Guide',
                             'Settings'
                         ).then(s => {
                             if (s === 'Settings') {
                                 vscode.commands.executeCommand('workbench.action.openSettings', 'gpugo.cliPath');
+                            } else if (s === 'Install Guide') {
+                                vscode.env.openExternal(vscode.Uri.parse('https://go.gpu.tf/docs'));
                             }
                         });
                     }
