@@ -244,6 +244,13 @@ func (a *Agent) handleVGPURestartEvent(dataLines []string) int {
 		return 0
 	}
 
+	// Sync config before restarting to ensure we use the latest license
+	klog.Infof("Syncing config before worker restart to get latest license")
+	if err := a.pullConfig(); err != nil {
+		klog.Errorf("Failed to sync config before worker restart: %v", err)
+		// Continue with restart anyway - better to restart with old config than not restart at all
+	}
+
 	queued := a.reconciler.RequestWorkerRestarts(workerIDs)
 	if queued > 0 {
 		klog.Infof("Queued worker restarts from SSE event: workers=%s", strings.Join(workerIDs, ","))
