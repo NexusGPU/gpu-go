@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { CLI, StudioEnv } from '../cli/cli';
 import { getWebviewContent } from './webviewUtils';
 import { STUDIO_TEMPLATES, getTemplateById, getCategories } from '../config/studioTemplates';
+import { Logger } from '../logger';
 
 export class CreateStudioPanel {
     public static currentPanel: CreateStudioPanel | undefined;
@@ -123,6 +124,9 @@ export class CreateStudioPanel {
             }
 
             const volumes = data.volumes ? data.volumes.split(',').map(v => v.trim()).filter(Boolean) : [];
+
+            // Show output window to display creation progress
+            Logger.show();
 
             let createdStudio: StudioEnv | null = null;
             await vscode.window.withProgress({
