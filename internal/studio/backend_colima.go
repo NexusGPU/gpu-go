@@ -400,39 +400,10 @@ func (b *ColimaBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	args = append(args, "--label", fmt.Sprintf("ggo.name=%s", opts.Name))
 	args = append(args, "--label", "ggo.mode=colima")
 
-	// Add port mappings
-	// Check if all requested ports are available
-	var occupiedPorts []int
-	sshPort := 0
-	for _, port := range opts.Ports {
-		// Check if host port is available
-		if !isPortAvailable(port.HostPort) {
-			occupiedPorts = append(occupiedPorts, port.HostPort)
-		}
-
-		protocol := port.Protocol
-		if protocol == "" {
-			protocol = DefaultProtocolTCP
-		}
-		args = append(args, "-p", fmt.Sprintf("%d:%d/%s", port.HostPort, port.ContainerPort, protocol))
-		if port.ContainerPort == 22 {
-			sshPort = port.HostPort
-		}
-	}
-
-	// If any ports are occupied, return a helpful error
-	if len(occupiedPorts) > 0 {
-		portList := make([]string, len(occupiedPorts))
-		for i, p := range occupiedPorts {
-			portList[i] = fmt.Sprintf("%d", p)
-		}
-		return nil, fmt.Errorf("port(s) already in use: %s. Please choose different ports in the 'Port Mappings' field", strings.Join(portList, ", "))
-	}
-
-	// Add default SSH port if not specified (use random port in 12000-18000 range)
-	if sshPort == 0 {
-		sshPort = findAvailablePort(0)
-		args = append(args, "-p", fmt.Sprintf("%d:22/tcp", sshPort))
+	// Add port mappings and find SSH port
+	sshPort, err := addPortMappings(&args, opts.Ports)
+	if err != nil {
+		return nil, err
 	}
 
 	// Use endpoint override if specified
