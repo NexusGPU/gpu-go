@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -500,4 +501,45 @@ func getSSHVolumeMounts(paths *platform.Paths, studioName string) []VolumeMount 
 	}
 
 	return mounts
+}
+
+// ImageHasDefaultCommand checks if a Docker image has a useful default CMD or ENTRYPOINT
+// Interactive shells (bash, sh) are not considered useful as they exit immediately without -it
+func ImageHasDefaultCommand(ctx context.Context, dockerCmd, image string) bool {
+	cmd := exec.CommandContext(ctx, dockerCmd, "inspect", "--format", "{{.Config.Cmd}}{{.Config.Entrypoint}}", image)
+	output, err := cmd.Output()
+	if err != nil {
+		klog.V(2).Infof("Failed to inspect image %s: %v, assuming no default command", image, err)
+		return false
+	}
+
+	// Output format: [cmd args][entrypoint args] or [] for empty
+	// Examples:
+	// - Image with CMD: [/bin/bash][] or similar
+	// - Image with ENTRYPOINT: [][/entrypoint.sh]
+	// - Image with both: [arg1 arg2][/entrypoint.sh]
+	// - No CMD or ENTRYPOINT: [][]
+	outputStr := strings.TrimSpace(string(output))
+
+	// No CMD or ENTRYPOINT
+	if outputStr == "" || outputStr == "[][]" || outputStr == "<no value><no value>" {
+		klog.V(2).Infof("Image %s has no CMD/ENTRYPOINT", image)
+		return false
+	}
+
+	// Check if CMD/ENTRYPOINT is just an interactive shell
+	// These exit immediately without -it flag, so treat as "no useful command"
+	interactiveShells := []string{"/bin/bash", "/bin/sh", "bash", "sh", "/usr/bin/bash", "/usr/bin/sh"}
+	outputLower := strings.ToLower(outputStr)
+	for _, shell := range interactiveShells {
+		// Match [/bin/bash][] or similar patterns
+		if strings.Contains(outputLower, shell) && !strings.Contains(outputLower, "start-") && !strings.Contains(outputLower, ".sh]") {
+			// It's a plain shell command, not a script
+			klog.V(2).Infof("Image %s has interactive shell CMD (%s), treating as no useful command", image, outputStr)
+			return false
+		}
+	}
+
+	klog.V(2).Infof("Image %s has useful CMD/ENTRYPOINT: %s", image, outputStr)
+	return true
 }

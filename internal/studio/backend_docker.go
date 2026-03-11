@@ -303,22 +303,29 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	}
 	args = append(args, image)
 
-	// Add command args (supplements ENTRYPOINT or overrides CMD)
-	// FormatContainerCommand handles wrapping single shell commands with "sh -c"
-	// If no command is provided, use "sleep infinity" to keep container running
-	cmdToUse := opts.Command
-	if len(cmdToUse) == 0 {
-		cmdToUse = []string{"sleep", "infinity"}
-	}
-	if formattedCmd := FormatContainerCommand(cmdToUse); len(formattedCmd) > 0 {
-		args = append(args, formattedCmd...)
-	}
-
 	klog.V(2).Infof("Running docker command: %s %v", b.dockerCmd, args)
 
 	// Pull image first with progress visible to user
 	if err := b.pullImageWithProgress(ctx, image, platform); err != nil {
 		return nil, fmt.Errorf("failed to pull image: %w", err)
+	}
+
+	// Check if image has a default CMD or ENTRYPOINT
+	// Only use "sleep infinity" if image has no CMD and user provided no command
+	cmdToUse := opts.Command
+	if len(cmdToUse) == 0 {
+		hasDefaultCmd := ImageHasDefaultCommand(ctx, b.dockerCmd, image)
+		if !hasDefaultCmd {
+			cmdToUse = []string{"sleep", "infinity"}
+			klog.V(2).Infof("Image has no default CMD/ENTRYPOINT, using sleep infinity")
+		} else {
+			klog.V(2).Infof("Image has default CMD/ENTRYPOINT, using it")
+		}
+	}
+	if len(cmdToUse) > 0 {
+		if formattedCmd := FormatContainerCommand(cmdToUse); len(formattedCmd) > 0 {
+			args = append(args, formattedCmd...)
+		}
 	}
 
 	// Run container

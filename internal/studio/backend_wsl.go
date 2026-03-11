@@ -322,10 +322,44 @@ func (b *WSLBackend) Create(ctx context.Context, opts *CreateOptions) (*Environm
 	}
 	args = append(args, image)
 
-	// Add command args (supplements ENTRYPOINT or overrides CMD)
-	// FormatContainerCommand handles wrapping single shell commands with "sh -c"
-	if formattedCmd := FormatContainerCommand(opts.Command); len(formattedCmd) > 0 {
-		args = append(args, formattedCmd...)
+	// Check if image has a default CMD or ENTRYPOINT
+	// Only use "sleep infinity" if image has no useful CMD and user provided no command
+	// For WSL, we run docker inspect in WSL context
+	cmdToUse := opts.Command
+	if len(cmdToUse) == 0 {
+		// Check image CMD/ENTRYPOINT by running docker inspect in WSL
+		inspectArgs := []string{"docker", "inspect", "--format", "{{.Config.Cmd}}{{.Config.Entrypoint}}", image}
+		inspectOutput, inspectErr := b.runInWSL(ctx, distro, inspectArgs...)
+		hasDefaultCmd := false
+		if inspectErr == nil {
+			outputStr := strings.TrimSpace(string(inspectOutput))
+			// Same logic as ImageHasDefaultCommand but inline for WSL
+			if outputStr != "" && outputStr != "[][]" && outputStr != "<no value><no value>" {
+				// Check if it's not just an interactive shell
+				outputLower := strings.ToLower(outputStr)
+				interactiveShells := []string{"/bin/bash", "/bin/sh", "bash", "sh", "/usr/bin/bash", "/usr/bin/sh"}
+				isInteractiveShell := false
+				for _, shell := range interactiveShells {
+					if strings.Contains(outputLower, shell) && !strings.Contains(outputLower, "start-") && !strings.Contains(outputLower, ".sh]") {
+						isInteractiveShell = true
+						break
+					}
+				}
+				hasDefaultCmd = !isInteractiveShell
+			}
+		}
+
+		if !hasDefaultCmd {
+			cmdToUse = []string{"sleep", "infinity"}
+			klog.V(2).Infof("Image has no useful CMD/ENTRYPOINT, using sleep infinity")
+		} else {
+			klog.V(2).Infof("Image has useful CMD/ENTRYPOINT, using it")
+		}
+	}
+	if len(cmdToUse) > 0 {
+		if formattedCmd := FormatContainerCommand(cmdToUse); len(formattedCmd) > 0 {
+			args = append(args, formattedCmd...)
+		}
 	}
 
 	// Run in WSL

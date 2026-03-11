@@ -15,6 +15,7 @@ import (
 
 	"github.com/NexusGPU/gpu-go/internal/errors"
 	"github.com/NexusGPU/gpu-go/internal/platform"
+	"k8s.io/klog/v2"
 )
 
 const appleContainerInstallHint = "Apple Container is not installed. Download the signed installer package from https://github.com/apple/container/releases"
@@ -215,9 +216,22 @@ func (b *AppleContainerBackend) Create(ctx context.Context, opts *CreateOptions)
 	}
 	args = append(args, image)
 
-	// Add command args (supplements ENTRYPOINT or overrides CMD)
-	if formattedCmd := FormatContainerCommand(opts.Command); len(formattedCmd) > 0 {
-		args = append(args, formattedCmd...)
+	// Check if image has a default CMD or ENTRYPOINT
+	// Only use "sleep infinity" if image has no useful CMD and user provided no command
+	cmdToUse := opts.Command
+	if len(cmdToUse) == 0 {
+		hasDefaultCmd := ImageHasDefaultCommand(ctx, b.containerCmd, image)
+		if !hasDefaultCmd {
+			cmdToUse = []string{"sleep", "infinity"}
+			klog.V(2).Infof("Image has no useful CMD/ENTRYPOINT, using sleep infinity")
+		} else {
+			klog.V(2).Infof("Image has useful CMD/ENTRYPOINT, using it")
+		}
+	}
+	if len(cmdToUse) > 0 {
+		if formattedCmd := FormatContainerCommand(cmdToUse); len(formattedCmd) > 0 {
+			args = append(args, formattedCmd...)
+		}
 	}
 
 	cmd := exec.CommandContext(ctx, b.containerCmd, args...)
