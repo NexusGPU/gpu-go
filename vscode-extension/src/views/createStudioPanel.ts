@@ -87,6 +87,16 @@ export class CreateStudioPanel {
         versionTag: string;
     }) {
         try {
+            // Validate required fields
+            if (!data.name || !data.name.trim()) {
+                vscode.window.showErrorMessage('Studio name is required');
+                return;
+            }
+            if (!data.gpuUrl || !data.gpuUrl.trim()) {
+                vscode.window.showErrorMessage('Share link is required. Please enter a GPU share link.');
+                return;
+            }
+
             // Resolve image from template or custom
             let image = data.customImage;
             let ports = data.ports ? data.ports.split(',').map(p => p.trim()).filter(Boolean) : [];
@@ -471,6 +481,17 @@ export class CreateStudioPanel {
                                 const portsHelper = document.getElementById('ports-helper');
                                 if (portsHelper) {
                                     portsHelper.textContent = 'Comma-separated port mappings (host:container). Leave empty to use template defaults.';
+                                }
+                            }
+
+                            // Auto-fill image version tag from template
+                            const versionTagField = document.getElementById('versionTag');
+                            if (versionTagField && template.image) {
+                                const [, defaultTag] = template.image.split(':');
+                                if (defaultTag) {
+                                    versionTagField.value = defaultTag;
+                                } else {
+                                    versionTagField.value = 'latest';
                                 }
                             }
                         } else {

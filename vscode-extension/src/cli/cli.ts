@@ -334,21 +334,17 @@ export class CLI {
             child.stdout.on('data', (data: Buffer) => {
                 // On Windows, try to decode using the correct encoding
                 // Node.js Buffer.toString() defaults to UTF-8, but Windows CMD outputs in the system codepage (e.g., GBK for Chinese Windows)
-                if (process.platform === 'win32') {
-                    // For Windows, we use UTF-8 as modern Windows shells should support it
-                    // If there are encoding issues, the user should ensure their terminal uses UTF-8
-                    stdout += data.toString('utf8');
-                } else {
-                    stdout += data.toString();
-                }
+                const text = process.platform === 'win32' ? data.toString('utf8') : data.toString();
+                stdout += text;
+                // Stream output to logger for real-time progress
+                Logger.log(text.trim());
             });
 
             child.stderr.on('data', (data: Buffer) => {
-                if (process.platform === 'win32') {
-                    stderr += data.toString('utf8');
-                } else {
-                    stderr += data.toString();
-                }
+                const text = process.platform === 'win32' ? data.toString('utf8') : data.toString();
+                stderr += text;
+                // Docker outputs progress info to stderr, so log it as info instead of error
+                Logger.log(text.trim());
             });
 
             child.on('close', (code) => {
@@ -453,6 +449,9 @@ export class CLI {
     async studioList(): Promise<StudioEnv[]> {
         try {
             const res = await this.execCommandJSON<ListResponse<StudioEnvJSON>>(['studio', 'list']);
+            if (!res || !res.items) {
+                return [];
+            }
             return res.items.map(env => this.convertStudioEnv(env));
         } catch (error) {
             Logger.error('Failed to list studios', error);
@@ -606,6 +605,9 @@ export class CLI {
     async workerList(): Promise<Worker[]> {
         try {
             const res = await this.execCommandJSON<ListResponse<WorkerJSON>>(['worker', 'list']);
+            if (!res || !res.items) {
+                return [];
+            }
             return res.items.map(w => this.convertWorker(w));
         } catch (error) {
             Logger.error('Failed to list workers', error);
@@ -700,6 +702,9 @@ export class CLI {
     async shareList(): Promise<Share[]> {
         try {
             const res = await this.execCommandJSON<ListResponse<ShareJSON>>(['share', 'list']);
+            if (!res || !res.items) {
+                return [];
+            }
             return res.items.map(s => this.convertShare(s));
         } catch {
             return [];
@@ -750,6 +755,9 @@ export class CLI {
     async agentList(): Promise<Agent[]> {
         try {
             const res = await this.execCommandJSON<ListResponse<AgentJSON>>(['agent', 'list']);
+            if (!res || !res.items) {
+                return [];
+            }
             return res.items.map(a => this.convertAgent(a));
         } catch (error) {
             Logger.error('Failed to list agents', error);
