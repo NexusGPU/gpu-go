@@ -57,12 +57,15 @@ type GPUEnvResult struct {
 // GetLibraryNames returns the library names to preload for a vendor (Linux/macOS)
 // Note: These are the expected canonical names. Use FindActualLibraryFiles to
 // discover actual downloaded files which may have different names.
+// Only includes libraries that need to intercept GPU API calls (stub libraries).
+// Other libraries (libteleport, libaccelerator) are available in LD_LIBRARY_PATH but not preloaded.
 func GetLibraryNames(vendor GPUVendor) []string {
 	switch vendor {
 	case VendorNvidia:
-		return []string{"libcuda.so", "libnvidia-ml.so", "libteleport.so", "libaccelerator_nvidia-linux-amd64.so"}
+		// Only preload stub libraries that intercept CUDA/NVML API calls
+		return []string{"libcuda.so", "libnvidia-ml.so"}
 	case VendorAMD, VendorHygon:
-		return []string{"libamdhip64.so", "libteleport.so", "libaccelerator_amd-linux-amd64.so"}
+		return []string{"libamdhip64.so"}
 	default:
 		return []string{}
 	}
@@ -71,10 +74,13 @@ func GetLibraryNames(vendor GPUVendor) []string {
 // FindActualLibraryFiles scans the cache directory for actual GPU library files
 // that should be preloaded. This handles cases where downloaded files have different
 // names than the canonical library names.
+// Note: Only stub libraries (libcuda, libnvidia, etc.) need to be in LD_PRELOAD.
+// Support libraries (libteleport, libaccelerator) are detected by patterns for
+// discovery purposes, but won't be preloaded if canonical stub libraries are found.
 func FindActualLibraryFiles(cachePath string, vendor GPUVendor) []string {
 	var libs []string
 
-	// First try to find canonical library names
+	// First try to find canonical library names (stub libraries only)
 	canonicalNames := GetLibraryNames(vendor)
 	for _, name := range canonicalNames {
 		libPath := filepath.Join(cachePath, name)
@@ -83,18 +89,20 @@ func FindActualLibraryFiles(cachePath string, vendor GPUVendor) []string {
 		}
 	}
 
-	// If canonical names found, use them
+	// If canonical names found, use them (stub libraries only)
 	if len(libs) > 0 {
 		return libs
 	}
 
 	// Otherwise, scan for .so files that match vendor patterns
+	// Patterns include support libraries for discovery, but only stub libraries
+	// will be used for LD_PRELOAD (libteleport/libaccelerator are in LD_LIBRARY_PATH)
 	entries, err := os.ReadDir(cachePath)
 	if err != nil {
 		return canonicalNames // Fall back to canonical names if can't read dir
 	}
 
-	// Patterns for different vendors
+	// Patterns for different vendors (includes support libs for discovery)
 	var patterns []string
 	switch vendor {
 	case VendorNvidia:
