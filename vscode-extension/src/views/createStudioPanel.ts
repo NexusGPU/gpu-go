@@ -479,11 +479,23 @@ export class CreateStudioPanel {
                     }
                 });
 
-                // Trigger initial template info display
-                const initialTemplate = document.getElementById('template').value;
-                if (initialTemplate) {
-                    document.getElementById('template').dispatchEvent(new Event('change'));
-                }
+                // Trigger initial template info display after component initialization
+                // Use setTimeout to ensure vscode-single-select component is fully initialized
+                setTimeout(() => {
+                    const templateSelect = document.getElementById('template');
+                    const initialTemplate = templateSelect.value;
+                    if (initialTemplate) {
+                        templateSelect.dispatchEvent(new Event('change'));
+                    } else {
+                        // If no value yet, wait a bit longer and try again
+                        setTimeout(() => {
+                            const retryTemplate = templateSelect.value;
+                            if (retryTemplate) {
+                                templateSelect.dispatchEvent(new Event('change'));
+                            }
+                        }, 200);
+                    }
+                }, 100);
 
                 document.getElementById('create-btn').addEventListener('click', () => {
                     const name = document.getElementById('name').value;
