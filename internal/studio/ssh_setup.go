@@ -163,8 +163,9 @@ SSHD_EOF
 printf "   ✓ SSH configured\n"
 `
 
-	// Execute install script in container
-	cmd := execCmd("exec", containerID, "sh", "-c", installScript)
+	// Execute install script in container as root user
+	// Many images (e.g., Jupyter) run as non-root by default, but apt-get needs root
+	cmd := execCmd("exec", "--user", "root", containerID, "sh", "-c", installScript)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	err := cmd.Run()
@@ -223,7 +224,8 @@ printf "   ✓ SSH configured\n"
 	if len(envLines) > 0 {
 		envContent := strings.Join(envLines, "\n")
 		// First backup and remove existing PATH line, then append all variables
-		writeEnvCmd := execCmd("exec", containerID, "sh", "-c",
+		// Execute as root since /etc/environment requires elevated permissions
+		writeEnvCmd := execCmd("exec", "--user", "root", containerID, "sh", "-c",
 			fmt.Sprintf("grep -v '^PATH=' /etc/environment > /etc/environment.tmp 2>/dev/null || touch /etc/environment.tmp; echo '%s' >> /etc/environment.tmp && mv /etc/environment.tmp /etc/environment", envContent))
 		if output, err := writeEnvCmd.CombinedOutput(); err != nil {
 			klog.Warningf("Failed to write environment variables (non-fatal): %v, output: %s", err, string(output))
@@ -235,7 +237,8 @@ printf "   ✓ SSH configured\n"
 	// Add SSH public key if provided
 	if sshPublicKey != "" {
 		klog.V(2).Infof("Adding SSH public key to container")
-		addKeyCmd := execCmd("exec", containerID, "sh", "-c",
+		// Execute as root to write to /root/.ssh/authorized_keys
+		addKeyCmd := execCmd("exec", "--user", "root", containerID, "sh", "-c",
 			fmt.Sprintf("echo '%s' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && chown root:root /root/.ssh/authorized_keys", sshPublicKey))
 		if output, err := addKeyCmd.CombinedOutput(); err != nil {
 			klog.Warningf("Failed to add SSH key (non-fatal): %v, output: %s", err, string(output))
@@ -245,8 +248,9 @@ printf "   ✓ SSH configured\n"
 	// Start SSH daemon in background
 	// LD_PRELOAD is now set in /etc/environment (not /etc/ld.so.preload)
 	// so it only affects user shells, not the sshd daemon itself
+	// Execute as root since sshd requires elevated permissions
 	klog.V(2).Infof("Starting SSH daemon in container")
-	startSSHCmd := execCmd("exec", "-d", containerID, "/usr/sbin/sshd", "-D")
+	startSSHCmd := execCmd("exec", "-d", "--user", "root", containerID, "/usr/sbin/sshd", "-D")
 	if output, err := startSSHCmd.CombinedOutput(); err != nil {
 		klog.Errorf("Failed to start SSH daemon: %v, output: %s", err, string(output))
 		return fmt.Errorf("failed to start SSH daemon: %w\nOutput: %s", err, string(output))
