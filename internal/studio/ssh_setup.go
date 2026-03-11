@@ -40,28 +40,46 @@ else
         export DEBIAN_FRONTEND=noninteractive
         printf "   Installing SSH (30-60s): "
 
+        # Create temp file for error messages
+        ERR_FILE=$(mktemp)
+
         # Update packages with progress dots
         (
-            apt-get update -qq >/dev/null 2>&1 &
+            apt-get update -qq >/dev/null 2>"$ERR_FILE" &
             pid=$!
             while kill -0 $pid 2>/dev/null; do
                 printf "."
                 sleep 2
             done
             wait $pid
+            exit_code=$?
+            if [ $exit_code -ne 0 ]; then
+                printf "\n   ✗ apt-get update failed:\n"
+                cat "$ERR_FILE"
+                rm -f "$ERR_FILE"
+                exit $exit_code
+            fi
         )
 
         # Install packages with progress dots
         (
-            apt-get install -y -qq openssh-server sudo >/dev/null 2>&1 &
+            apt-get install -y -qq openssh-server sudo >/dev/null 2>"$ERR_FILE" &
             pid=$!
             while kill -0 $pid 2>/dev/null; do
                 printf "."
                 sleep 2
             done
             wait $pid
+            exit_code=$?
+            if [ $exit_code -ne 0 ]; then
+                printf "\n   ✗ apt-get install failed:\n"
+                cat "$ERR_FILE"
+                rm -f "$ERR_FILE"
+                exit $exit_code
+            fi
         )
 
+        rm -f "$ERR_FILE"
         printf " done\n"
         mkdir -p /run/sshd
     elif command -v apk >/dev/null 2>&1; then
