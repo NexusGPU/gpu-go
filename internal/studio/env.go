@@ -311,17 +311,20 @@ func SetupGPUEnv(paths *platform.Paths, config *GPUEnvConfig) (*GPUEnvResult, er
 		// This ensures only user shells get the preload, not system daemons like sshd
 
 		// Add LD_PRELOAD as environment variable that will be written to /etc/environment
-		ldPreloadContent := generateLDPreloadContent(config.Vendor, libsPath, config.IsContainer)
-		// Extract library paths from preload content (skip comment lines)
-		var preloadPaths []string
-		for _, line := range strings.Split(ldPreloadContent, "\n") {
-			line = strings.TrimSpace(line)
-			if line != "" && !strings.HasPrefix(line, "#") {
-				preloadPaths = append(preloadPaths, line)
+		// Skip on macOS host as GPU libraries are not available locally (GPU is remote)
+		if !IsDarwin() {
+			ldPreloadContent := generateLDPreloadContent(config.Vendor, libsPath, config.IsContainer)
+			// Extract library paths from preload content (skip comment lines)
+			var preloadPaths []string
+			for _, line := range strings.Split(ldPreloadContent, "\n") {
+				line = strings.TrimSpace(line)
+				if line != "" && !strings.HasPrefix(line, "#") {
+					preloadPaths = append(preloadPaths, line)
+				}
 			}
-		}
-		if len(preloadPaths) > 0 {
-			result.EnvVars["LD_PRELOAD"] = strings.Join(preloadPaths, ":")
+			if len(preloadPaths) > 0 {
+				result.EnvVars["LD_PRELOAD"] = strings.Join(preloadPaths, ":")
+			}
 		}
 
 		// Update env vars for container paths
