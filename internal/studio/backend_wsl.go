@@ -242,7 +242,7 @@ func (b *WSLBackend) Create(ctx context.Context, opts *CreateOptions) (*Environm
 	args = append(args, "--label", "ggo.mode=wsl")
 
 	// Add port mappings
-	// First, check if all requested ports are available
+	// Check if all requested ports are available
 	var occupiedPorts []int
 	sshPort := 0
 	for _, port := range opts.Ports {
@@ -267,7 +267,7 @@ func (b *WSLBackend) Create(ctx context.Context, opts *CreateOptions) (*Environm
 		for i, p := range occupiedPorts {
 			portList[i] = fmt.Sprintf("%d", p)
 		}
-		return nil, fmt.Errorf("port(s) already in use: %s. Please stop the process using these ports or use different ports with --ports flag", strings.Join(portList, ", "))
+		return nil, fmt.Errorf("port(s) already in use: %s. Please choose different ports in the 'Port Mappings' field", strings.Join(portList, ", "))
 	}
 
 	// Add default SSH port if not specified (use random port in 12000-18000 range)

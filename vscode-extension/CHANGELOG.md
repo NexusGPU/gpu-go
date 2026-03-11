@@ -5,6 +5,15 @@ All notable changes to the "GPUGo" extension will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.10] - 2026-03-11
+
+### Changed
+- Show template default ports in Advanced Options when creating studio
+  - Default ports are now pre-filled and visible in Port Mappings field
+  - Advanced Options auto-expands when template has default ports
+  - Users can see and modify ports before creating studio
+  - Prevents port conflicts when creating multiple studios with same template
+
 ## [0.1.9] - 2026-03-11
 
 ### Changed

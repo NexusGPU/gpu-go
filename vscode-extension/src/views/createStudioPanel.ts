@@ -314,11 +314,11 @@ export class CreateStudioPanel {
                     <vscode-form-helper>Share link or code to a remote vGPU worker. If left empty, will use local GPU if applicable.</vscode-form-helper>
                 </vscode-form-group>
 
-                <vscode-collapsible title="Advanced Options">
+                <vscode-collapsible id="advanced-options" title="Advanced Options">
                     <vscode-form-group variant="vertical">
                         <vscode-label for="ports">Port Mappings</vscode-label>
                         <vscode-textfield id="ports" name="ports" placeholder="8888:8888, 6006:6006"></vscode-textfield>
-                        <vscode-form-helper>Comma-separated port mappings (host:container). Leave empty to use template defaults.</vscode-form-helper>
+                        <vscode-form-helper id="ports-helper">Comma-separated port mappings (host:container). Leave empty to use template defaults.</vscode-form-helper>
                     </vscode-form-group>
 
                     <vscode-form-group variant="vertical">
@@ -455,7 +455,23 @@ export class CreateStudioPanel {
                             // Auto-fill default ports when template is selected
                             if (template.defaultPorts && template.defaultPorts.length > 0) {
                                 portsField.value = template.defaultPorts.join(', ');
+                                // Auto-expand Advanced Options so user can see the ports
+                                const advancedOptions = document.getElementById('advanced-options');
+                                if (advancedOptions) {
+                                    advancedOptions.setAttribute('open', '');
+                                }
+                                // Update helper text to show these are template defaults
+                                const portsHelper = document.getElementById('ports-helper');
+                                if (portsHelper) {
+                                    portsHelper.textContent = 'Template default ports (you can modify these). Format: host:container';
+                                }
                                 // Don't mark as modified by user since this is auto-fill
+                            } else {
+                                // No default ports, reset helper text
+                                const portsHelper = document.getElementById('ports-helper');
+                                if (portsHelper) {
+                                    portsHelper.textContent = 'Comma-separated port mappings (host:container). Leave empty to use template defaults.';
+                                }
                             }
                         } else {
                             infoBox.style.display = 'none';
