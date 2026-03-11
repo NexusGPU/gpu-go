@@ -5,6 +5,32 @@ All notable changes to the "GPUGo" extension will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.11] - 2026-03-12
+
+### Added
+- Share link validation before creating studio
+  - Prevents accidental studio creation without remote GPU
+  - Shows clear error message if share link is missing
+
+### Changed
+- Use GPU-enabled Jupyter Docker images from Quay.io registry
+  - PyTorch: `quay.io/jupyter/pytorch-notebook:cuda12-python-3.11.8` (CUDA 12)
+  - TensorFlow: `quay.io/jupyter/tensorflow-notebook:cuda-latest`
+  - All Jupyter images migrated from Docker Hub to Quay.io
+- Auto-fill image version tag when selecting template
+  - Automatically sets correct CUDA tag (cuda12-python-3.11.8, cuda-latest)
+  - Users can still manually modify version if needed
+- Improve studio creation progress logging
+  - Real-time stdout/stderr streaming to output window
+  - Docker pull progress now shows as INFO instead of ERROR
+  - Better visibility of creation steps
+
+### Fixed
+- Null pointer errors in list commands
+  - Added null checks for studioList, workerList, shareList, agentList
+  - Safely returns empty arrays instead of crashing
+  - Fixes "Cannot read properties of null (reading 'map')" error
+
 ## [0.1.10] - 2026-03-11
 
 ### Changed
