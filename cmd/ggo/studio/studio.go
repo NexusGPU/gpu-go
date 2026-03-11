@@ -256,12 +256,14 @@ func runCreate(cmd *cobra.Command, args []string) error {
 
 		// Append share code to connection URL for authentication
 		shareInfo.ConnectionURL = shareInfo.ConnectionURL + "+" + shortCode
-		klog.Infof("Resolved share link: worker_id=%s vendor=%s connection_url=%s",
-			shareInfo.WorkerID, shareInfo.HardwareVendor, shareInfo.ConnectionURL)
+		klog.Infof("Resolved share link: worker_id=%s vendor=%s arch=%s connection_url=%s",
+			shareInfo.WorkerID, shareInfo.HardwareVendor, shareInfo.AgentArch, shareInfo.ConnectionURL)
 
-		// Determine target arch from platform flag (default: amd64)
+		// Determine target arch from share info (preferred) or platform flag (fallback)
 		targetArch := "amd64"
-		if platform != "" {
+		if shareInfo.AgentArch != "" {
+			targetArch = shareInfo.AgentArch
+		} else if platform != "" {
 			if parts := strings.SplitN(platform, "/", 2); len(parts) == 2 {
 				targetArch = parts[1]
 			}
@@ -472,9 +474,17 @@ func buildCreateOptions(name string, shareInfo *api.SharePublicInfo) (*studio.Cr
 	}
 
 	// Default platform to linux/amd64 for studio containers
+	// If share info provides agent architecture, use it to set the correct platform
 	effectivePlatform := platform
 	if effectivePlatform == "" {
-		effectivePlatform = "linux/amd64"
+		if shareInfo != nil && shareInfo.AgentArch != "" {
+			// Use agent architecture from share info (e.g., "amd64", "arm64")
+			effectivePlatform = "linux/" + shareInfo.AgentArch
+			klog.V(2).Infof("Using platform from GPU agent: %s", effectivePlatform)
+		} else {
+			// Default to linux/amd64 for compatibility
+			effectivePlatform = "linux/amd64"
+		}
 	}
 
 	return &studio.CreateOptions{

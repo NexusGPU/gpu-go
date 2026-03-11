@@ -229,6 +229,7 @@ type SharePublicInfo struct {
 	WorkerID       string `json:"worker_id"`
 	HardwareVendor string `json:"hardware_vendor"`
 	ConnectionURL  string `json:"connection_url"`
+	AgentArch      string `json:"agent_arch,omitempty"` // Architecture of the agent (e.g., "amd64", "arm64")
 }
 
 // SystemMetrics represents system metrics for metrics report
