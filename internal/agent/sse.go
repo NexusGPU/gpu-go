@@ -245,10 +245,13 @@ func (a *Agent) handleVGPURestartEvent(dataLines []string) int {
 	}
 
 	// Sync config before restarting to ensure we use the latest license
-	klog.Infof("Syncing config before worker restart to get latest license")
-	if err := a.pullConfig(); err != nil {
-		klog.Errorf("Failed to sync config before worker restart: %v", err)
-		// Continue with restart anyway - better to restart with old config than not restart at all
+	// Skip if client is not available (e.g., in tests)
+	if a.client != nil {
+		klog.Infof("Syncing config before worker restart to get latest license")
+		if err := a.pullConfig(); err != nil {
+			klog.Errorf("Failed to sync config before worker restart: %v", err)
+			// Continue with restart anyway - better to restart with old config than not restart at all
+		}
 	}
 
 	queued := a.reconciler.RequestWorkerRestarts(workerIDs)
