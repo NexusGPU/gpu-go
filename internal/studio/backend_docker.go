@@ -199,23 +199,8 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	args = append(args, "--label", fmt.Sprintf("ggo.name=%s", opts.Name))
 	args = append(args, "--label", "ggo.mode=docker")
 
-	// Auto-detect default ports from image name if none were explicitly specified
-	ports := opts.Ports
-	if !hasContainerPort(ports, 8888) {
-		for _, dp := range getDefaultPortsForImage(opts.Image) {
-			if !hasContainerPort(ports, dp.ContainerPort) {
-				// Use the default host port if available, otherwise find a free one
-				hostPort := dp.HostPort
-				if !isPortAvailable(hostPort) {
-					hostPort = findAvailablePort(0)
-					klog.V(2).Infof("Default port %d in use, using %d for container port %d", dp.HostPort, hostPort, dp.ContainerPort)
-				}
-				ports = append(ports, PortMapping{HostPort: hostPort, ContainerPort: dp.ContainerPort})
-			}
-		}
-	}
-
 	// Add port mappings and find SSH port
+	ports := resolvePortMappings(opts.Ports, opts.Image)
 	sshPort, err := addPortMappings(&args, ports)
 	if err != nil {
 		return nil, err
@@ -830,6 +815,27 @@ fi
 
 var _ Backend = (*DockerBackend)(nil)
 
+// resolvePortMappings merges user-specified ports with auto-detected default ports
+// for the given image. If the user already mapped a well-known port, it is not overridden.
+func resolvePortMappings(userPorts []PortMapping, image string) []PortMapping {
+	ports := userPorts
+	if hasContainerPort(ports, 8888) {
+		return ports
+	}
+	for _, dp := range getDefaultPortsForImage(image) {
+		if hasContainerPort(ports, dp.ContainerPort) {
+			continue
+		}
+		hostPort := dp.HostPort
+		if !isPortAvailable(hostPort) {
+			hostPort = findAvailablePort(0)
+			klog.V(2).Infof("Default port %d in use, using %d for container port %d", dp.HostPort, hostPort, dp.ContainerPort)
+		}
+		ports = append(ports, PortMapping{HostPort: hostPort, ContainerPort: dp.ContainerPort})
+	}
+	return ports
+}
+
 // getDefaultPortsForImage returns default port mappings based on the image name.
 // This auto-exposes well-known service ports (Jupyter, TensorBoard, etc.) so users
 // don't have to specify -p flags for common images.
@@ -876,4 +882,3 @@ func hasContainerPort(ports []PortMapping, containerPort int) bool {
 func init() {
 	_ = bytes.Buffer{} // silence import
 }
-
