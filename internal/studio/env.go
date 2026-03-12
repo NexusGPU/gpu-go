@@ -319,8 +319,10 @@ func SetupGPUEnv(paths *platform.Paths, config *GPUEnvConfig) (*GPUEnvResult, er
 		// This ensures only user shells get the preload, not system daemons like sshd
 
 		// Add LD_PRELOAD as environment variable that will be written to /etc/environment
-		// Skip on macOS host as GPU libraries are not available locally (GPU is remote)
-		if !IsDarwin() {
+		// For containers, always set LD_PRELOAD regardless of host OS - the GPU client
+		// libraries are downloaded for Linux and mounted into the container at /opt/gpugo/libs.
+		// For non-container (native) usage, skip on macOS since LD_PRELOAD is a Linux mechanism.
+		if config.IsContainer || !IsDarwin() {
 			ldPreloadContent := generateLDPreloadContent(config.Vendor, libsPath, config.IsContainer)
 			// Extract library paths from preload content (skip comment lines)
 			var preloadPaths []string
