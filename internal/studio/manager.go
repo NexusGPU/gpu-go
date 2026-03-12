@@ -385,13 +385,17 @@ func (m *Manager) Remove(ctx context.Context, idOrName string) error {
 		return err
 	}
 
-	backend, err := m.GetBackend(env.Mode)
-	if err != nil {
-		return err
-	}
+	// If the container is already gone (deleted externally or backend offline),
+	// just clean up the local state.
+	if env.Status != StatusDeleted && env.Status != StatusUnknown {
+		backend, err := m.GetBackend(env.Mode)
+		if err != nil {
+			return err
+		}
 
-	if err := backend.Remove(ctx, env.ID); err != nil {
-		return err
+		if err := backend.Remove(ctx, env.ID); err != nil {
+			return err
+		}
 	}
 
 	// Remove from local state
