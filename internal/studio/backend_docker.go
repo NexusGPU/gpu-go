@@ -192,8 +192,24 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	args = append(args, "--label", fmt.Sprintf("ggo.name=%s", opts.Name))
 	args = append(args, "--label", "ggo.mode=docker")
 
+	// Auto-detect default ports from image name if none were explicitly specified
+	ports := opts.Ports
+	if !hasContainerPort(ports, 8888) {
+		for _, dp := range getDefaultPortsForImage(opts.Image) {
+			if !hasContainerPort(ports, dp.ContainerPort) {
+				// Use the default host port if available, otherwise find a free one
+				hostPort := dp.HostPort
+				if !isPortAvailable(hostPort) {
+					hostPort = findAvailablePort(0)
+					klog.V(2).Infof("Default port %d in use, using %d for container port %d", dp.HostPort, hostPort, dp.ContainerPort)
+				}
+				ports = append(ports, PortMapping{HostPort: hostPort, ContainerPort: dp.ContainerPort})
+			}
+		}
+	}
+
 	// Add port mappings and find SSH port
-	sshPort, err := addPortMappings(&args, opts.Ports)
+	sshPort, err := addPortMappings(&args, ports)
 	if err != nil {
 		return nil, err
 	}
@@ -203,6 +219,9 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	if opts.Endpoint != "" {
 		gpuWorkerURL = opts.Endpoint
 	}
+
+	// On macOS with OrbStack, containers can typically reach LAN IPs directly.
+	// No URL rewriting or relay is needed — the GPU worker URL is passed as-is.
 
 	// Setup container GPU environment using common abstraction
 	// This downloads GPU client libraries and sets up env vars, volumes
@@ -804,6 +823,50 @@ fi
 
 var _ Backend = (*DockerBackend)(nil)
 
+// getDefaultPortsForImage returns default port mappings based on the image name.
+// This auto-exposes well-known service ports (Jupyter, TensorBoard, etc.) so users
+// don't have to specify -p flags for common images.
+func getDefaultPortsForImage(image string) []PortMapping {
+	img := strings.ToLower(image)
+	var ports []PortMapping
+
+	// Jupyter-based images
+	if strings.Contains(img, "jupyter") || strings.Contains(img, "notebook") {
+		ports = append(ports, PortMapping{HostPort: 8888, ContainerPort: 8888})
+	}
+
+	// PyTorch/TensorFlow images often have TensorBoard + Jupyter
+	if strings.Contains(img, "tensorflow") || strings.Contains(img, "torch") || strings.Contains(img, "pytorch") {
+		if !hasContainerPort(ports, 8888) {
+			ports = append(ports, PortMapping{HostPort: 8888, ContainerPort: 8888})
+		}
+		ports = append(ports, PortMapping{HostPort: 6006, ContainerPort: 6006})
+	}
+
+	// TensorFusion studio images
+	if strings.Contains(img, "tensorfusion") || strings.Contains(img, "studio") {
+		if !hasContainerPort(ports, 8888) {
+			ports = append(ports, PortMapping{HostPort: 8888, ContainerPort: 8888})
+		}
+		if !hasContainerPort(ports, 6006) {
+			ports = append(ports, PortMapping{HostPort: 6006, ContainerPort: 6006})
+		}
+	}
+
+	return ports
+}
+
+// hasContainerPort checks if a container port is already in the port mappings
+func hasContainerPort(ports []PortMapping, containerPort int) bool {
+	for _, p := range ports {
+		if p.ContainerPort == containerPort {
+			return true
+		}
+	}
+	return false
+}
+
 func init() {
 	_ = bytes.Buffer{} // silence import
 }
+
