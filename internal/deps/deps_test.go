@@ -45,6 +45,26 @@ func TestLibraryKey(t *testing.T) {
 		Arch:     "amd64",
 	}
 	assert.NotEqual(t, lib.Key(), lib3.Key())
+
+	// Libraries with VendorSlug should include vendor in key
+	lib4 := Library{
+		Name:       "libteleport.so",
+		Version:    "2.11.5",
+		Platform:   "linux",
+		Arch:       "amd64",
+		VendorSlug: "nvidia",
+	}
+	assert.Equal(t, "libteleport.so:nvidia:linux:amd64", lib4.Key())
+
+	// Same library with different vendor should have different key
+	lib5 := Library{
+		Name:       "libteleport.so",
+		Version:    "2.11.5",
+		Platform:   "linux",
+		Arch:       "amd64",
+		VendorSlug: "amd",
+	}
+	assert.NotEqual(t, lib4.Key(), lib5.Key())
 }
 
 func TestSelectRequiredDeps(t *testing.T) {

@@ -168,6 +168,13 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	// Required for SSH daemon to properly fork child processes
 	args = append(args, "--init")
 
+	// On macOS, disable any built-in image healthcheck.
+	// Under Rosetta (amd64 on ARM Mac) healthcheck processes run slowly and
+	// accumulate, overwhelming the service they probe (e.g. Jupyter's port 8888).
+	if IsDarwin() {
+		args = append(args, "--no-healthcheck")
+	}
+
 	// Add security options for SSH to work in containers
 	// SSH's privilege separation requires certain capabilities that Docker's
 	// default seccomp profile blocks, causing "mm_request_receive: bad msg_len" errors
@@ -193,7 +200,8 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	args = append(args, "--label", "ggo.mode=docker")
 
 	// Add port mappings and find SSH port
-	sshPort, err := addPortMappings(&args, opts.Ports)
+	ports := resolvePortMappings(opts.Ports, opts.Image)
+	sshPort, err := addPortMappings(&args, ports)
 	if err != nil {
 		return nil, err
 	}
@@ -203,6 +211,9 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	if opts.Endpoint != "" {
 		gpuWorkerURL = opts.Endpoint
 	}
+
+	// On macOS with OrbStack, containers can typically reach LAN IPs directly.
+	// No URL rewriting or relay is needed — the GPU worker URL is passed as-is.
 
 	// Setup container GPU environment using common abstraction
 	// This downloads GPU client libraries and sets up env vars, volumes
@@ -803,6 +814,70 @@ fi
 }
 
 var _ Backend = (*DockerBackend)(nil)
+
+// resolvePortMappings merges user-specified ports with auto-detected default ports
+// for the given image. If the user already mapped a well-known port, it is not overridden.
+func resolvePortMappings(userPorts []PortMapping, image string) []PortMapping {
+	ports := userPorts
+	if hasContainerPort(ports, 8888) {
+		return ports
+	}
+	for _, dp := range getDefaultPortsForImage(image) {
+		if hasContainerPort(ports, dp.ContainerPort) {
+			continue
+		}
+		hostPort := dp.HostPort
+		if !isPortAvailable(hostPort) {
+			hostPort = findAvailablePort(0)
+			klog.V(2).Infof("Default port %d in use, using %d for container port %d", dp.HostPort, hostPort, dp.ContainerPort)
+		}
+		ports = append(ports, PortMapping{HostPort: hostPort, ContainerPort: dp.ContainerPort})
+	}
+	return ports
+}
+
+// getDefaultPortsForImage returns default port mappings based on the image name.
+// This auto-exposes well-known service ports (Jupyter, TensorBoard, etc.) so users
+// don't have to specify -p flags for common images.
+func getDefaultPortsForImage(image string) []PortMapping {
+	img := strings.ToLower(image)
+	var ports []PortMapping
+
+	// Jupyter-based images
+	if strings.Contains(img, "jupyter") || strings.Contains(img, "notebook") {
+		ports = append(ports, PortMapping{HostPort: 8888, ContainerPort: 8888})
+	}
+
+	// PyTorch/TensorFlow images often have TensorBoard + Jupyter
+	if strings.Contains(img, "tensorflow") || strings.Contains(img, "torch") || strings.Contains(img, "pytorch") {
+		if !hasContainerPort(ports, 8888) {
+			ports = append(ports, PortMapping{HostPort: 8888, ContainerPort: 8888})
+		}
+		ports = append(ports, PortMapping{HostPort: 6006, ContainerPort: 6006})
+	}
+
+	// TensorFusion studio images
+	if strings.Contains(img, "tensorfusion") || strings.Contains(img, "studio") {
+		if !hasContainerPort(ports, 8888) {
+			ports = append(ports, PortMapping{HostPort: 8888, ContainerPort: 8888})
+		}
+		if !hasContainerPort(ports, 6006) {
+			ports = append(ports, PortMapping{HostPort: 6006, ContainerPort: 6006})
+		}
+	}
+
+	return ports
+}
+
+// hasContainerPort checks if a container port is already in the port mappings
+func hasContainerPort(ports []PortMapping, containerPort int) bool {
+	for _, p := range ports {
+		if p.ContainerPort == containerPort {
+			return true
+		}
+	}
+	return false
+}
 
 func init() {
 	_ = bytes.Buffer{} // silence import

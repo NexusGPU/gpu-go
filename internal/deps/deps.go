@@ -64,10 +64,16 @@ type Library struct {
 	VendorName string `json:"vendorName,omitempty"` // e.g., "STUB", "NVIDIA", "AMD"
 }
 
-// Key returns a unique identifier for this library (name + platform + arch)
+// Key returns a unique identifier for this library (name + vendor + platform + arch)
 // Note: We don't include version in the key because we want to track a single
-// version per library name/platform/arch combination
+// version per library name/vendor/platform/arch combination.
+// VendorSlug is included so vendor-specific libraries (e.g., libcuda for nvidia vs
+// libamdhip64 for amd) and shared libraries (e.g., libteleport) with different vendor
+// tags don't collide in the manifest maps.
 func (l Library) Key() string {
+	if l.VendorSlug != "" {
+		return fmt.Sprintf("%s:%s:%s:%s", l.Name, l.VendorSlug, l.Platform, l.Arch)
+	}
 	return fmt.Sprintf("%s:%s:%s", l.Name, l.Platform, l.Arch)
 }
 
