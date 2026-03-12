@@ -168,6 +168,13 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	// Required for SSH daemon to properly fork child processes
 	args = append(args, "--init")
 
+	// On macOS, disable any built-in image healthcheck.
+	// Under Rosetta (amd64 on ARM Mac) healthcheck processes run slowly and
+	// accumulate, overwhelming the service they probe (e.g. Jupyter's port 8888).
+	if IsDarwin() {
+		args = append(args, "--no-healthcheck")
+	}
+
 	// Add security options for SSH to work in containers
 	// SSH's privilege separation requires certain capabilities that Docker's
 	// default seccomp profile blocks, causing "mm_request_receive: bad msg_len" errors
