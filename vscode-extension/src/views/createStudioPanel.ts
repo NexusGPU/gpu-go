@@ -320,7 +320,7 @@ export class CreateStudioPanel {
 
                 <vscode-form-group variant="vertical">
                     <vscode-label for="gpuUrl">Remote GPU Share Link</vscode-label>
-                    <vscode-textfield id="gpuUrl" name="gpuUrl" placeholder="e.g., abc123 or https://go.gpu.tf/s/abc123"></vscode-textfield>
+                    <vscode-textfield id="gpuUrl" name="gpuUrl" placeholder="e.g., abc123 or https://tensor-fusion.ai/s/abc123"></vscode-textfield>
                     <vscode-form-helper>Share link or code to a remote vGPU worker. If left empty, will use local GPU if applicable.</vscode-form-helper>
                 </vscode-form-group>
 

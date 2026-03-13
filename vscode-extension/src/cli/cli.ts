@@ -287,7 +287,7 @@ export class CLI {
         if (process.env.GPU_GO_ENDPOINT) {
             return process.env.GPU_GO_ENDPOINT;
         }
-        return vscode.workspace.getConfiguration('gpugo').get<string>('serverUrl', 'https://go.gpu.tf');
+        return vscode.workspace.getConfiguration('gpugo').get<string>('serverUrl', 'https://tensor-fusion.ai');
     }
 
     getDashboardUrl(): string {
@@ -375,7 +375,7 @@ export class CLI {
                             if (s === 'Settings') {
                                 vscode.commands.executeCommand('workbench.action.openSettings', 'gpugo.cliPath');
                             } else if (s === 'Install Guide') {
-                                vscode.env.openExternal(vscode.Uri.parse('https://go.gpu.tf/docs'));
+                                vscode.env.openExternal(vscode.Uri.parse('https://tensor-fusion.ai/docs'));
                             }
                         });
                     }

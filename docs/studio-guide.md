@@ -18,7 +18,7 @@ GPU Go 提供两种使用远程 GPU 的方式：
 ggo use abc123
 
 # 使用完整链接
-ggo use https://go.gpu.tf/s/abc123
+ggo use https://tensor-fusion.ai/s/abc123
 
 # 直接激活，无需确认 (-y)
 ggo use abc123 -y
@@ -82,7 +82,7 @@ ggo clean --all
 ggo studio create my-studio -s abc123
 
 # 使用完整链接
-ggo studio create my-studio -s https://go.gpu.tf/s/abc123
+ggo studio create my-studio -s https://tensor-fusion.ai/s/abc123
 
 # 指定镜像
 ggo studio create my-studio -s abc123 --image tensorfusion/studio-torch:latest
