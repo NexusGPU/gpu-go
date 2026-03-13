@@ -382,7 +382,15 @@ func (m *Manager) Start(ctx context.Context, idOrName string) error {
 func (m *Manager) Remove(ctx context.Context, idOrName string) error {
 	env, err := m.Get(ctx, idOrName)
 	if err != nil {
-		return err
+		// If the backend can't find the environment, check local state.
+		// This handles the case where a container was deleted externally
+		// but the local state entry still exists.
+		env, err = m.getFromState(idOrName)
+		if err != nil {
+			return err
+		}
+		// Container is already gone, just clean up local state.
+		return m.removeEnvironment(env.ID)
 	}
 
 	// If the container is already gone (deleted externally or backend offline),
@@ -703,6 +711,28 @@ func (m *Manager) saveState(state map[string]*Environment) error {
 	}
 
 	return os.WriteFile(m.getStatePath(), data, 0644)
+}
+
+// getFromState looks up an environment by ID or name from local state only.
+func (m *Manager) getFromState(idOrName string) (*Environment, error) {
+	state, err := m.loadState()
+	if err != nil {
+		return nil, errors.NotFound("environment", idOrName)
+	}
+
+	// Try direct ID lookup first.
+	if env, ok := state[idOrName]; ok {
+		return env, nil
+	}
+
+	// Fall back to name matching.
+	for _, env := range state {
+		if env.Name == idOrName {
+			return env, nil
+		}
+	}
+
+	return nil, errors.NotFound("environment", idOrName)
 }
 
 func (m *Manager) saveEnvironment(env *Environment) error {
