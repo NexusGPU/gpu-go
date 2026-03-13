@@ -106,18 +106,28 @@ func (b *DockerBackend) GetHostArch(ctx context.Context) string {
 // If platform is specified, it will use --platform flag
 func (b *DockerBackend) pullImageWithProgress(ctx context.Context, image, platform string) error {
 	// Check if image already exists locally
+	imageExistsLocally := false
 	checkCmd := exec.CommandContext(ctx, b.dockerCmd, "image", "inspect", image)
 	b.setDockerEnv(checkCmd)
 	if err := checkCmd.Run(); err == nil {
-		// Image exists, but we should re-pull if platform is specified
-		// to ensure we get the right architecture
+		imageExistsLocally = true
 		if platform == "" {
 			klog.V(2).Infof("Image %s already exists locally", image)
-			return nil // Image exists and no specific platform requested
+			return nil
+		}
+		// Image exists and platform is specified — check if it already matches
+		inspectCmd := exec.CommandContext(ctx, b.dockerCmd, "image", "inspect", "--format", "{{.Os}}/{{.Architecture}}", image)
+		b.setDockerEnv(inspectCmd)
+		if out, inspectErr := inspectCmd.Output(); inspectErr == nil {
+			localPlatform := strings.TrimSpace(string(out))
+			if localPlatform == platform {
+				klog.V(2).Infof("Image %s already exists locally with matching platform %s", image, platform)
+				return nil
+			}
 		}
 	}
 
-	// Image doesn't exist or we need to ensure correct platform, pull it with progress
+	// Image doesn't exist or platform doesn't match, pull it with progress
 	fmt.Fprintf(os.Stderr, "\n   Pulling image: %s\n", image)
 	if platform != "" {
 		fmt.Fprintf(os.Stderr, "   Platform: %s\n", platform)
@@ -137,6 +147,13 @@ func (b *DockerBackend) pullImageWithProgress(ctx context.Context, image, platfo
 	pullCmd.Stderr = os.Stderr
 
 	if err := pullCmd.Run(); err != nil {
+		if imageExistsLocally {
+			// Pull failed but image exists locally (e.g. local-only custom image
+			// with a different platform) — use the local image as-is
+			klog.V(2).Infof("Pull failed but image %s exists locally, using local image", image)
+			fmt.Fprintf(os.Stderr, "   Pull failed, using local image %s\n\n", image)
+			return nil
+		}
 		return fmt.Errorf("failed to pull image %s: %w", image, err)
 	}
 

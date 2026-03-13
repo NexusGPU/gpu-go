@@ -85,13 +85,23 @@ func (b *ColimaBackend) GetVMArch(ctx context.Context) string {
 // If platform is specified, it will use --platform flag
 func (b *ColimaBackend) pullImageWithProgress(ctx context.Context, image, platform string) error {
 	// Check if image already exists locally with correct platform
+	imageExistsLocally := false
 	checkCmd := exec.CommandContext(ctx, "docker", "image", "inspect", image)
 	checkCmd.Env = append(os.Environ(), fmt.Sprintf("DOCKER_HOST=%s", b.dockerHost))
 	if err := checkCmd.Run(); err == nil {
-		// Image exists, but we should re-pull if platform is specified
-		// to ensure we get the right architecture
+		imageExistsLocally = true
 		if platform == "" {
-			return nil // Image exists and no specific platform requested
+			return nil
+		}
+		// Image exists and platform is specified — check if it already matches
+		inspectCmd := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", "{{.Os}}/{{.Architecture}}", image)
+		inspectCmd.Env = append(os.Environ(), fmt.Sprintf("DOCKER_HOST=%s", b.dockerHost))
+		if out, inspectErr := inspectCmd.Output(); inspectErr == nil {
+			localPlatform := strings.TrimSpace(string(out))
+			if localPlatform == platform {
+				klog.V(2).Infof("Image %s already exists locally with matching platform %s", image, platform)
+				return nil
+			}
 		}
 	}
 
@@ -115,6 +125,13 @@ func (b *ColimaBackend) pullImageWithProgress(ctx context.Context, image, platfo
 	pullCmd.Stderr = os.Stderr
 
 	if err := pullCmd.Run(); err != nil {
+		if imageExistsLocally {
+			// Pull failed but image exists locally (e.g. local-only custom image
+			// with a different platform) — use the local image as-is
+			klog.V(2).Infof("Pull failed but image %s exists locally, using local image", image)
+			fmt.Fprintf(os.Stderr, "   Pull failed, using local image %s\n\n", image)
+			return nil
+		}
 		return fmt.Errorf("failed to pull image %s: %w", image, err)
 	}
 
