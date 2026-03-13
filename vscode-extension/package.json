@@ -2,20 +2,20 @@
   "name": "gpu-go",
   "displayName": "GPUGo",
   "description": "Use GPU Like NFS - Manage AI studio environments with remote GPU access. Create, connect, and manage GPU-powered development environments.",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "publisher": "nexusgpu",
   "license": "SEE LICENSE IN LICENSE",
   "icon": "images/icon.png",
   "homepage": "https://tensor-fusion.ai",
   "repository": {
     "type": "git",
-    "url": "https://github.com/NexusGPU/tensor-fusion"
+    "url": "https://github.com/NexusGPU/gpu-go"
   },
   "bugs": {
-    "url": "https://github.com/NexusGPU/tensor-fusion/issues",
+    "url": "https://github.com/NexusGPU/gpu-go/issues",
     "email": "support@tensor-fusion.com"
   },
-  "qna": "https://github.com/NexusGPU/tensor-fusion/discussions",
+  "qna": "https://github.com/NexusGPU/gpu-go/discussions",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -288,7 +288,7 @@
       "properties": {
         "gpugo.serverUrl": {
           "type": "string",
-          "default": "https://go.gpu.tf",
+          "default": "https://tensor-fusion.ai",
           "description": "GPUGo API server URL"
         },
         "gpugo.dashboardUrl": {

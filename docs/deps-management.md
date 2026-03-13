@@ -133,7 +133,7 @@ ggo deps update -y
 
 | Environment Variable | Description |
 |---------------------|-------------|
-| `GPU_GO_ENDPOINT` | API base URL (default: https://go.gpu.tf) |
+| `GPU_GO_ENDPOINT` | API base URL (default: https://tensor-fusion.ai) |
 
 | Flag | Description |
 |------|-------------|

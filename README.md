@@ -7,9 +7,9 @@
     <br />
     <a href="https://tensor-fusion.ai/guide/overview">View Demo</a>
     |
-    <a href="https://github.com/NexusGPU/tensor-fusion/issues/new?labels=bug&template=bug-report---.md">Report Bug</a>
+    <a href="https://github.com/NexusGPU/gpu-go/issues/new?labels=bug&template=bug-report---.md">Report Bug</a>
     |
-    <a href="https://github.com/NexusGPU/tensor-fusion/issues/new?labels=enhancement&template=feature-request---.md">Request Feature</a>
+    <a href="https://github.com/NexusGPU/gpu-go/issues/new?labels=enhancement&template=feature-request---.md">Request Feature</a>
 </p>
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
@@ -63,7 +63,7 @@ Create a **Studio** environment locally that is connected to the remote GPU.
 ggo auth login
 
 # Create a studio environment connected to a remote GPU
-ggo studio create my-project -s "https://go.gpu.tf/s/share-code"
+ggo studio create my-project -s "https://tensor-fusion.ai/s/share-code"
 
 # Connect via SSH (automatically configures your ~/.ssh/config)
 ggo studio ssh my-project
@@ -81,7 +81,7 @@ Prefer a GUI? The **GPU Go VS Code Extension** provides a beautiful interface to
 ## 💬 Community & Contact
 
 - Discord channel: [https://discord.gg/2bybv9yQNk](https://discord.gg/2bybv9yQNk)
-- Discuss anything about TensorFusion & GPUGo: [Github Discussions](https://github.com/NexusGPU/tensor-fusion/discussions)
+- Discuss anything about TensorFusion & GPUGo: [Github Discussions](https://github.com/NexusGPU/gpu-go/discussions)
 - Contact us with WeCom for Greater China region: [企业微信](https://work.weixin.qq.com/ca/cawcde42751d9f6a29)
 - Email us: [support@tensor-fusion.com](mailto:support@tensor-fusion.com)
 - Schedule [1:1 meeting with TensorFusion founders](https://tensor-fusion.ai/book-demo)
