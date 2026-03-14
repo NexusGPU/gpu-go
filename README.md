@@ -5,7 +5,7 @@
     <br />
     <a href="https://tensor-fusion.ai/guide/overview"><strong>Explore the docs »</strong></a>
     <br />
-    <a href="https://tensor-fusion.ai/guide/overview">View Demo</a>
+    <a href="https://tensor-fusion.ai/docs/gpu-go/overview#gpu-go-overview">View Demo</a>
     |
     <a href="https://github.com/NexusGPU/gpu-go/issues/new?labels=bug&template=bug-report---.md">Report Bug</a>
     |
