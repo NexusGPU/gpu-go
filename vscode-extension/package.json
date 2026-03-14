@@ -167,12 +167,6 @@
         "category": "GPUGo"
       },
       {
-        "command": "gpugo.openTensorBoard",
-        "title": "Open TensorBoard",
-        "icon": "$(graph)",
-        "category": "GPUGo"
-      },
-      {
         "command": "gpugo.openWebUI",
         "title": "Open Web Interface",
         "icon": "$(globe)",
@@ -273,11 +267,6 @@
         },
         {
           "command": "gpugo.openJupyter",
-          "when": "view == gpugo.studio && viewItem == studio-running",
-          "group": "3_webui"
-        },
-        {
-          "command": "gpugo.openTensorBoard",
           "when": "view == gpugo.studio && viewItem == studio-running",
           "group": "3_webui"
         }
