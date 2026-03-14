@@ -165,6 +165,7 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	// Determine the platform to use
 	// If user specified platform, use it; otherwise detect from host
 	platform := opts.Platform
+	userSpecifiedPlatform := platform != ""
 	if platform == "" {
 		// Auto-detect host architecture
 		hostArch := b.GetHostArch(ctx)
@@ -305,7 +306,13 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	klog.V(2).Infof("Running docker command: %s %v", b.dockerCmd, args)
 
 	// Pull image first with progress visible to user
-	if err := b.pullImageWithProgress(ctx, image, platform); err != nil {
+	// Only pass platform to pull check when user explicitly specified it;
+	// auto-detected platform should not force a re-pull of an existing local image
+	pullPlatform := ""
+	if userSpecifiedPlatform {
+		pullPlatform = platform
+	}
+	if err := b.pullImageWithProgress(ctx, image, pullPlatform); err != nil {
 		return nil, fmt.Errorf("failed to pull image: %w", err)
 	}
 
