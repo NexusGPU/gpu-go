@@ -63,7 +63,7 @@ Create a **Studio** environment locally that is connected to the remote GPU.
 ggo auth login
 
 # Create a studio environment connected to a remote GPU
-ggo studio create my-project -s "https://tensor-fusion.ai/s/share-code"
+ggo studio create my-project -s "https://gpu.tf/s/share-code"
 
 # Connect via SSH (automatically configures your ~/.ssh/config)
 ggo studio ssh my-project

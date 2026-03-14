@@ -36,7 +36,7 @@ var (
 )
 
 // extractShortCode extracts the short code from a short link URL or returns the input as-is if it's already a code.
-// Supports formats: "abc123", "https://tensor-fusion.ai/s/abc123", "tensor-fusion.ai/s/abc123"
+// Supports formats: "abc123", "https://gpu.tf/s/abc123", "gpu.tf/s/abc123"
 func extractShortCode(input string) string {
 	input = strings.TrimSpace(input)
 
@@ -78,7 +78,7 @@ Examples:
   ggo use abc123
 
   # Connect using full short link
-  ggo use https://tensor-fusion.ai/s/abc123
+  ggo use https://gpu.tf/s/abc123
 
   # Activate in current shell (recommended)
   eval "$(ggo use abc123 -y)"
@@ -235,7 +235,7 @@ Examples:
 
   # Clean up a specific connection (using code or link)
   ggo clean abc123
-  ggo clean https://tensor-fusion.ai/s/abc123
+  ggo clean https://gpu.tf/s/abc123
 
   # Clean up all GPU Go connections
   ggo clean --all`,

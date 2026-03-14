@@ -24,7 +24,7 @@ var (
 )
 
 // extractShortCode extracts the short code from a short link URL or returns the input as-is if it's already a code.
-// Supports formats: "abc123", "https://tensor-fusion.ai/s/abc123", "tensor-fusion.ai/s/abc123"
+// Supports formats: "abc123", "https://gpu.tf/s/abc123", "gpu.tf/s/abc123"
 func extractShortCode(input string) string {
 	input = strings.TrimSpace(input)
 
