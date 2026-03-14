@@ -84,14 +84,26 @@ func (b *ColimaBackend) GetVMArch(ctx context.Context) string {
 // pullImageWithProgress pulls a Docker image with progress output to stderr
 // If platform is specified, it will use --platform flag
 func (b *ColimaBackend) pullImageWithProgress(ctx context.Context, image, platform string) error {
-	// Check if image already exists locally with correct platform
+	// Check if image already exists locally with the correct platform
+	imageExistsLocally := false
 	checkCmd := exec.CommandContext(ctx, "docker", "image", "inspect", image)
 	checkCmd.Env = append(os.Environ(), fmt.Sprintf("DOCKER_HOST=%s", b.dockerHost))
 	if err := checkCmd.Run(); err == nil {
-		// Image exists, but we should re-pull if platform is specified
-		// to ensure we get the right architecture
+		imageExistsLocally = true
 		if platform == "" {
-			return nil // Image exists and no specific platform requested
+			klog.V(2).Infof("Image %s already exists locally, skipping pull", image)
+			return nil
+		}
+		// Image exists and platform is specified — check if it already matches
+		inspectCmd := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", "{{.Os}}/{{.Architecture}}", image)
+		inspectCmd.Env = append(os.Environ(), fmt.Sprintf("DOCKER_HOST=%s", b.dockerHost))
+		if out, inspectErr := inspectCmd.Output(); inspectErr == nil {
+			localPlatform := strings.TrimSpace(string(out))
+			if localPlatform == platform {
+				klog.V(2).Infof("Image %s already exists locally with matching platform %s, skipping pull", image, platform)
+				return nil
+			}
+			klog.V(2).Infof("Image %s exists locally as %s but need %s, will pull", image, localPlatform, platform)
 		}
 	}
 
@@ -115,6 +127,13 @@ func (b *ColimaBackend) pullImageWithProgress(ctx context.Context, image, platfo
 	pullCmd.Stderr = os.Stderr
 
 	if err := pullCmd.Run(); err != nil {
+		if imageExistsLocally {
+			// Pull failed but image exists locally (e.g. local-only custom image
+			// with a different platform) — use the local image as-is
+			klog.V(2).Infof("Pull failed but image %s exists locally, using local image", image)
+			fmt.Fprintf(os.Stderr, "   Pull failed, using local image %s\n\n", image)
+			return nil
+		}
 		return fmt.Errorf("failed to pull image %s: %w", image, err)
 	}
 
@@ -482,7 +501,7 @@ func (b *ColimaBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	}
 	args = append(args, image)
 
-	// Pull image first with progress visible to user
+	// Pull image if not already cached locally
 	if err := b.pullImageWithProgress(ctx, image, platform); err != nil {
 		return nil, fmt.Errorf("failed to pull image: %w", err)
 	}

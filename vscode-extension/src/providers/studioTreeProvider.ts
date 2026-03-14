@@ -107,8 +107,6 @@ export class StudioTreeProvider implements vscode.TreeDataProvider<vscode.TreeIt
                     const [hostPort, containerPort] = portMapping.split(':').map(p => parseInt(p));
                     if (containerPort === 8888) {
                         items.push(new StudioWebUrlItem('Jupyter Lab', `http://localhost:${hostPort}/lab`));
-                    } else if (containerPort === 6006) {
-                        items.push(new StudioWebUrlItem('TensorBoard', `http://localhost:${hostPort}`));
                     } else if (containerPort === 8787) {
                         items.push(new StudioWebUrlItem('RStudio', `http://localhost:${hostPort}`));
                     } else if (containerPort === 4040) {

@@ -200,25 +200,6 @@ function registerCommands(context: vscode.ExtensionContext, cli: CLI) {
         })
     );
 
-    // Open TensorBoard in browser
-    context.subscriptions.push(
-        vscode.commands.registerCommand('gpugo.openTensorBoard', async (item) => {
-            if (item?.env) {
-                const port = findMappedPort(item.env.ports, 6006);
-                if (!port) {
-                    vscode.window.showWarningMessage(
-                        'TensorBoard port (6006) is not mapped in this studio. ' +
-                        'Recreate the studio with port mapping: -p 6006:6006'
-                    );
-                    return;
-                }
-                const url = `http://localhost:${port}`;
-                vscode.env.openExternal(vscode.Uri.parse(url));
-                vscode.window.showInformationMessage(`Opening TensorBoard at ${url}`);
-            }
-        })
-    );
-
     // Open generic Web UI
     context.subscriptions.push(
         vscode.commands.registerCommand('gpugo.openWebUI', async (item, port?: number) => {

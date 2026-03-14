@@ -486,7 +486,6 @@ export class CLI {
             if (!ports.includes('8888:8888')) {
                 ports.push('8888:8888');
             }
-            ports.push('6006:6006');
         }
         if (img.includes('rstudio') || img.includes('rocker')) {
             ports.push('8787:8787');
@@ -497,9 +496,6 @@ export class CLI {
         if (img.includes('tensorfusion') || img.includes('studio')) {
             if (!ports.includes('8888:8888')) {
                 ports.push('8888:8888');
-            }
-            if (!ports.includes('6006:6006')) {
-                ports.push('6006:6006');
             }
         }
 

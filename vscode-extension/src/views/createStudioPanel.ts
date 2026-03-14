@@ -226,9 +226,7 @@ export class CreateStudioPanel {
         const templateOptionsHtml = categories.map(category => {
             const templates = STUDIO_TEMPLATES.filter(t => t.category === category.id);
             const options = templates.map(t => {
-                // Shorter option text - just icon and name for dropdown
-                const levelBadge = t.level === 'beginner' ? '⭐' : t.level === 'advanced' ? '🔧' : '';
-                return `<vscode-option value="${t.id}">${t.icon} ${t.name}${levelBadge ? ' ' + levelBadge : ''}</vscode-option>`;
+                return `<vscode-option value="${t.id}">${t.name}</vscode-option>`;
             }).join('');
             return options;
         }).join('');
@@ -273,13 +271,12 @@ export class CreateStudioPanel {
 
                 <vscode-form-group variant="vertical" id="custom-image-group" style="display: none;">
                     <vscode-label for="customImage">Custom Image</vscode-label>
-                    <vscode-textfield id="customImage" name="customImage" placeholder="e.g., pytorch/pytorch:2.0-cuda11.8"></vscode-textfield>
+                    <vscode-textfield id="customImage" name="customImage" placeholder="e.g., quay.io/jupyter/pytorch-notebook:cuda12-python-3.13.12"></vscode-textfield>
                     <vscode-form-helper>Enter your custom Docker image</vscode-form-helper>
                 </vscode-form-group>
 
                 <div id="template-info" class="template-info-box" style="margin: 16px 0; padding: 16px; background: var(--vscode-textBlockQuote-background); border-radius: 6px; border-left: 4px solid var(--vscode-textLink-foreground); display: none;">
                     <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
-                        <span id="info-icon" style="font-size: 1.5em;"></span>
                         <div>
                             <div id="info-name" style="font-weight: 600; font-size: 1.1em;"></div>
                             <div id="info-description" style="color: var(--vscode-descriptionForeground); font-size: 0.9em;"></div>
@@ -327,7 +324,7 @@ export class CreateStudioPanel {
                 <vscode-collapsible id="advanced-options" title="Advanced Options">
                     <vscode-form-group variant="vertical">
                         <vscode-label for="ports">Port Mappings</vscode-label>
-                        <vscode-textfield id="ports" name="ports" placeholder="8888:8888, 6006:6006"></vscode-textfield>
+                        <vscode-textfield id="ports" name="ports" placeholder="8888:8888"></vscode-textfield>
                         <vscode-form-helper id="ports-helper">Comma-separated port mappings (host:container). Leave empty to use template defaults.</vscode-form-helper>
                     </vscode-form-group>
 
@@ -414,7 +411,6 @@ export class CreateStudioPanel {
                             infoBox.style.display = 'block';
 
                             // Basic info
-                            document.getElementById('info-icon').textContent = template.icon;
                             document.getElementById('info-name').textContent = template.name;
                             document.getElementById('info-description').textContent = template.description;
                             document.getElementById('info-image').textContent = template.image;

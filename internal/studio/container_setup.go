@@ -117,6 +117,11 @@ func SetupContainerGPUEnv(ctx context.Context, config *ContainerSetupConfig) (*C
 			result.EnvVars["CUDA_VISIBLE_DEVICES"] = "0"
 		}
 
+		// Set TF_MAX_CACHE_REQUEST_COUNT=0 on macOS
+		if IsDarwin() {
+			result.EnvVars["TF_MAX_CACHE_REQUEST_COUNT"] = "0"
+		}
+
 		klog.Infof("GPU environment setup complete for studio %s: vendor=%s connection_url=%s",
 			config.StudioName, vendor, config.GPUWorkerURL)
 	}

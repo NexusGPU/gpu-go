@@ -2,7 +2,7 @@
   "name": "gpu-go",
   "displayName": "GPUGo",
   "description": "Use GPU Like NFS - Manage AI studio environments with remote GPU access. Create, connect, and manage GPU-powered development environments.",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "publisher": "nexusgpu",
   "license": "SEE LICENSE IN LICENSE",
   "icon": "images/icon.png",
@@ -167,12 +167,6 @@
         "category": "GPUGo"
       },
       {
-        "command": "gpugo.openTensorBoard",
-        "title": "Open TensorBoard",
-        "icon": "$(graph)",
-        "category": "GPUGo"
-      },
-      {
         "command": "gpugo.openWebUI",
         "title": "Open Web Interface",
         "icon": "$(globe)",
@@ -273,11 +267,6 @@
         },
         {
           "command": "gpugo.openJupyter",
-          "when": "view == gpugo.studio && viewItem == studio-running",
-          "group": "3_webui"
-        },
-        {
-          "command": "gpugo.openTensorBoard",
           "when": "view == gpugo.studio && viewItem == studio-running",
           "group": "3_webui"
         }
