@@ -105,15 +105,27 @@ func (b *DockerBackend) GetHostArch(ctx context.Context) string {
 // pullImageWithProgress pulls a Docker image with progress output to stderr
 // If platform is specified, it will use --platform flag
 func (b *DockerBackend) pullImageWithProgress(ctx context.Context, image, platform string) error {
-	// Check if image already exists locally — skip pull entirely if so.
-	// docker run --platform will validate platform compatibility at runtime.
+	// Check if image already exists locally with the correct platform
 	imageExistsLocally := false
 	checkCmd := exec.CommandContext(ctx, b.dockerCmd, "image", "inspect", image)
 	b.setDockerEnv(checkCmd)
 	if err := checkCmd.Run(); err == nil {
 		imageExistsLocally = true
-		klog.V(2).Infof("Image %s already exists locally, skipping pull", image)
-		return nil
+		if platform == "" {
+			klog.V(2).Infof("Image %s already exists locally, skipping pull", image)
+			return nil
+		}
+		// Image exists and platform is specified — check if it already matches
+		inspectCmd := exec.CommandContext(ctx, b.dockerCmd, "image", "inspect", "--format", "{{.Os}}/{{.Architecture}}", image)
+		b.setDockerEnv(inspectCmd)
+		if out, inspectErr := inspectCmd.Output(); inspectErr == nil {
+			localPlatform := strings.TrimSpace(string(out))
+			if localPlatform == platform {
+				klog.V(2).Infof("Image %s already exists locally with matching platform %s, skipping pull", image, platform)
+				return nil
+			}
+			klog.V(2).Infof("Image %s exists locally as %s but need %s, will pull", image, localPlatform, platform)
+		}
 	}
 
 	// Image doesn't exist or platform doesn't match, pull it with progress
