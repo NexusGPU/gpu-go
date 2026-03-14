@@ -43,7 +43,7 @@ Examples:
   ggo launch -s abc123 python train.py
 
   # Launch Jupyter notebook
-  ggo launch -s https://tensor-fusion.ai/s/abc123 jupyter notebook
+  ggo launch -s https://gpu.tf/s/abc123 jupyter notebook
 
   # Launch with arguments
   ggo launch -s abc123 python -c "import torch; print(torch.cuda.is_available())"
@@ -68,7 +68,7 @@ Examples:
 }
 
 // extractShortCode extracts the short code from a short link URL or returns the input as-is if it's already a code.
-// Supports formats: "abc123", "https://tensor-fusion.ai/s/abc123", "tensor-fusion.ai/s/abc123"
+// Supports formats: "abc123", "https://gpu.tf/s/abc123", "gpu.tf/s/abc123"
 func extractShortCode(input string) string {
 	input = strings.TrimSpace(input)
 
