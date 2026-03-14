@@ -84,25 +84,15 @@ func (b *ColimaBackend) GetVMArch(ctx context.Context) string {
 // pullImageWithProgress pulls a Docker image with progress output to stderr
 // If platform is specified, it will use --platform flag
 func (b *ColimaBackend) pullImageWithProgress(ctx context.Context, image, platform string) error {
-	// Check if image already exists locally with correct platform
+	// Check if image already exists locally — skip pull entirely if so.
+	// docker run --platform will validate platform compatibility at runtime.
 	imageExistsLocally := false
 	checkCmd := exec.CommandContext(ctx, "docker", "image", "inspect", image)
 	checkCmd.Env = append(os.Environ(), fmt.Sprintf("DOCKER_HOST=%s", b.dockerHost))
 	if err := checkCmd.Run(); err == nil {
 		imageExistsLocally = true
-		if platform == "" {
-			return nil
-		}
-		// Image exists and platform is specified — check if it already matches
-		inspectCmd := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", "{{.Os}}/{{.Architecture}}", image)
-		inspectCmd.Env = append(os.Environ(), fmt.Sprintf("DOCKER_HOST=%s", b.dockerHost))
-		if out, inspectErr := inspectCmd.Output(); inspectErr == nil {
-			localPlatform := strings.TrimSpace(string(out))
-			if localPlatform == platform {
-				klog.V(2).Infof("Image %s already exists locally with matching platform %s", image, platform)
-				return nil
-			}
-		}
+		klog.V(2).Infof("Image %s already exists locally, skipping pull", image)
+		return nil
 	}
 
 	// Image doesn't exist or we need to ensure correct platform, pull it with progress
@@ -388,7 +378,6 @@ func (b *ColimaBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	// Determine the platform to use
 	// If user specified platform, use it; otherwise detect from VM
 	platform := opts.Platform
-	userSpecifiedPlatform := platform != ""
 	if platform == "" {
 		// Auto-detect VM architecture
 		vmArch := b.GetVMArch(ctx)
@@ -500,14 +489,8 @@ func (b *ColimaBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	}
 	args = append(args, image)
 
-	// Pull image first with progress visible to user
-	// Only pass platform to pull check when user explicitly specified it;
-	// auto-detected platform should not force a re-pull of an existing local image
-	pullPlatform := ""
-	if userSpecifiedPlatform {
-		pullPlatform = platform
-	}
-	if err := b.pullImageWithProgress(ctx, image, pullPlatform); err != nil {
+	// Pull image if not already cached locally
+	if err := b.pullImageWithProgress(ctx, image, platform); err != nil {
 		return nil, fmt.Errorf("failed to pull image: %w", err)
 	}
 

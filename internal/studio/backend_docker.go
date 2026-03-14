@@ -105,26 +105,15 @@ func (b *DockerBackend) GetHostArch(ctx context.Context) string {
 // pullImageWithProgress pulls a Docker image with progress output to stderr
 // If platform is specified, it will use --platform flag
 func (b *DockerBackend) pullImageWithProgress(ctx context.Context, image, platform string) error {
-	// Check if image already exists locally
+	// Check if image already exists locally — skip pull entirely if so.
+	// docker run --platform will validate platform compatibility at runtime.
 	imageExistsLocally := false
 	checkCmd := exec.CommandContext(ctx, b.dockerCmd, "image", "inspect", image)
 	b.setDockerEnv(checkCmd)
 	if err := checkCmd.Run(); err == nil {
 		imageExistsLocally = true
-		if platform == "" {
-			klog.V(2).Infof("Image %s already exists locally", image)
-			return nil
-		}
-		// Image exists and platform is specified — check if it already matches
-		inspectCmd := exec.CommandContext(ctx, b.dockerCmd, "image", "inspect", "--format", "{{.Os}}/{{.Architecture}}", image)
-		b.setDockerEnv(inspectCmd)
-		if out, inspectErr := inspectCmd.Output(); inspectErr == nil {
-			localPlatform := strings.TrimSpace(string(out))
-			if localPlatform == platform {
-				klog.V(2).Infof("Image %s already exists locally with matching platform %s", image, platform)
-				return nil
-			}
-		}
+		klog.V(2).Infof("Image %s already exists locally, skipping pull", image)
+		return nil
 	}
 
 	// Image doesn't exist or platform doesn't match, pull it with progress
@@ -165,7 +154,6 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 	// Determine the platform to use
 	// If user specified platform, use it; otherwise detect from host
 	platform := opts.Platform
-	userSpecifiedPlatform := platform != ""
 	if platform == "" {
 		// Auto-detect host architecture
 		hostArch := b.GetHostArch(ctx)
@@ -305,14 +293,8 @@ func (b *DockerBackend) Create(ctx context.Context, opts *CreateOptions) (*Envir
 
 	klog.V(2).Infof("Running docker command: %s %v", b.dockerCmd, args)
 
-	// Pull image first with progress visible to user
-	// Only pass platform to pull check when user explicitly specified it;
-	// auto-detected platform should not force a re-pull of an existing local image
-	pullPlatform := ""
-	if userSpecifiedPlatform {
-		pullPlatform = platform
-	}
-	if err := b.pullImageWithProgress(ctx, image, pullPlatform); err != nil {
+	// Pull image if not already cached locally
+	if err := b.pullImageWithProgress(ctx, image, platform); err != nil {
 		return nil, fmt.Errorf("failed to pull image: %w", err)
 	}
 
