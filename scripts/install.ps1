@@ -376,7 +376,23 @@ function Install-Ggo {
         catch {
             # Ignore version check errors
         }
-        
+
+        # Restart agent service if it was running (update mode)
+        if (-not $Token) {
+            $existingTask = Get-ScheduledTask -TaskName $TASK_NAME -ErrorAction SilentlyContinue
+            if ($existingTask) {
+                Write-Info "Detected existing $TASK_NAME scheduled task, restarting..."
+                Start-ScheduledTask -TaskName $TASK_NAME -ErrorAction SilentlyContinue
+                Start-Sleep -Seconds 3
+                $taskInfo = Get-ScheduledTask -TaskName $TASK_NAME
+                if ($taskInfo.State -eq "Running") {
+                    Write-Info "Service $TASK_NAME restarted successfully"
+                } else {
+                    Write-Warn "Service $TASK_NAME may not have restarted. Check with: Get-ScheduledTask -TaskName $TASK_NAME"
+                }
+            }
+        }
+
         # Agent mode: register and setup service
         if ($Token) {
             Write-Host ""

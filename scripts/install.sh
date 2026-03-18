@@ -331,6 +331,39 @@ register_agent() {
     fi
 }
 
+# --- Restart agent service if running (for update mode) ---
+restart_agent_service_if_running() {
+    SUDO=$(get_sudo)
+
+    case "$(uname -s)" in
+        Linux*)
+            # Check systemd
+            if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+                if ${SUDO:+${SUDO}} systemctl is-active --quiet "${SYSTEMD_SERVICE_NAME}" 2>/dev/null; then
+                    info "Detected running ${SYSTEMD_SERVICE_NAME} service, restarting..."
+                    ${SUDO:+${SUDO}} systemctl restart "${SYSTEMD_SERVICE_NAME}"
+                    if ${SUDO:+${SUDO}} systemctl is-active --quiet "${SYSTEMD_SERVICE_NAME}" 2>/dev/null; then
+                        info "Service ${SYSTEMD_SERVICE_NAME} restarted successfully"
+                    else
+                        warn "Service ${SYSTEMD_SERVICE_NAME} may not have restarted properly"
+                        warn "Check with: sudo systemctl status ${SYSTEMD_SERVICE_NAME}"
+                    fi
+                fi
+            fi
+            ;;
+        Darwin*)
+            # Check launchctl for macOS
+            PLIST_LABEL="com.tensor-fusion.ggo-agent"
+            if launchctl list "${PLIST_LABEL}" >/dev/null 2>&1; then
+                info "Detected running ${PLIST_LABEL} service, restarting..."
+                ${SUDO:+${SUDO}} launchctl stop "${PLIST_LABEL}" 2>/dev/null || true
+                ${SUDO:+${SUDO}} launchctl start "${PLIST_LABEL}" 2>/dev/null || true
+                info "Service ${PLIST_LABEL} restarted"
+            fi
+            ;;
+    esac
+}
+
 # --- Main installation ---
 main() {
     OS=$(detect_os)
@@ -448,7 +481,12 @@ main() {
         info "Installed version:"
         "${DEST_PATH}" version 2>/dev/null || true
     fi
-    
+
+    # Restart ggo-agent service if it exists and is running (update mode)
+    if [ -z "${TOKEN}" ]; then
+        restart_agent_service_if_running
+    fi
+
     # Agent mode: register and setup systemd service (Linux only)
     if [ -n "${TOKEN}" ] && [ "${OS}" = "linux" ]; then
         info ""
