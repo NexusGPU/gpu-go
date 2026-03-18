@@ -136,6 +136,9 @@ func (m *Manager) Start() error {
 		return nil
 	}
 
+	// Ensure CUDA libraries are discoverable (critical for systemd services and non-interactive shells)
+	ensureCUDALibraryPath()
+
 	klog.Infof("Starting hypervisor manager: lib_path=%s vendor=%s isolation_mode=%s", m.libPath, m.vendor, m.isolationMode)
 
 	// 1. Create device controller with accelerator library

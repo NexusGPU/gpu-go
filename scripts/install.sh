@@ -214,6 +214,33 @@ setup_systemd_service() {
         ENV_VARS="Environment=\"GPU_GO_ENDPOINT=${ENDPOINT}\""
         info "Systemd service will use API endpoint: ${ENDPOINT}"
     fi
+
+    # Detect CUDA library paths for LD_LIBRARY_PATH
+    CUDA_LIB_PATHS=""
+    for cuda_dir in /usr/local/cuda/lib64 /usr/local/cuda/lib /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu /usr/lib64; do
+        if [ -d "${cuda_dir}" ] && ls "${cuda_dir}"/libcuda.so* >/dev/null 2>&1; then
+            if [ -n "${CUDA_LIB_PATHS}" ]; then
+                CUDA_LIB_PATHS="${CUDA_LIB_PATHS}:${cuda_dir}"
+            else
+                CUDA_LIB_PATHS="${cuda_dir}"
+            fi
+        fi
+    done
+    # Also check stubs directory for libcuda.so
+    for cuda_stubs in /usr/local/cuda/lib64/stubs /usr/local/cuda/lib/stubs; do
+        if [ -d "${cuda_stubs}" ] && ls "${cuda_stubs}"/libcuda.so* >/dev/null 2>&1; then
+            if [ -n "${CUDA_LIB_PATHS}" ]; then
+                CUDA_LIB_PATHS="${CUDA_LIB_PATHS}:${cuda_stubs}"
+            else
+                CUDA_LIB_PATHS="${cuda_stubs}"
+            fi
+        fi
+    done
+    if [ -n "${CUDA_LIB_PATHS}" ]; then
+        ENV_VARS="${ENV_VARS}
+Environment=\"LD_LIBRARY_PATH=${CUDA_LIB_PATHS}\""
+        info "Detected CUDA library paths: ${CUDA_LIB_PATHS}"
+    fi
     
     # Create systemd service file
     SERVICE_FILE="/etc/systemd/system/${SYSTEMD_SERVICE_NAME}.service"
@@ -246,7 +273,7 @@ PrivateTmp=true
 PrivateDevices=false
 
 # Allow access to GPU devices and config
-ReadWritePaths=/var/lib/ggo /tmp /root/.config/ggo
+ReadWritePaths=/var/lib/ggo /tmp /root/.config/ggo /root/.gpugo
 
 # Resource limits
 LimitNOFILE=65536
