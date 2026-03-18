@@ -57,3 +57,12 @@ func TestBuildScriptCommand_UnsupportedOS(t *testing.T) {
 	_, _, err := buildScriptCommand(scriptActionUpdate, "plan9")
 	require.Error(t, err)
 }
+
+func TestRootHomeDir(t *testing.T) {
+	dir := rootHomeDir()
+	// rootHomeDir returns a platform-specific root home directory
+	// On Linux it should be /root, on macOS /var/root
+	assert.NotEmpty(t, dir)
+	assert.True(t, dir == "/root" || dir == "/var/root",
+		"expected /root or /var/root, got %s", dir)
+}
