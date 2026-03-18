@@ -253,32 +253,6 @@ remove_config() {
     fi
 }
 
-# --- Kill running processes ---
-# Kills stray ggo and tensor-fusion-worker processes that are NOT the caller.
-# The systemd/launchd service should already be stopped by this point;
-# this is a safety net for orphaned processes.
-kill_processes() {
-    # Find the PID of the ggo process that invoked this script (our parent).
-    # We must NOT kill it, otherwise `ggo uninstall` is terminated mid-flight.
-    CALLER_PID="${PPID:-0}"
-
-    info "Stopping any running ggo processes..."
-    if command -v pgrep >/dev/null 2>&1; then
-        for pid in $(pgrep "${BINARY_NAME}" 2>/dev/null); do
-            if [ "${pid}" != "${CALLER_PID}" ]; then
-                kill -9 "${pid}" 2>/dev/null || true
-            fi
-        done
-    fi
-
-    info "Stopping any running tensor-fusion-worker processes..."
-    if command -v pkill >/dev/null 2>&1; then
-        pkill -9 "tensor-fusion-worker" 2>/dev/null || true
-    elif command -v killall >/dev/null 2>&1; then
-        killall -9 "tensor-fusion-worker" 2>/dev/null || true
-    fi
-}
-
 # --- Unregister from server ---
 unregister_from_server() {
     # Search for ggo binary in multiple locations
@@ -374,9 +348,6 @@ main() {
         remove_launchd_service
     fi
 
-    # Kill any orphaned processes after service is stopped
-    kill_processes
-    
     # Remove binary
     remove_binary
     

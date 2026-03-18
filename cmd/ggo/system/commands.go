@@ -112,15 +112,7 @@ func NewUninstallCmd() *cobra.Command {
 			// Step 1: Unregister agent from server (must happen before config is removed)
 			tryUnregisterAgent()
 
-			// Step 2: Stop the agent service so it doesn't recreate files during shutdown
-			stopAgentService()
-
-			// Step 3: Clean up data directories (after unregister read the config
-			// and service is stopped, but before CDN script which may kill this process)
-			cleanupDataDirs()
-
-			// Step 4: Run CDN uninstall script (removes binary, cleans up service files)
-			// NOTE: this script kills all ggo processes, so this must be last
+			// Step 2: Run CDN uninstall script (stops service, removes service files and binary)
 			command, cmdArgs, err := buildScriptCommand(scriptActionUninstall, runtime.GOOS)
 			if err != nil {
 				return err
@@ -132,6 +124,9 @@ func NewUninstallCmd() *cobra.Command {
 			if err := execCmd.Run(); err != nil {
 				klog.Warningf("Uninstall script failed: %v", err)
 			}
+
+			// Step 3: Clean up data directories (after service is stopped by the script)
+			cleanupDataDirs()
 
 			return nil
 		},
@@ -196,37 +191,6 @@ func rootHomeDir() string {
 		return "/var/root"
 	}
 	return "/root"
-}
-
-// stopAgentService stops the ggo-agent system service so it doesn't recreate
-// files (e.g. workers.json) during shutdown while we're cleaning up directories.
-func stopAgentService() {
-	switch {
-	case platform.IsLinux():
-		stopCmd := buildSudoCommand("systemctl", "stop", "ggo-agent")
-		if err := stopCmd.Run(); err != nil {
-			klog.V(4).Infof("Could not stop ggo-agent service (may not exist): %v", err)
-		}
-	case platform.IsDarwin():
-		// Try user-level launchd agent first, then system-level daemon
-		for _, plist := range []string{
-			filepath.Join(os.Getenv("HOME"), "Library", "LaunchAgents", "com.gpugo.agent.plist"),
-			"/Library/LaunchDaemons/com.gpugo.agent.plist",
-		} {
-			cmd := buildSudoCommand("launchctl", "unload", plist)
-			_ = cmd.Run()
-		}
-	}
-}
-
-// buildSudoCommand creates an exec.Cmd that runs the given command with sudo
-// if the current user is not root. On Windows this returns the command as-is.
-func buildSudoCommand(name string, args ...string) *exec.Cmd {
-	if os.Getuid() == 0 {
-		return exec.Command(name, args...)
-	}
-	sudoArgs := append([]string{"-n", name}, args...)
-	return exec.Command("sudo", sudoArgs...)
 }
 
 // tryUnregisterAgent attempts to unregister the agent from the server before cleanup.
