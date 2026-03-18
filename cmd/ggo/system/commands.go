@@ -105,18 +105,8 @@ func NewUninstallCmd() *cobra.Command {
 		Example: "ggo uninstall",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Step 1: Clean up local data directory that CDN script might miss
-			paths := platform.DefaultPaths()
-			homeDir := paths.UserDir()
-			if homeDir != "" {
-				if _, err := os.Stat(homeDir); err == nil {
-					fmt.Printf("Removing %s...\n", homeDir)
-					if err := os.RemoveAll(homeDir); err != nil {
-						klog.Warningf("Failed to remove %s: %v", homeDir, err)
-						fmt.Printf("Warning: failed to remove %s: %v\n", homeDir, err)
-					}
-				}
-			}
+			// Step 1: Clean up data directories
+			cleanupDataDirs()
 
 			// Step 2: Run CDN uninstall script
 			command, cmdArgs, err := buildScriptCommand(scriptActionUninstall, runtime.GOOS)
@@ -132,4 +122,54 @@ func NewUninstallCmd() *cobra.Command {
 	}
 
 	return cmd
+}
+
+// cleanupDataDirs removes ggo data directories for both the current user and root.
+// When running as a normal user, it removes the user's own ~/.gpugo directly,
+// then uses sudo to remove /root/.gpugo (prompting for password if needed).
+func cleanupDataDirs() {
+	// Remove current user's data directory
+	paths := platform.DefaultPaths()
+	userDir := paths.UserDir()
+	if userDir != "" {
+		if _, err := os.Stat(userDir); err == nil {
+			fmt.Printf("Removing %s...\n", userDir)
+			if err := os.RemoveAll(userDir); err != nil {
+				klog.Warningf("Failed to remove %s: %v", userDir, err)
+			}
+		}
+	}
+
+	if runtime.GOOS == "windows" {
+		return
+	}
+
+	// If running as root, /root/.gpugo is already handled above
+	if os.Getuid() == 0 {
+		return
+	}
+
+	// Running as normal user — the agent runs as root via systemd,
+	// so /root/.gpugo needs sudo to remove
+	rootGpugoDir := "/root/.gpugo"
+	// Check if the directory exists (may fail without sudo, that's ok)
+	checkCmd := exec.Command("sudo", "-n", "test", "-d", rootGpugoDir)
+	if checkCmd.Run() != nil {
+		// sudo -n failed (needs password) or dir doesn't exist; try with password prompt
+		checkCmd2 := exec.Command("sudo", "test", "-d", rootGpugoDir)
+		checkCmd2.Stdin = os.Stdin
+		if checkCmd2.Run() != nil {
+			return
+		}
+	}
+
+	fmt.Printf("Removing %s (requires sudo)...\n", rootGpugoDir)
+	rmCmd := exec.Command("sudo", "rm", "-rf", rootGpugoDir)
+	rmCmd.Stdout = os.Stdout
+	rmCmd.Stderr = os.Stderr
+	rmCmd.Stdin = os.Stdin
+	if err := rmCmd.Run(); err != nil {
+		klog.Warningf("Failed to remove %s: %v", rootGpugoDir, err)
+		fmt.Printf("Warning: failed to remove %s, you may need to run: sudo rm -rf %s\n", rootGpugoDir, rootGpugoDir)
+	}
 }
