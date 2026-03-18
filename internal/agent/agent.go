@@ -437,18 +437,7 @@ func (a *Agent) convertToWorkerInfos(apiWorkers []api.WorkerConfig) ([]*hvApi.Wo
 
 		// Set WorkerRunningInfo with remote-gpu-worker binary
 		// Ensure Env map is initialized (not nil) to avoid issues in single_node backend
-		// NOTE: single_node backend replaces (not merges) process env, so we must
-		// include all required env vars here including PATH and LD_LIBRARY_PATH.
 		envVars := make(map[string]string)
-
-		// Inherit essential environment variables from the current process
-		// so the worker can find CUDA libraries and system binaries
-		for _, key := range []string{"PATH", "LD_LIBRARY_PATH", "HOME", "USER"} {
-			if v := os.Getenv(key); v != "" {
-				envVars[key] = v
-			}
-		}
-
 		envVars["TF_LICENSE"] = cfg.License.Plain
 		envVars["TF_LICENSE_SIGN"] = cfg.License.Encrypted
 		envVars["TF_ENABLE_LOG"] = "1"
@@ -500,8 +489,6 @@ func (a *Agent) convertToWorkerInfos(apiWorkers []api.WorkerConfig) ([]*hvApi.Wo
 		}
 		klog.Infof("Set environment variables for worker %s: TF_LICENSE (len=%d, empty=%v), TF_LICENSE_SIGN (len=%d, empty=%v)",
 			w.WorkerID, len(cfg.License.Plain), cfg.License.Plain == "", len(cfg.License.Encrypted), cfg.License.Encrypted == "")
-		klog.Infof("Worker %s env: LD_LIBRARY_PATH=%s PATH=%s CUDA_VISIBLE_DEVICES=%s",
-			w.WorkerID, envVars["LD_LIBRARY_PATH"], envVars["PATH"], envVars[envCUDAVisibleDevices])
 
 		infos = append(infos, info)
 	}
@@ -633,12 +620,6 @@ func buildGPUVisibilityEnv(vendor string, gpuIndices []int) map[string]string {
 	visibleIndices := make([]string, 0, len(gpuIndices))
 	for _, index := range gpuIndices {
 		if index < 0 {
-			continue
-		}
-		// Sanity check: GPU index from accelerator lib can return garbage values.
-		// No real machine has > 1024 GPUs; skip unreasonable indices.
-		if index > 1024 {
-			klog.Warningf("Skipping unreasonable GPU index %d (likely accelerator library bug)", index)
 			continue
 		}
 		visibleIndices = append(visibleIndices, strconv.Itoa(index))
