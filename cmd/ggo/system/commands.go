@@ -192,7 +192,7 @@ func cleanupDataDirs() {
 
 // rootHomeDir returns the home directory of the root user on Unix systems.
 func rootHomeDir() string {
-	if runtime.GOOS == "darwin" {
+	if platform.IsDarwin() {
 		return "/var/root"
 	}
 	return "/root"
@@ -201,13 +201,13 @@ func rootHomeDir() string {
 // stopAgentService stops the ggo-agent system service so it doesn't recreate
 // files (e.g. workers.json) during shutdown while we're cleaning up directories.
 func stopAgentService() {
-	switch runtime.GOOS {
-	case "linux":
+	switch {
+	case platform.IsLinux():
 		stopCmd := buildSudoCommand("systemctl", "stop", "ggo-agent")
 		if err := stopCmd.Run(); err != nil {
 			klog.V(4).Infof("Could not stop ggo-agent service (may not exist): %v", err)
 		}
-	case "darwin":
+	case platform.IsDarwin():
 		// Try user-level launchd agent first, then system-level daemon
 		for _, plist := range []string{
 			filepath.Join(os.Getenv("HOME"), "Library", "LaunchAgents", "com.gpugo.agent.plist"),
