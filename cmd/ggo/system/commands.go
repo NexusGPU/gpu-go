@@ -153,7 +153,7 @@ func cleanupDataDirs() {
 		}
 	}
 
-	if runtime.GOOS == "windows" {
+	if platform.IsWindows() {
 		return
 	}
 
@@ -208,7 +208,7 @@ func tryUnregisterAgent() {
 
 	// On Unix, if running as non-root, check root's config
 	// (agent runs as root via systemd/launchd, so config lives in root's home)
-	if runtime.GOOS == "windows" || os.Getuid() == 0 {
+	if platform.IsWindows() || os.Getuid() == 0 {
 		return
 	}
 
