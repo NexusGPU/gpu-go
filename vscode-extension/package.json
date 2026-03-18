@@ -17,7 +17,7 @@
   },
   "qna": "https://github.com/NexusGPU/gpu-go/discussions",
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.96.0"
   },
   "galleryBanner": {
     "color": "#6366f1",
@@ -314,6 +314,12 @@
           "type": "string",
           "default": "docker.io",
           "description": "Default container image registry for studio environments (e.g., docker.io, gcr.io/my-project, myregistry.example.com)"
+        },
+        "gpugo.token": {
+          "type": "string",
+          "default": "",
+          "description": "Personal Access Token (PAT) for GPUGo authentication. Generate from dashboard: Settings > Security > IDE Extension.",
+          "markdownDescription": "Personal Access Token (PAT) for GPUGo. [Generate from dashboard](https://tensor-fusion.ai/settings/security#ide-extension)."
         }
       }
     }
@@ -334,7 +340,7 @@
     "@types/glob": "^8.1.0",
     "@types/mocha": "^10.0.6",
     "@types/node": "^25.0.10",
-    "@types/vscode": "^1.85.0",
+    "@types/vscode": "^1.96.0",
     "@typescript-eslint/eslint-plugin": "^8.53.1",
     "@typescript-eslint/parser": "^8.53.1",
     "@vscode/test-electron": "^2.3.8",

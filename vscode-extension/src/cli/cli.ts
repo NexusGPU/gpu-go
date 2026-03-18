@@ -310,8 +310,14 @@ export class CLI {
 
         Logger.log(`Executing: ${cliPath} ${finalArgs.join(' ')}`);
 
-        // Resolve token
+        // Resolve token: env var > settings > token file
         let userToken = process.env.GPU_GO_TOKEN;
+        if (!userToken) {
+            const settingsToken = vscode.workspace.getConfiguration('gpugo').get<string>('token', '');
+            if (settingsToken) {
+                userToken = settingsToken;
+            }
+        }
         if (!userToken) {
             try {
                 const fs = await import('fs/promises');

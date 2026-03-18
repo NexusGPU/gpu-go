@@ -73,6 +73,9 @@ export async function activate(context: vscode.ExtensionContext) {
             if (e.affectsConfiguration('gpugo.autoRefreshInterval')) {
                 setupAutoRefresh(context);
             }
+            if (e.affectsConfiguration('gpugo.token')) {
+                authManager.checkLoginStatus();
+            }
         })
     );
 

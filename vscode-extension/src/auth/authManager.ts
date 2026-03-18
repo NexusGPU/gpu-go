@@ -27,13 +27,27 @@ export class AuthManager {
      * Check login status using CLI command first, then fallback to token file check
      */
     async checkLoginStatus(): Promise<boolean> {
-        // First try CLI auth status (more reliable)
+        // Check settings token first (quick, no CLI call needed)
+        const settingsToken = vscode.workspace.getConfiguration('gpugo').get<string>('token', '');
+        if (settingsToken) {
+            Logger.log('Auth check via settings token: logged in');
+            this._isLoggedIn = true;
+            this._onAuthStateChanged.fire(true);
+            return true;
+        }
+
+        // Then try CLI auth status (more reliable)
         const authStatus = await this.cli.authStatus();
         if (authStatus.loggedIn) {
             Logger.log('Auth check via CLI: logged in');
             this._isLoggedIn = true;
             this._onAuthStateChanged.fire(true);
             return true;
+        }
+        // No token found anywhere — update state if previously logged in
+        if (this._isLoggedIn) {
+            this._isLoggedIn = false;
+            this._onAuthStateChanged.fire(false);
         }
         return false;
     }
@@ -135,6 +149,12 @@ export class AuthManager {
     }
 
     async getToken(): Promise<string | null> {
+        // Check settings token first
+        const settingsToken = vscode.workspace.getConfiguration('gpugo').get<string>('token', '');
+        if (settingsToken) {
+            return settingsToken;
+        }
+
         try {
             const tokenPath = this.getTokenPath();
             const content = await fs.readFile(tokenPath, 'utf-8');
