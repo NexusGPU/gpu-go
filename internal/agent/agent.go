@@ -245,9 +245,21 @@ func (a *Agent) Start() error {
 		a.reconciler.Start()
 	}
 
-	// Pull initial config
-	if err := a.pullConfig(); err != nil {
-		klog.Errorf("Failed to pull initial config: error=%v", err)
+	// Pull initial config with retry — the first pull populates the license
+	// and worker list, both required for the reconciler to start workers.
+	var pullErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		pullErr = a.pullConfig()
+		if pullErr == nil {
+			break
+		}
+		klog.Errorf("Failed to pull config (attempt %d/3): error=%v", attempt, pullErr)
+		if attempt < 3 {
+			time.Sleep(time.Duration(attempt*2) * time.Second)
+		}
+	}
+	if pullErr != nil {
+		klog.Errorf("CRITICAL: All config pull attempts failed — workers will NOT start until config is received via SSE. error=%v", pullErr)
 	}
 
 	// Start background tasks
@@ -369,9 +381,15 @@ func (a *Agent) pullConfig() error {
 	if a.reconciler != nil {
 		infos, err := a.convertToWorkerInfos(resp.Workers)
 		if err != nil {
-			return fmt.Errorf("failed to convert worker infos: %w", err)
+			return fmt.Errorf("failed to convert worker infos (workers won't start): %w", err)
+		}
+		klog.Infof("Setting desired workers for reconciler: count=%d", len(infos))
+		for _, info := range infos {
+			klog.Infof("  worker=%s executable=%s", info.WorkerUID, info.WorkerRunningInfo.Executable)
 		}
 		a.reconciler.SetDesiredWorkers(infos)
+	} else {
+		klog.Infof("No reconciler available (client-only mode), skipping worker reconciliation")
 	}
 
 	a.configVersion = resp.ConfigVersion

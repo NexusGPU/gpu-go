@@ -155,6 +155,8 @@ func (r *Reconciler) reconcile() {
 		actualMap[w.WorkerUID] = w
 	}
 
+	klog.Infof("Reconciling workers: desired=%d actual=%d", len(desired), len(actual))
+
 	var added, removed, updated int
 	retryRestarts := make(map[string]struct{})
 

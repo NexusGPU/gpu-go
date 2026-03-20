@@ -255,13 +255,17 @@ function Setup-WindowsService {
     # Allow the agent a few seconds to initialise (library load + API handshake)
     Start-Sleep -Seconds 5
 
+    $logsDir = Join-Path $stateDir "logs"
     $taskInfo = Get-ScheduledTask -TaskName $TASK_NAME
     if ($taskInfo.State -eq "Running") {
         Write-Info "Agent started successfully!"
     } else {
-        Write-Warn "Agent may not have started. Check task status with: Get-ScheduledTask -TaskName $TASK_NAME"
+        Write-Warn "Agent may not have started. Check logs at: $logsDir"
+        Write-Warn "Also check task status with: Get-ScheduledTask -TaskName $TASK_NAME"
     }
     
+    Write-Info ""
+    Write-Info "Agent logs: $logsDir"
     Write-Info ""
     Write-Info "Service management commands (PowerShell as Administrator):"
     Write-Info "  Get-ScheduledTask -TaskName $TASK_NAME           # Check status"

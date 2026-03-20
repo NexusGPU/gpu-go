@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/NexusGPU/gpu-go/cmd/ggo/auth"
 	"github.com/NexusGPU/gpu-go/cmd/ggo/cmdutil"
@@ -356,20 +359,52 @@ func newStartCmd() *cobra.Command {
 				return err
 			}
 
+			// Set up log file so diagnostic output is available even when running
+			// as a Windows scheduled task (where stderr is not captured).
+			logsDir := filepath.Join(stateDir, "logs")
+			if err := os.MkdirAll(logsDir, 0755); err == nil {
+				logPath := filepath.Join(logsDir, fmt.Sprintf("agent-%s.log", time.Now().Format("2006-01-02")))
+				logFile, err := os.OpenFile(logPath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
+				if err == nil {
+					klog.SetOutput(io.MultiWriter(os.Stderr, logFile))
+					klog.Infof("Agent log file: %s", logPath)
+				}
+			}
+
 			setProductNameEnv(cfg.License)
 
+			// Prefer server URL from config (saved during registration) so that
+			// scheduled tasks connect to the correct server without needing
+			// the --server flag or GPU_GO_ENDPOINT env var.
+			effectiveServerURL := serverURL
+			if cfg.ServerURL != "" {
+				effectiveServerURL = cfg.ServerURL
+			}
+			klog.Infof("Using server URL: %s", effectiveServerURL)
+
 			client := api.NewClient(
-				api.WithBaseURL(serverURL),
+				api.WithBaseURL(effectiveServerURL),
 				api.WithAgentSecret(cfg.AgentSecret),
 			)
 
+			// Check if this machine was registered with GPUs
+			localGPUs, _ := configMgr.LoadGPUs()
+			hasRegisteredGPUs := len(localGPUs) > 0
+
 			hvMgr, hvErr := getHypervisorManager()
 			if hvErr != nil {
-				klog.Warningf("Hypervisor initialization failed, starting without GPU management: %v", hvErr)
-				if !out.IsJSON() {
-					out.Warning(fmt.Sprintf("GPU management unavailable: %v", hvErr))
-					out.Info("Starting agent in client-only mode (no GPU worker management)")
+				if hasRegisteredGPUs {
+					// GPU machine: hypervisor is required for worker management
+					cmd.SilenceUsage = true
+					if !out.IsJSON() {
+						out.Error(fmt.Sprintf("Failed to initialize GPU management: %v", hvErr))
+						out.Println(tui.Muted("This machine has registered GPUs but the hypervisor could not start."))
+						out.Println(tui.Muted("Please check that GPU drivers are installed and accessible."))
+					}
+					return fmt.Errorf("hypervisor initialization failed: %w", hvErr)
 				}
+				// Client-only machine (no GPUs): start without hypervisor
+				klog.Infof("No GPUs registered, starting in client-only mode (hypervisor not needed)")
 				hvMgr = nil
 			}
 

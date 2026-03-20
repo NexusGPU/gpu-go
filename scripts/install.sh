@@ -537,6 +537,7 @@ main() {
                 info "API Endpoint: ${ENDPOINT}"
             fi
             info "The agent is now running as a systemd service."
+            info "Agent logs: ${HOME}/.gpugo/state/logs/"
             info ""
         else
             info ""
