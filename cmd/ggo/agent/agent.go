@@ -226,22 +226,13 @@ func newRegisterCmd() *cobra.Command {
 					out.Warning(fmt.Sprintf("Failed to discover GPUs: %v", gpuErr))
 				}
 				klog.Warningf("Failed to discover GPUs: error=%v", gpuErr)
-				gpus = nil
+				gpus = []api.GPUInfo{}
 			}
 			if len(gpus) == 0 {
-				cmd.SilenceUsage = true
 				if !out.IsJSON() {
-					out.Error("No GPUs detected on this machine.")
-					out.Println(tui.Muted("Agent registration requires at least one GPU."))
-					out.Println(tui.Muted("Possible causes:"))
-					out.Println(tui.Muted("  - No GPU hardware installed"))
-					out.Println(tui.Muted("  - GPU drivers not installed or not loaded"))
-					out.Println(tui.Muted("  - Security policies blocking GPU library access"))
-					out.Println("")
-					out.Info("The ggo binary has been installed and can be used as a client.")
-					out.Info("Tip: Use GPU_GO_MOCK_GPUS=1 to test registration with mock GPUs.")
+					out.Info("No GPUs detected. Registering as client-only machine.")
 				}
-				return fmt.Errorf("no GPUs detected: agent registration requires at least one GPU")
+				klog.Infof("No GPUs discovered, registering as client-only")
 			}
 
 			agentInstance := agent.NewAgent(client, configMgr)
