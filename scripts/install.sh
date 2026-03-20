@@ -342,7 +342,7 @@ register_agent() {
     # Build register command
     # Use sudo to ensure config is saved to root's home directory (~/.gpugo/config)
     # This matches the systemd service which runs as root
-    REGISTER_CMD="${SUDO} ${binary_path} agent register -t ${token}"
+    REGISTER_CMD="${SUDO} ${binary_path} agent register -t ${token} --force"
     
     if [ -n "${ENDPOINT}" ]; then
         REGISTER_CMD="${REGISTER_CMD} --server ${ENDPOINT}"

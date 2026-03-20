@@ -174,41 +174,53 @@ func newRegisterCmd() *cobra.Command {
 			if registered {
 				cfg, _ := configMgr.LoadConfig()
 
-				if !force {
-					// Verify whether the agent still exists on the server.
-					// If it is gone (e.g. deleted via dashboard or a prior uninstall),
-					// the local config is stale and we can safely clean it up and
-					// proceed. If the agent is still live, block as before.
-					agentClient := api.NewClient(
-						api.WithBaseURL(serverURL),
-						api.WithAgentSecret(cfg.AgentSecret),
-					)
-					_, serverErr := agentClient.GetAgentConfig(context.Background(), cfg.AgentID)
-					if serverErr == nil {
-						// Agent is alive on the server – require explicit action.
-						cmd.SilenceUsage = true
-						if !out.IsJSON() {
-							out.Error("Agent already registered on this machine. Run 'ggo agent unregister' first, or use --force to replace the existing registration.")
-						}
-						return agent.ErrAlreadyRegistered
-					}
-					// Agent not found on server → stale local config.
+				resolvedURL := serverURL
+				if cfg != nil && cfg.ServerURL != "" {
+					resolvedURL = cfg.ServerURL
+				}
+				agentClient := api.NewClient(
+					api.WithBaseURL(resolvedURL),
+					api.WithAgentSecret(cfg.AgentSecret),
+				)
+
+				// Check if the old agent is still alive on the server.
+				_, serverErr := agentClient.GetAgentConfig(context.Background(), cfg.AgentID)
+				isStale := serverErr != nil
+
+				if isStale {
 					if !out.IsJSON() {
-						out.Warning(fmt.Sprintf("Stale local registration found (agent %s no longer on server). Clearing config and re-registering...", cfg.AgentID))
+						out.Warning(fmt.Sprintf("Stale local registration found (agent %s no longer on server). Clearing and re-registering...", cfg.AgentID))
 					}
-				} else {
-					// --force: attempt to delete the old agent from the server so it
-					// does not linger as an orphan record.
-					agentClient := api.NewClient(
-						api.WithBaseURL(serverURL),
-						api.WithAgentSecret(cfg.AgentSecret),
-					)
+				} else if force {
+					// --force: skip confirmation, auto-unregister.
+					if !out.IsJSON() {
+						out.Info(fmt.Sprintf("Force replacing existing registration (agent %s)...", cfg.AgentID))
+					}
 					if deleteErr := agentClient.SelfDeleteAgent(context.Background(), cfg.AgentID); deleteErr != nil {
 						klog.Warningf("Failed to delete old agent from server (continuing): agent_id=%s error=%v", cfg.AgentID, deleteErr)
 					}
+				} else if out.IsJSON() {
+					// JSON mode (non-interactive): cannot prompt, require --force.
+					cmd.SilenceUsage = true
+					return agent.ErrAlreadyRegistered
+				} else {
+					// Interactive: show current registration and ask for confirmation.
+					out.Warning(fmt.Sprintf("This machine is already registered as agent %s", cfg.AgentID))
+					confirmed, promptErr := tui.ConfirmPrompt("Unregister the existing agent and re-register with the new token?")
+					if promptErr != nil || !confirmed {
+						out.Info("Registration cancelled. Existing registration unchanged.")
+						return nil
+					}
+					if deleteErr := agentClient.SelfDeleteAgent(context.Background(), cfg.AgentID); deleteErr != nil {
+						klog.Warningf("Failed to delete old agent from server (continuing): agent_id=%s error=%v", cfg.AgentID, deleteErr)
+						if !out.IsJSON() {
+							out.Warning(fmt.Sprintf("Could not remove old agent from server: %v", deleteErr))
+						}
+					} else if !out.IsJSON() {
+						out.Info(fmt.Sprintf("Old agent %s unregistered from server.", cfg.AgentID))
+					}
 				}
 
-				// Remove the stale / replaced local config before re-registering.
 				if removeErr := configMgr.RemoveConfig(); removeErr != nil {
 					klog.Warningf("Failed to remove local config (continuing): %v", removeErr)
 				}

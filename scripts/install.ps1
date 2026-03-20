@@ -176,7 +176,7 @@ function Register-Agent {
     Write-Info ""
     Write-Info "Registering GPU Go agent..."
     
-    $registerArgs = @("agent", "register", "-t", $AgentToken)
+    $registerArgs = @("agent", "register", "-t", $AgentToken, "--force")
     
     if ($Endpoint) {
         $registerArgs += @("--server", $Endpoint)
