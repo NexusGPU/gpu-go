@@ -190,7 +190,10 @@ function Register-Agent {
         Write-Info "Agent registered successfully!"
         return $true
     } else {
-        throw "Agent registration failed. Please check your token and try again."
+        Write-Warn "Agent registration failed."
+        Write-Warn "If this machine has no GPUs, the ggo binary is still installed and can be used as a client."
+        Write-Warn "For GPU machines, please check that GPU drivers are accessible and try again."
+        return $false
     }
 }
 
@@ -401,19 +404,28 @@ function Install-Ggo {
             Write-Host "==========================================" -ForegroundColor Yellow
             
             # Register agent
-            $null = Register-Agent -BinaryPath $destPath -AgentToken $Token
+            $registered = Register-Agent -BinaryPath $destPath -AgentToken $Token
 
-            # Setup Windows service
-            $null = Setup-WindowsService -BinaryPath $destPath
-            
-            Write-Host ""
-            Write-Host "==========================================" -ForegroundColor Green
-            Write-Host "  GPU Go Agent installation complete!" -ForegroundColor Green
-            Write-Host "==========================================" -ForegroundColor Green
-            if ($Endpoint) {
-                Write-Info "API Endpoint: $Endpoint"
+            if ($registered) {
+                # Setup Windows service only if registration succeeded
+                $null = Setup-WindowsService -BinaryPath $destPath
+                
+                Write-Host ""
+                Write-Host "==========================================" -ForegroundColor Green
+                Write-Host "  GPU Go Agent installation complete!" -ForegroundColor Green
+                Write-Host "==========================================" -ForegroundColor Green
+                if ($Endpoint) {
+                    Write-Info "API Endpoint: $Endpoint"
+                }
+                Write-Info "The agent is now running as a scheduled task."
+            } else {
+                Write-Host ""
+                Write-Host "==========================================" -ForegroundColor Yellow
+                Write-Host "  GPU Go client installed (agent not registered)" -ForegroundColor Yellow
+                Write-Host "==========================================" -ForegroundColor Yellow
+                Write-Info "The ggo binary is available at: $destPath"
+                Write-Info "To register later (on a machine with GPUs): ggo agent register --token <your-token>"
             }
-            Write-Info "The agent is now running as a scheduled task."
             Write-Host ""
             return
         }

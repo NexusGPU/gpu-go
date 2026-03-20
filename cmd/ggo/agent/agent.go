@@ -106,16 +106,28 @@ func getHypervisorManager() (*hypervisor.Manager, error) {
 			}
 		}
 
-		hypervisorManager, hypervisorErr = hypervisor.NewManager(hypervisor.Config{
-			LibPath:       libPath,
-			Vendor:        agent.DetectVendorFromLibPath(libPath),
-			IsolationMode: getIsolationMode(),
-			StateDir:      stateDir,
-		})
-		if hypervisorErr != nil {
-			return
-		}
-		hypervisorErr = hypervisorManager.Start()
+		// The accelerator library (tensor-fusion) may panic during initialization
+		// if GPU hardware or drivers are unavailable (e.g. NVML "Driver Not Loaded").
+		// Wrap in a recovery block so the process doesn't crash.
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					hypervisorErr = fmt.Errorf("accelerator library panicked during initialization: %v (this usually means no compatible GPU hardware or driver is available)", r)
+					hypervisorManager = nil
+				}
+			}()
+
+			hypervisorManager, hypervisorErr = hypervisor.NewManager(hypervisor.Config{
+				LibPath:       libPath,
+				Vendor:        agent.DetectVendorFromLibPath(libPath),
+				IsolationMode: getIsolationMode(),
+				StateDir:      stateDir,
+			})
+			if hypervisorErr != nil {
+				return
+			}
+			hypervisorErr = hypervisorManager.Start()
+		}()
 	})
 	return hypervisorManager, hypervisorErr
 }
@@ -208,26 +220,28 @@ func newRegisterCmd() *cobra.Command {
 				klog.Fatalf("Failed to sync deps manifest: error=%v", err)
 			}
 
-			gpus, err := discoverGPUs()
-			if err != nil {
-				// GPU discovery failed (e.g., unsupported GPU vendor like AMD, or no GPU drivers)
-				// Log a warning but allow registration to continue with empty GPU list.
-				// This enables users to install the agent on machines without supported GPUs
-				// and add GPU configuration later via the dashboard.
+			gpus, gpuErr := discoverGPUs()
+			if gpuErr != nil {
 				if !out.IsJSON() {
-					out.Warning(fmt.Sprintf("Failed to discover GPUs: %v", err))
-					out.Warning("Registering agent without GPU configuration. You can configure GPUs later via the dashboard.")
+					out.Warning(fmt.Sprintf("Failed to discover GPUs: %v", gpuErr))
 				}
-				klog.Warningf("Failed to discover GPUs, continuing registration: error=%v", err)
-				gpus = []api.GPUInfo{} // Empty GPU list
+				klog.Warningf("Failed to discover GPUs: error=%v", gpuErr)
+				gpus = nil
 			}
-			if len(gpus) == 0 && err == nil {
-				// No error but no GPUs found - warn but allow registration
+			if len(gpus) == 0 {
+				cmd.SilenceUsage = true
 				if !out.IsJSON() {
-					out.Warning("No GPUs found. Registering agent without GPU configuration.")
-					out.Info("Tip: Use GPU_GO_MOCK_GPUS=1 for testing, or configure GPUs via the dashboard.")
+					out.Error("No GPUs detected on this machine.")
+					out.Println(tui.Muted("Agent registration requires at least one GPU."))
+					out.Println(tui.Muted("Possible causes:"))
+					out.Println(tui.Muted("  - No GPU hardware installed"))
+					out.Println(tui.Muted("  - GPU drivers not installed or not loaded"))
+					out.Println(tui.Muted("  - Security policies blocking GPU library access"))
+					out.Println("")
+					out.Info("The ggo binary has been installed and can be used as a client.")
+					out.Info("Tip: Use GPU_GO_MOCK_GPUS=1 to test registration with mock GPUs.")
 				}
-				klog.Warningf("No GPUs discovered, continuing registration with empty GPU list")
+				return fmt.Errorf("no GPUs detected: agent registration requires at least one GPU")
 			}
 
 			agentInstance := agent.NewAgent(client, configMgr)
@@ -358,13 +372,14 @@ func newStartCmd() *cobra.Command {
 				api.WithAgentSecret(cfg.AgentSecret),
 			)
 
-			hvMgr, err := getHypervisorManager()
-			if err != nil {
-				cmd.SilenceUsage = true
+			hvMgr, hvErr := getHypervisorManager()
+			if hvErr != nil {
+				klog.Warningf("Hypervisor initialization failed, starting without GPU management: %v", hvErr)
 				if !out.IsJSON() {
-					out.Error(fmt.Sprintf("Failed to initialize hypervisor manager: %v", err))
+					out.Warning(fmt.Sprintf("GPU management unavailable: %v", hvErr))
+					out.Info("Starting agent in client-only mode (no GPU worker management)")
 				}
-				return err
+				hvMgr = nil
 			}
 
 			var workerBinaryPath string

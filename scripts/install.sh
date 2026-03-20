@@ -354,7 +354,10 @@ register_agent() {
         info "Agent registered successfully!"
         return 0
     else
-        fatal "Agent registration failed. Please check your token and try again."
+        warn "Agent registration failed."
+        warn "If this machine has no GPUs, the ggo binary is still installed and can be used as a client."
+        warn "For GPU machines, please check that GPU drivers are installed and try again."
+        return 1
     fi
 }
 
@@ -522,20 +525,28 @@ main() {
         info "=========================================="
         
         # Register agent
-        register_agent "${DEST_PATH}" "${TOKEN}"
-        
-        # Setup systemd service
-        setup_systemd_service "${DEST_PATH}"
-        
-        info ""
-        info "=========================================="
-        info "GPU Go Agent installation complete!"
-        info "=========================================="
-        if [ -n "${ENDPOINT}" ]; then
-            info "API Endpoint: ${ENDPOINT}"
+        if register_agent "${DEST_PATH}" "${TOKEN}"; then
+            # Setup systemd service only if registration succeeded
+            setup_systemd_service "${DEST_PATH}"
+            
+            info ""
+            info "=========================================="
+            info "GPU Go Agent installation complete!"
+            info "=========================================="
+            if [ -n "${ENDPOINT}" ]; then
+                info "API Endpoint: ${ENDPOINT}"
+            fi
+            info "The agent is now running as a systemd service."
+            info ""
+        else
+            info ""
+            info "=========================================="
+            info "GPU Go client installed (agent not registered)"
+            info "=========================================="
+            info "The ggo binary is available at: ${DEST_PATH}"
+            info "To register later (on a machine with GPUs): ggo agent register --token <your-token>"
+            info ""
         fi
-        info "The agent is now running as a systemd service."
-        info ""
         return 0
     fi
     
